@@ -1,0 +1,19 @@
+# etcd
+[etcd]
+service = ["0.0.0.0:2379"]
+dialtimeout = 5000
+# etcd kv存储的key前缀 用来与其他业务做区分
+prefix = "/gopher_cron"
+# 当前节点需要处理的项目名称
+projects = ["project_a", "project_b"]
+# 命令调用脚本 /bin/sh  /bin/bash 根据自己系统情况决定
+shell = "/bin/bash"
+
+[mongodb]
+service = ["mongodb://0.0.0.0:27017"]
+username = ""
+password = ""
+# 可自行修改数据库表名 新表会自动生成admin账号
+table = "gopher_cron"
+# mongodb的验证方式
+auth_mechanism = "SCRAM-SHA-1"
