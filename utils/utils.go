@@ -19,7 +19,7 @@ func InitIDWorker(cluster int64) {
 	var (
 		err error
 	)
-	globalIDWorker, err = snowFlakeByGo.NewWorker(1)
+	globalIDWorker, err = snowFlakeByGo.NewWorker(cluster)
 	if err != nil {
 		panic(err)
 	}
