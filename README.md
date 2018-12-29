@@ -13,7 +13,20 @@
 - 任务日志查看  
 - 随时结束任务进程  
 - 分布式扩展  
-- 健康节点检测 (分项目显示对应的健康节点IP及节点数)
+- 健康节点检测 (分项目显示对应的健康节点IP及节点数)  
+
+### cronexpr 秒级cron表达式介绍(引用)  
+
+    * * * * * * * 
+    Field name     Mandatory?   Allowed values    Allowed special characters
+    ----------     ----------   --------------    --------------------------
+    Seconds        No           0-59              * / , -
+    Minutes        Yes          0-59              * / , -
+    Hours          Yes          0-23              * / , -
+    Day of month   Yes          1-31              * / , - L W
+    Month          Yes          1-12 or JAN-DEC   * / , -
+    Day of week    Yes          0-6 or SUN-SAT    * / , - L #
+    Year           No           1970–2099         * / , -
 
 ### 使用方法  
 下载项目到本地并编译，根据cmd文件夹下service和client中包含的conf/config-default.toml进行配置  
