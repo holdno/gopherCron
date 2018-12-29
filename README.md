@@ -4,6 +4,7 @@
 可以通过配置文件制定某个节点所受理的业务线，从而做到业务统一管理但隔离调度
 ### 依赖  
 - Etcd   # 服务注册与发现
+- Gin # webapi 提供可视化操作
 - MongoDB  # 任务日志存储
 - cronexpr # github.com/gorhill/cronexpr cron表达式解析器  
   
@@ -16,6 +17,37 @@
 
 ### 使用方法  
 下载项目到本地并编译，根据cmd文件夹下service和client中包含的conf/config-default.toml进行配置  
+
+#### 配置文件  
+``` toml 
+[deploy]
+# 当前的环境:dev、release
+environment = "dev"
+# 对外提供的端口
+host = ["0.0.0.0:6306"]
+
+# etcd
+[etcd]
+service = ["0.0.0.0:2379"]
+dialtimeout = 5000
+# etcd kv存储的key前缀 用来与其他业务做区分
+prefix = "/gopher_cron"
+
+[mongodb]
+service = ["mongodb://0.0.0.0:27017"]
+username = ""
+password = ""
+# 可自行修改数据库表名 新表会自动生成admin账号
+table = "gopher_cron"
+# mongodb的验证方式
+auth_mechanism = "SCRAM-SHA-1"
+
+# jwt用来做api的身份校验
+[jwt]
+# jwt签名的secret 建议修改
+secret = "fjskfjls2ifeew2mn"
+exp = 12
+```
 
 #### service 部署  
 ``` shell
