@@ -46,7 +46,7 @@ auth_mechanism = "SCRAM-SHA-1"
 [jwt]
 # jwt签名的secret 建议修改
 secret = "fjskfjls2ifeew2mn"
-exp = 12
+exp = 12 # token 有效期
 ```
 
 #### service 部署  
