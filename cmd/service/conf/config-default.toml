@@ -1,0 +1,27 @@
+[deploy]
+# 当前的环境:dev、release
+environment = "dev"
+# 对外提供的端口
+host = ["0.0.0.0:6306"]
+
+# etcd
+[etcd]
+service = ["0.0.0.0:2379"]
+dialtimeout = 5000
+# etcd kv存储的key前缀 用来与其他业务做区分
+prefix = "/gopher_cron"
+
+[mongodb]
+service = ["mongodb://0.0.0.0:27017"]
+username = ""
+password = ""
+# 可自行修改数据库表名 新表会自动生成admin账号
+table = "gopher_cron"
+# mongodb的验证方式
+auth_mechanism = "SCRAM-SHA-1"
+
+# jwt用来做api的身份校验
+[jwt]
+# jwt签名的secret 建议修改
+secret = "fjskfjls2ifeew2mn"
+exp = 12
