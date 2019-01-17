@@ -1,8 +1,6 @@
 package user_func
 
 import (
-	"fmt"
-
 	"github.com/gin-gonic/gin"
 	"ojbk.io/gopherCron/cmd/service/request"
 	"ojbk.io/gopherCron/common"
@@ -35,8 +33,6 @@ func Login(c *gin.Context) {
 		request.APIError(c, err)
 		return
 	}
-
-	fmt.Println(user.Salt)
 
 	if user == nil {
 		errObj = errors.ErrDataNotFound

@@ -77,7 +77,6 @@ func GetUserProjects(uid string) ([]*common.Project, error) {
 		err    error
 		errObj errors.Error
 		list   []*common.Project
-		item   common.Project
 		res    mongo.Cursor
 	)
 
@@ -91,6 +90,7 @@ func GetUserProjects(uid string) ([]*common.Project, error) {
 	}
 
 	for res.Next(context.TODO()) {
+		var item common.Project
 		if err = res.Decode(&item); err != nil {
 			errObj = errors.ErrInternalError
 			errObj.Log = "[Project - GetUserProjects] convert error:" + err.Error()

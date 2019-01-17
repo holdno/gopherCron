@@ -5,6 +5,7 @@ import (
 	"ojbk.io/gopherCron/cmd/service/request"
 	"ojbk.io/gopherCron/errors"
 	"ojbk.io/gopherCron/pkg/db"
+	"ojbk.io/gopherCron/pkg/etcd"
 	"ojbk.io/gopherCron/utils"
 )
 
@@ -27,6 +28,11 @@ func DeleteOne(c *gin.Context) {
 	}
 
 	if err = db.DeleteProject(req.Project, uid); err != nil {
+		request.APIError(c, err)
+		return
+	}
+
+	if _, err = etcd.Manager.DeleteTask(req.Project, ""); err != nil {
 		request.APIError(c, err)
 		return
 	}

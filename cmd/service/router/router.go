@@ -1,6 +1,8 @@
 package router
 
 import (
+	"net/http"
+
 	"github.com/gin-gonic/gin"
 	"ojbk.io/gopherCron/cmd/service/controller/etcd_func"
 	"ojbk.io/gopherCron/cmd/service/controller/log_func"
@@ -20,6 +22,8 @@ func SetupRoute(r *gin.Engine) {
 			user.POST("/login", user_func.Login)
 			user.Use(middleware.TokenVerify())
 			user.GET("/info", user_func.GetUserInfo)
+			user.POST("/change_password", user_func.ChangePassword)
+			user.POST("/create_user", user_func.CreateUser)
 		}
 
 		cron := api.Group("/crontab")
@@ -44,6 +48,13 @@ func SetupRoute(r *gin.Engine) {
 		{
 			log.Use(middleware.TokenVerify())
 			log.GET("/list", log_func.GetList)
+			log.POST("/clean", log_func.CleanLogs)
 		}
+
+		r.NoRoute(func(c *gin.Context) {
+			c.String(http.StatusOK, "no route found")
+		})
 	}
+
+	r.StaticFS("/admin", http.Dir("./view"))
 }

@@ -65,13 +65,13 @@ func (m *TaskManager) DeleteTask(project, name string) (*common.TaskInfo, error)
 	deleteKey = common.BuildKey(project, name)
 
 	// save to etcd
-	if delResp, err = m.kv.Delete(context.TODO(), deleteKey, clientv3.WithPrevKV()); err != nil {
+	if delResp, err = m.kv.Delete(context.TODO(), deleteKey, clientv3.WithPrevKV(), clientv3.WithPrefix()); err != nil {
 		errObj = errors.ErrInternalError
 		errObj.Log = "[Etcd - DeleteTask] etcd client kv delete error:" + err.Error()
 		return nil, errObj
 	}
 
-	if len(delResp.PrevKvs) != 0 {
+	if name != "" && len(delResp.PrevKvs) != 0 {
 		json.Unmarshal([]byte(delResp.PrevKvs[0].Value), &oldTask)
 	}
 

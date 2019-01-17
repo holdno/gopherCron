@@ -71,8 +71,6 @@ const (
 	CodeDataNotFound = iota + 10000
 	// CodeServiceBusy 服务繁忙
 	CodeServiceBusy
-	// CodeApiExpired 请求过期
-	CodeApiExpired
 	// CodeLockAlreadyRequired 上锁失败
 	CodeLockAlreadyRequired
 	// CodeNotLocalIPFound 没有找到本地ip
@@ -80,6 +78,7 @@ const (
 	CodePasswordErr
 	CodeProjectNotExist
 	CodeProjectExist
+	CodeInsufficientPermissions
 )
 
 var (
@@ -97,14 +96,17 @@ var (
 	ErrInternalError = Error{Code: CodeInternalError, Msg: "请求失败（错误码：500）", MsgEn: "Request failed (Error code: 500)", Log: "内部错误"}
 	// ErrDataNotFound 数据不存在错误
 	ErrDataNotFound = Error{Code: CodeDataNotFound, Msg: "数据不存在", MsgEn: "Data not found", Log: "数据不存在"}
-	// ErrApiExpired 接口校验时间戳过期
-	ErrApiExpired = Error{Code: CodeApiExpired, Msg: "接口校验失败,已过期", MsgEn: "Request expired", Log: "接口请求参数过期"}
 
-	// ErrLockAlreadyRequired
+	// ErrLockAlreadyRequired 抢锁失败
 	ErrLockAlreadyRequired = Error{Code: CodeLockAlreadyRequired, Msg: "抢锁失败，锁已经被占用", MsgEn: "lock error, the lock already required", Log: "etcd 分布式锁抢锁失败"}
-	// ErrNotLocalIPFound
-	ErrNotLocalIPFound = Error{Code: CodeNotLocalIPFound, Msg: "没有获取到本地IP", MsgEn: "Not local ip found", Log: "该检点没有本地网卡"}
-	ErrPasswordErr     = Error{Code: CodePasswordErr, Msg: "密码错误", MsgEn: "Password is wrong", Log: "用户登录密码错误"}
+	// ErrLocalIPNotFound 没有获取到网卡ip
+	ErrLocalIPNotFound = Error{Code: CodeNotLocalIPFound, Msg: "没有获取到本地IP", MsgEn: "Not local ip found", Log: "该检点没有本地网卡"}
+	// ErrPasswordErr 密码错误
+	ErrPasswordErr = Error{Code: CodePasswordErr, Msg: "密码错误", MsgEn: "Password is wrong", Log: "用户登录密码错误"}
+	// ErrProjectNotExist 项目不存在
 	ErrProjectNotExist = Error{Code: CodeProjectNotExist, Msg: "项目不存在", MsgEn: "Project not exist", Log: "项目不存在"}
-	ErrProjectExist    = Error{Code: CodeProjectExist, Msg: "项目已存在", MsgEn: "Project is exist", Log: "项目已存在"}
+	// ErrProjectExist 项目已存在
+	ErrProjectExist = Error{Code: CodeProjectExist, Msg: "项目已存在", MsgEn: "Project is exist", Log: "项目已存在"}
+	// ErrInsufficientPermissions 权限不足
+	ErrInsufficientPermissions = Error{Code: CodeInsufficientPermissions, Msg: "权限不足", MsgEn: "Insufficient permissions", Log: "无权限"}
 )

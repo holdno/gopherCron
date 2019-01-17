@@ -100,5 +100,5 @@ func getLocalIP() (string, error) {
 			}
 		}
 	}
-	return "", errors.ErrNotLocalIPFound
+	return "", errors.ErrLocalIPNotFound
 }

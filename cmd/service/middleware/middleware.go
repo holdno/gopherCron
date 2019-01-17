@@ -1,8 +1,6 @@
 package middleware
 
 import (
-	"fmt"
-
 	"github.com/gin-gonic/gin"
 	"ojbk.io/gopherCron/cmd/service/request"
 	"ojbk.io/gopherCron/errors"
@@ -33,7 +31,6 @@ func BuildResponse() gin.HandlerFunc {
 func TokenVerify() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token := c.Request.Header.Get("access-token")
-		fmt.Println("token", token)
 		res := jwt.Verify(token)
 		if res.Code != 1000 {
 			request.APIError(c, errors.ErrUnauthorized)

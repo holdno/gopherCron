@@ -11,4 +11,6 @@ const (
 	ADMIN_USER_PERMISSION = "admin,user"
 	ADMIN_USER_NAME       = "administrator"
 	ADMIN_PROJECT         = "admin_project"
+
+	DBTimeout = 5 // second
 )

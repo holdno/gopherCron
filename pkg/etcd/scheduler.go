@@ -130,6 +130,7 @@ func (ts *TaskScheduler) TrySchedule() time.Duration {
 	return (*nearTime).Sub(now)
 }
 
+// TryStartTask 开始执行任务
 func (ts *TaskScheduler) TryStartTask(plan *common.TaskSchedulePlan) {
 	// 执行的任务可能会执行很久
 	// 需要防止并发

@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"time"
 
 	"github.com/sirupsen/logrus"
 
@@ -20,6 +21,7 @@ const (
 	TaskLogTable = "task_log"
 )
 
+// CreateTaskLog 记录任务执行日志
 func CreateTaskLog(data *common.TaskLog) error {
 	var (
 		err    error
@@ -41,6 +43,7 @@ func CreateTaskLog(data *common.TaskLog) error {
 	return nil
 }
 
+// GetLogList 获取日志列表
 func GetLogList(project, name string, page, pagesize int64) ([]*common.TaskLog, error) {
 	var (
 		err      error
@@ -79,6 +82,7 @@ func GetLogList(project, name string, page, pagesize int64) ([]*common.TaskLog, 
 	return taskList, nil
 }
 
+// GetLogTotal 获取日志列表总数
 func GetLogTotal(project, name string) (int64, error) {
 	var (
 		err    error
@@ -93,4 +97,40 @@ func GetLogTotal(project, name string) (int64, error) {
 	}
 
 	return total, nil
+}
+
+// CleanLog 清除任务日志
+func CleanLog(project, task string) error {
+	var (
+		ctx    context.Context
+		err    error
+		errObj errors.Error
+	)
+
+	ctx, _ = context.WithTimeout(context.TODO(), time.Duration(common.DBTimeout)*time.Second)
+	if _, err = Database.Collection(TaskLogTable).DeleteMany(ctx, bson.M{"project": project, "name": task}); err != nil {
+		errObj = errors.ErrInternalError
+		errObj.Log = "[TaskLog - CleanLog] Delete error:" + err.Error()
+		return errObj
+	}
+
+	return nil
+}
+
+// CleanProjectLog 清除项目下全部任务的日志
+func CleanProjectLog(project string) error {
+	var (
+		ctx    context.Context
+		err    error
+		errObj errors.Error
+	)
+
+	ctx, _ = context.WithTimeout(context.TODO(), time.Duration(common.DBTimeout)*time.Second)
+	if _, err = Database.Collection(TaskLogTable).DeleteMany(ctx, bson.M{"project": project}); err != nil {
+		errObj = errors.ErrInternalError
+		errObj.Log = "[TaskLog - CleanProjectLog] Delete error:" + err.Error()
+		return errObj
+	}
+
+	return nil
 }
