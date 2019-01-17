@@ -65,7 +65,7 @@ exp = 12 # token 有效期
 #### service 部署  
 ``` shell
 $ ./service -conf ./conf/config-default.toml // 配置文件名请随意  
-2018-12-29 14:31:15 listening and serving HTTP on 0.0.0.0:6306
+2019-01-18 00:00:45 listening and serving HTTP on 0.0.0.0:6306
 
 ```
 #### client 部署  
@@ -81,3 +81,15 @@ Register
 client runing
 ```  
 
+### Admin 管理页面  
+访问地址: localhost:6306/admin  
+![admin](http://image.holdno.com/github/holdno/gopher_cron/admin.png)
+
+### TODO   
+- 项目组概念  多个用户共享某些项目  
+- 继续完善admin后台管理页面   
+  - 修改密码  
+  - 管理员创建新用户
+  - 系统公告 
+  - 项目相关图标  
+  - 日志管理
