@@ -82,7 +82,10 @@ client runing
 ```  
 
 ### Admin 管理页面  
-访问地址: localhost:6306/admin  
+访问地址: localhost:6306/admin    
+  
+> 管理员初始账号密码为 admin  123456  
+
 ![image](http://img.holdno.com/github/holdno/gopher_cron/admin.png)
 
 ### TODO   
