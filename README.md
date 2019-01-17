@@ -83,7 +83,7 @@ client runing
 
 ### Admin 管理页面  
 访问地址: localhost:6306/admin  
-![admin](http://image.holdno.com/github/holdno/gopher_cron/admin.png)
+![image](http://img.holdno.com/github/holdno/gopher_cron/admin.png)
 
 ### TODO   
 - 项目组概念  多个用户共享某些项目  
