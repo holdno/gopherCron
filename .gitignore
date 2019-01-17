@@ -2,3 +2,5 @@
 /cmd/service/config/
 config-dev.toml
 build.sh
+gopherCron
+gopherCronClient

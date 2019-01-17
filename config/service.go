@@ -55,7 +55,7 @@ func InitServiceConfig(path string) *ServiceConfig {
 	return &c
 }
 
-// GetServiceConfig
+// GetServiceConfig 获取服务配置
 func GetServiceConfig() *ServiceConfig {
 	if serviceConf != nil {
 		return serviceConf

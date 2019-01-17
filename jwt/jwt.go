@@ -112,7 +112,7 @@ func (jwt *Jwt) ToJSON(secret string) (string, error) {
 // SignatureBuild 服务密钥SH256加密
 // 当然加密方式有多种
 // 这个服务就只用这一种，如果需要其他的自行拓展一下就可以了
-// 但是注意要和 header.Alg 中定义的加密方式保持一致
+// 但是注意要和 header.Alg 中定义的加密方式保持一致!
 func SignatureBuild(token, secret string) string {
 	key := []byte(secret)
 	h := hmac.New(sha256.New, key)

@@ -13,6 +13,7 @@ import (
 	"ojbk.io/gopherCron/pkg/etcd"
 )
 
+// InitMasterContext 基础服务初始化
 func InitMasterContext(conf *config.ServiceConfig) {
 	var err error
 	jwt.InitJWT(conf.JWT)

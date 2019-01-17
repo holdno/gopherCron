@@ -15,6 +15,7 @@ import (
 
 var globalIDWorker *snowFlakeByGo.Worker
 
+// InitIDWorker 初始化ID生成器
 func InitIDWorker(cluster int64) {
 	var (
 		err error
