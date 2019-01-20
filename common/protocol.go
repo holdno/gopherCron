@@ -11,11 +11,14 @@ import (
 
 // TaskInfo 任务详情
 type TaskInfo struct {
-	Name       string `json:"name"`
-	Project    string `json:"project"`
+	TaskID    string `json:"task_id"`
+	Name      string `json:"name"`
+	ProjectID string `json:"project_id"`
+
 	Command    string `json:"command"`
 	Cron       string `json:"cron"`
 	Remark     string `json:"remark"`
+	Timeout    int    `json:"timeout"` // 任务超时时间 单位 秒(s)
 	CreateTime int64  `json:"create_time"`
 	Status     int    `json:"status"`
 }
@@ -50,28 +53,28 @@ type TaskExecuteResult struct {
 var ETCD_PREFIX = "/cron"
 
 // BuildKey etcd 保存任务的key
-func BuildKey(project, name string) string {
-	return ETCD_PREFIX + "/" + project + "/" + name
+func BuildKey(projectID, taskID string) string {
+	return ETCD_PREFIX + "/" + projectID + "/" + taskID
 }
 
 // BuildLockKey etcd 分布式锁key
-func BuildLockKey(project, name string) string {
-	return ETCD_PREFIX + "/lock/" + project + "/" + name
+func BuildLockKey(projectID, taskID string) string {
+	return ETCD_PREFIX + "/lock/" + projectID + "/" + taskID
 }
 
 // BuildLockKey etcd 分布式锁key
-func BuildKillKey(project, name string) string {
-	return ETCD_PREFIX + "/kill/" + project + "/" + name
+func BuildKillKey(projectID, taskID string) string {
+	return ETCD_PREFIX + "/kill/" + projectID + "/" + taskID
 }
 
 // BuildRegisterKey etcd 服务发现key
-func BuildRegisterKey(project, ip string) string {
-	return ETCD_PREFIX + "/register/" + project + "/" + ip
+func BuildRegisterKey(projectID, ip string) string {
+	return ETCD_PREFIX + "/register/" + projectID + "/" + ip
 }
 
 // BuildTableKey 构建scheduler 关系表中的key
 func (t *TaskInfo) ScheduleKey() string {
-	return t.Project + t.Name
+	return t.ProjectID + t.TaskID
 }
 
 func Unmarshal(value []byte) (*TaskInfo, error) {
@@ -85,7 +88,7 @@ func Unmarshal(value []byte) (*TaskInfo, error) {
 }
 
 // 从etcd的key中提取任务名称
-func ExtractTaskName(project, key string) string {
+func ExtractTaskID(project, key string) string {
 	return strings.TrimPrefix(key, BuildKey(project, ""))
 }
 
@@ -95,7 +98,7 @@ func ExtractWorkerIP(project, key string) string {
 }
 
 // 从etcd的key中提取任务名称
-func ExtractKillName(project, key string) string {
+func ExtractKillID(project, key string) string {
 	return strings.TrimPrefix(key, BuildKillKey(project, ""))
 }
 
@@ -137,7 +140,11 @@ func BuildTaskExecuteInfo(plan *TaskSchedulePlan) *TaskExecutingInfo {
 		RealTime: time.Now(),    // 真实执行时间
 	}
 
-	info.CancelCtx, info.CancelFunc = context.WithCancel(context.TODO())
+	if plan.Task.Timeout != 0 {
+		info.CancelCtx, info.CancelFunc = context.WithTimeout(context.TODO(), time.Duration(plan.Task.Timeout)*time.Second)
+	} else {
+		info.CancelCtx, info.CancelFunc = context.WithCancel(context.TODO())
+	}
 
 	return info
 }

@@ -99,9 +99,9 @@ func TestTaskManager_TaskWatcher(t *testing.T) {
 					// 推送一个更新事件给 scheduler
 				case mvccpb.DELETE: // 任务删除
 					fmt.Println("delete", string(watchEvent.Kv.Key))
-					taskName = common.ExtractTaskName("testProject", string(watchEvent.Kv.Key))
+					taskName = common.ExtractTaskID("testProject", string(watchEvent.Kv.Key))
 					// 构建一个delete event
-					task = &common.TaskInfo{Name: taskName, Project: "testProject"}
+					task = &common.TaskInfo{TaskID: taskName, ProjectID: "testProject"}
 					taskEvent = common.BuildTaskEvent(common.TASK_EVENT_DELETE, task)
 					taskEvent = taskEvent
 					// 推送给 scheduler 把任务终止掉

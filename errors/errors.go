@@ -69,6 +69,7 @@ const (
 	CodeInternalError = 500
 	// CodeDataNotFound  获取不到相关内容
 	CodeDataNotFound = iota + 10000
+	CodeUserNotFound
 	// CodeServiceBusy 服务繁忙
 	CodeServiceBusy
 	// CodeLockAlreadyRequired 上锁失败
@@ -79,6 +80,9 @@ const (
 	CodeProjectNotExist
 	CodeProjectExist
 	CodeInsufficientPermissions
+	CodeCron
+	CodeUserExist
+	CodeDontRemoveProjectAdmin
 )
 
 var (
@@ -96,7 +100,10 @@ var (
 	ErrInternalError = Error{Code: CodeInternalError, Msg: "请求失败（错误码：500）", MsgEn: "Request failed (Error code: 500)", Log: "内部错误"}
 	// ErrDataNotFound 数据不存在错误
 	ErrDataNotFound = Error{Code: CodeDataNotFound, Msg: "数据不存在", MsgEn: "Data not found", Log: "数据不存在"}
-
+	// ErrUserNotFound 用户不存在
+	ErrUserNotFound = Error{Code: CodeUserNotFound, Msg: "用户不存在", MsgEn: "User not found", Log: "用户不存在"}
+	// ErrCron Cron表达式错误
+	ErrCron = Error{Code: CodeCron, Msg: "cron表达式错误", MsgEn: "Cron was wrong", Log: "cron表达式错误"}
 	// ErrLockAlreadyRequired 抢锁失败
 	ErrLockAlreadyRequired = Error{Code: CodeLockAlreadyRequired, Msg: "抢锁失败，锁已经被占用", MsgEn: "lock error, the lock already required", Log: "etcd 分布式锁抢锁失败"}
 	// ErrLocalIPNotFound 没有获取到网卡ip
@@ -107,6 +114,10 @@ var (
 	ErrProjectNotExist = Error{Code: CodeProjectNotExist, Msg: "项目不存在", MsgEn: "Project not exist", Log: "项目不存在"}
 	// ErrProjectExist 项目已存在
 	ErrProjectExist = Error{Code: CodeProjectExist, Msg: "项目已存在", MsgEn: "Project is exist", Log: "项目已存在"}
+	// ErrUserExist 项目已存在
+	ErrUserExist = Error{Code: CodeUserExist, Msg: "该账号已存在", MsgEn: "User is exist", Log: "账号已存在"}
 	// ErrInsufficientPermissions 权限不足
 	ErrInsufficientPermissions = Error{Code: CodeInsufficientPermissions, Msg: "权限不足", MsgEn: "Insufficient permissions", Log: "无权限"}
+	// ErrDontRemoveProjectAdmin 不能将管理员从项目中移除
+	ErrDontRemoveProjectAdmin = Error{Code: CodeDontRemoveProjectAdmin, Msg: "无法将项目管理员移出项目", MsgEn: "Don't remove the administrator from the project", Log: "无法将项目管理员移出项目"}
 )

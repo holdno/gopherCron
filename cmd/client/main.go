@@ -58,7 +58,7 @@ func parseFlags() *Flags {
 	flags := new(Flags)
 	flag.StringVar(&flags.logDir, "log_dir", "stdout", "stdout or path")
 	flag.StringVar(&flags.logLevel, "log_level", "info", "log level")
-	flag.StringVar(&flags.confPath, "conf", "./config/config-dev.toml", "config file path")
+	flag.StringVar(&flags.confPath, "conf", "./conf/config-dev.toml", "config file path")
 	flag.Parse()
 	return flags
 }

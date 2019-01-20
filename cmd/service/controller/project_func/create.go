@@ -2,6 +2,7 @@ package project_func
 
 import (
 	"github.com/gin-gonic/gin"
+	"github.com/mongodb/mongo-go-driver/bson/primitive"
 	"ojbk.io/gopherCron/cmd/service/request"
 	"ojbk.io/gopherCron/common"
 	"ojbk.io/gopherCron/errors"
@@ -10,9 +11,8 @@ import (
 )
 
 type CreateRequest struct {
-	Title   string `form:"title" binding:"required"`
-	Project string `form:"project" binding:"required"`
-	Remark  string `form:"remark"`
+	Title  string `form:"title" binding:"required"`
+	Remark string `form:"remark"`
 }
 
 func Create(c *gin.Context) {
@@ -21,6 +21,7 @@ func Create(c *gin.Context) {
 		err     error
 		uid     string
 		project *common.Project
+		userID  primitive.ObjectID
 	)
 
 	uid = c.GetString("jwt_user")
@@ -30,7 +31,7 @@ func Create(c *gin.Context) {
 		return
 	}
 
-	if project, err = db.CheckProjectExistByName(req.Project); err != nil {
+	if project, err = db.CheckProjectExistByName(req.Title); err != nil {
 		if err != errors.ErrProjectNotExist {
 			request.APIError(c, err)
 			return
@@ -42,11 +43,13 @@ func Create(c *gin.Context) {
 		return
 	}
 
+	userID, _ = primitive.ObjectIDFromHex(uid)
+
 	if err = db.CreateProject(&common.Project{
-		Title:   req.Title,
-		Project: req.Project,
-		Remark:  req.Remark,
-		UID:     uid,
+		Title:    req.Title,
+		Remark:   req.Remark,
+		UID:      userID,
+		Relation: []primitive.ObjectID{userID},
 	}); err != nil {
 		request.APIError(c, err)
 		return

@@ -1,7 +1,12 @@
 package etcd
 
 import (
+	"fmt"
 	"time"
+
+	"ojbk.io/gopherCron/utils"
+
+	"github.com/mongodb/mongo-go-driver/bson/primitive"
 
 	"github.com/sirupsen/logrus"
 
@@ -67,8 +72,8 @@ func (ts *TaskScheduler) Loop() {
 func (ts *TaskScheduler) handleTaskEvent(event *common.TaskEvent) {
 	var (
 		taskSchedulePlan *common.TaskSchedulePlan
-		taskExisted      bool
 		taskExecuteinfo  *common.TaskExecutingInfo
+		taskExisted      bool
 		taskExecuting    bool
 		err              error
 	)
@@ -160,25 +165,44 @@ func (ts *TaskScheduler) PushTaskResult(result *common.TaskExecuteResult) {
 func (ts *TaskScheduler) handleTaskResult(result *common.TaskExecuteResult) {
 	// 删除任务的正在执行状态
 	delete(ts.TaskExecutingTable, result.ExecuteInfo.Task.ScheduleKey())
-	var resultString string
-	if result.Err != nil {
-		resultString = result.Err.Error()
-	} else {
-		resultString = string(result.Output)
+	var (
+		resultString string
+		projectID    primitive.ObjectID
+		projectInfo  *common.Project
+		err          error
+		getError     int
+		logInfo      *common.TaskLog
+	)
+
+	if projectID, err = primitive.ObjectIDFromHex(result.ExecuteInfo.Task.ProjectID); err != nil {
+		goto WITH_ERROR
 	}
-	db.CreateTaskLog(&common.TaskLog{
-		Project:   result.ExecuteInfo.Task.Project,
+
+	projectInfo, err = db.GetProject(projectID)
+
+WITH_ERROR:
+	resultString = fmt.Sprintf(`{"result": "%s", "command_error": "%v", "error": "%v"}`,
+		string(result.Output), result.Err, err)
+
+	if result.Err != nil {
+		getError = 1
+	}
+
+	logInfo = &common.TaskLog{
+		Project:   utils.TernaryOperation(projectInfo == nil, "", projectInfo.Title).(string),
 		Name:      result.ExecuteInfo.Task.Name,
 		Result:    resultString,
 		StartTime: result.StartTime.Unix(),
 		EndTime:   result.EndTime.Unix(),
 		Command:   result.ExecuteInfo.Task.Command,
-	})
-	//fmt.Printf("项目:%s,任务%s;命令执行完毕,结果:%s,Error:%v\n",
-	//	result.ExecuteInfo.Task.Project,
-	//	result.ExecuteInfo.Task.Name,
-	//	string(result.Output),
-	//	result.Err)
+		WithError: getError,
+		ClientIP:  common.LocalIP,
+	}
+
+	logInfo.ProjectID, _ = primitive.ObjectIDFromHex(result.ExecuteInfo.Task.ProjectID)
+	logInfo.TaskID, _ = primitive.ObjectIDFromHex(result.ExecuteInfo.Task.TaskID)
+
+	db.CreateTaskLog(logInfo)
 }
 
 // 接收任务事件

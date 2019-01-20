@@ -2,6 +2,7 @@ package project_func
 
 import (
 	"github.com/gin-gonic/gin"
+	"github.com/mongodb/mongo-go-driver/bson/primitive"
 	"ojbk.io/gopherCron/cmd/service/request"
 	"ojbk.io/gopherCron/errors"
 	"ojbk.io/gopherCron/pkg/db"
@@ -10,14 +11,16 @@ import (
 )
 
 type DeleteOneRequest struct {
-	Project string `form:"project" binding:"required"`
+	ProjectID string `form:"project_id" binding:"required"`
 }
 
 func DeleteOne(c *gin.Context) {
 	var (
-		err error
-		req DeleteOneRequest
-		uid string
+		err       error
+		req       DeleteOneRequest
+		uid       string
+		userID    primitive.ObjectID
+		projectID primitive.ObjectID
 	)
 
 	uid = c.GetString("jwt_user")
@@ -27,12 +30,22 @@ func DeleteOne(c *gin.Context) {
 		return
 	}
 
-	if err = db.DeleteProject(req.Project, uid); err != nil {
+	if userID, err = primitive.ObjectIDFromHex(uid); err != nil {
+		request.APIError(c, errors.ErrInvalidArgument)
+		return
+	}
+
+	if projectID, err = primitive.ObjectIDFromHex(req.ProjectID); err != nil {
+		request.APIError(c, errors.ErrInvalidArgument)
+		return
+	}
+
+	if _, err = etcd.Manager.DeleteTask(req.ProjectID, ""); err != nil {
 		request.APIError(c, err)
 		return
 	}
 
-	if _, err = etcd.Manager.DeleteTask(req.Project, ""); err != nil {
+	if err = db.DeleteProject(projectID, userID); err != nil {
 		request.APIError(c, err)
 		return
 	}

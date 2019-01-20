@@ -58,7 +58,6 @@ func (e *TaskExecuter) ExecuteTask(info *common.TaskExecutingInfo) {
 			output, err = cmd.CombinedOutput()
 
 			result.EndTime = time.Now()
-
 			result.Output = output
 			result.Err = err
 

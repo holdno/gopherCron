@@ -2,40 +2,40 @@ package etcd
 
 import (
 	"context"
-	"net"
+	"fmt"
 	"time"
+
+	"ojbk.io/gopherCron/utils"
 
 	"ojbk.io/gopherCron/config"
 
 	"ojbk.io/gopherCron/common"
-
-	"ojbk.io/gopherCron/errors"
 
 	"github.com/coreos/etcd/clientv3"
 )
 
 func (m *TaskManager) Register(config *config.EtcdConf) {
 	var (
-		localIP    string
 		err        error
 		cancelCtx  context.Context
 		cancelFunc context.CancelFunc
 	)
 
-	localIP, _ = getLocalIP()
+	common.LocalIP, _ = utils.GetLocalIP()
 
-	if localIP == "" {
-		localIP = "未知IP节点"
+	if common.LocalIP == "" {
+		common.LocalIP = "未知IP节点"
 	}
 	for _, v := range config.Projects {
-		go func(project string) {
+		go func(projectID string) {
 			var (
 				regKey             string
 				leaseGrantResp     *clientv3.LeaseGrantResponse
 				leaseKeepAliveChan <-chan *clientv3.LeaseKeepAliveResponse
 				leaseKeepAliveResp *clientv3.LeaseKeepAliveResponse
 			)
-			regKey = common.BuildRegisterKey(project, localIP)
+			regKey = common.BuildRegisterKey(projectID, common.LocalIP)
+			fmt.Println("register key", regKey)
 			for {
 				// 创建租约
 				if leaseGrantResp, err = Manager.lease.Grant(context.TODO(), 5); err != nil {
@@ -72,33 +72,4 @@ func (m *TaskManager) Register(config *config.EtcdConf) {
 			}
 		}(v)
 	}
-}
-
-func getLocalIP() (string, error) {
-	var (
-		addrs   []net.Addr
-		addr    net.Addr
-		err     error
-		ipNet   *net.IPNet
-		isIpNet bool
-	)
-
-	if addrs, err = net.InterfaceAddrs(); err != nil {
-		return "", err
-	}
-
-	// 获取第一个非IO的网卡
-	for _, addr = range addrs {
-		// ipv4  ipv6
-		// 如果能反解成ip地址 则为我们需要的地址
-		if ipNet, isIpNet = addr.(*net.IPNet); isIpNet && !ipNet.IP.IsLoopback() {
-			// 是ip地址 不是 unix socket地址
-			// 继续判断 是ipv4 还是 ipv6
-			// 跳过ipv6
-			if ipNet.IP.To4() != nil {
-				return ipNet.IP.String(), nil
-			}
-		}
-	}
-	return "", errors.ErrLocalIPNotFound
 }

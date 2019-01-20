@@ -12,5 +12,12 @@ const (
 	ADMIN_USER_NAME       = "administrator"
 	ADMIN_PROJECT         = "admin_project"
 
-	DBTimeout = 5 // second
+	// Log
+	ErrorLog   = 1
+	SuccessLog = 0
+)
+
+var (
+	// common
+	LocalIP = ""
 )

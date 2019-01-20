@@ -50,6 +50,6 @@ func Login(c *gin.Context) {
 		"name":       user.Name,
 		"permission": user.Permission,
 		"id":         user.ID,
-		"token":      jwt.Build(user.ID),
+		"token":      jwt.Build(user.ID.Hex()),
 	})
 }

@@ -13,6 +13,7 @@ type ServiceConfig struct {
 // DeployConf 部署配置
 type DeployConf struct {
 	Environment string   `toml:"environment"`
+	Timeout     int      `toml:"timeout"`
 	Host        []string `toml:"host"`
 }
 

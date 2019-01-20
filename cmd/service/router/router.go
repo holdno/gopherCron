@@ -23,7 +23,7 @@ func SetupRoute(r *gin.Engine) {
 			user.Use(middleware.TokenVerify())
 			user.GET("/info", user_func.GetUserInfo)
 			user.POST("/change_password", user_func.ChangePassword)
-			user.POST("/create_user", user_func.CreateUser)
+			user.POST("/create", user_func.CreateUser)
 		}
 
 		cron := api.Group("/crontab")
@@ -42,6 +42,9 @@ func SetupRoute(r *gin.Engine) {
 			project.POST("/create", project_func.Create)
 			project.GET("/list", project_func.GetUserProjects)
 			project.POST("/delete", project_func.DeleteOne)
+			project.GET("/users", user_func.GetUsersByProject)
+			project.POST("/remove_user", project_func.RemoveUser)
+			project.POST("/add_user", project_func.AddUser)
 		}
 
 		log := api.Group("/log")
@@ -49,6 +52,7 @@ func SetupRoute(r *gin.Engine) {
 			log.Use(middleware.TokenVerify())
 			log.GET("/list", log_func.GetList)
 			log.POST("/clean", log_func.CleanLogs)
+			log.GET("/recent", log_func.GetRecentLogCount)
 		}
 
 		r.NoRoute(func(c *gin.Context) {
@@ -56,5 +60,6 @@ func SetupRoute(r *gin.Engine) {
 		})
 	}
 
-	r.StaticFS("/admin", http.Dir("./view"))
+	r.StaticFS("/admin", http.Dir("../../dist/view"))
+	r.StaticFile("/favicon.ico", "./view/favicon.ico")
 }

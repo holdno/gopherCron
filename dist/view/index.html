@@ -1,0 +1,1419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<title>GopherCron 分布式定时任务管理中心</title>
+	<link rel="stylesheet" type="text/css" href="./css/style.css">
+	<link rel="stylesheet" type="text/css" href="./css/element-ui/index.css">
+	<link rel="stylesheet" type="text/css" href="./css/iconfont.css">
+	<script type="text/javascript" src="./js/echarts.min.js"></script>
+	<script type="text/javascript" src="./js/vue.js"></script>
+	<script type="text/javascript" src="./js/axios.js"></script>
+	<script type="text/javascript" src="./js/element-ui.v2.4.11.js"></script>
+	<script type="text/javascript" src="./js/cookie.js"></script>
+	<script type="text/javascript" src="./js/iconfont.js"></script>
+	
+</head>
+<body>
+	<div id="app" v-cloak v-loading="loading">
+		<!-- 登录页 -->
+		<div v-if="!isLogin">
+			<div class="login-container">
+		    <el-form class="login-form" autoComplete="on" :model="login.form" label-position="left">
+		    	<div class="title-container">
+		        <h3 class="title">gopherCron 任务调度系统</h3>
+		      </div>
+		      <el-form-item label="账号" prop="account">
+		        <el-input name="account" type="text" v-model="login.form.account" autoComplete="off" placeholder="account" />
+		      </el-form-item>
+
+		      <el-form-item label="密码" prop="password">
+		        <el-input name="password" :type="login.passwordType" @keyup.enter.native="handleLogin" v-model="login.form.password" autoComplete="off" placeholder="password" />
+		      </el-form-item>
+
+		      <el-button type="primary" style="width:100%;margin-bottom:30px;" :loading="login.loading" @click.native.prevent="handleLogin">登录</el-button>
+		    </el-form>
+		  </div>
+		</div>
+		<div v-if="isLogin" class="app__box">
+			<div class="menu__box">
+				<div class="menu__logo">
+					<img src="./images/logo.png">
+				</div>
+
+				<div class="menu__nav">
+					<div class="menu__item iconfont" @click="changeMenu('homepage')" :class="position == 'homepage' && 'active'">
+						&#xeb63;
+					</div>
+					<div class="menu__item iconfont" @click="changeMenu('project')" :class="position == 'project' && 'active'">
+						&#xeb88;
+					</div>
+					<div class="menu__item iconfont" v-if="user.permission.indexOf('admin') != -1" @click="changeMenu('admin')" :class="position == 'admin' && 'active'">
+						&#xebb8;
+					</div>
+				</div>
+
+				<div class="menu__version">
+					<div class="menu__item iconfont" @click="logout">
+						&#xe6a4;
+					</div>
+				</div>
+			</div>
+
+			<div class="all__page" v-show="position == 'homepage'">
+				<div class="home__box">
+					<div class="home__box-top">
+						<div class="home__user-box">
+							{{user.name}}，您好！您的权限：{{user.permission.join(',')}} 
+						</div>
+						<div class="home__help">
+							如果遇到问题，<a href="https://github.com/holdno/gopherCron" target="_blank">寻求帮助</a>
+						</div>
+					</div>
+
+					<div class="home__box-middle">
+						<!-- <div class="home__box-announcement">
+							<div class="home__box-announcement-title">
+								公告
+							</div>
+						</div> -->
+						<div class="home__box-recent" id="project_recent_series">
+
+						</div>
+						<div class="home__box-distribution" id="project_task_series">
+
+						</div>
+					</div>
+				</div>
+			</div>
+
+			<div class="all__page" v-show="position == 'admin'">
+				<div class="home__box">
+					<div class="home__box-top">
+						<div class="home__user-box">
+							{{user.name}}，您好！您的权限：{{user.permission.join(',')}} 
+							<span @click="password.showChangePassword = true">修改密码</span> 
+							<span @click="admin.showCreateUser = true" v-if="user.permission.indexOf('admin') != -1">创建用户</span>
+						</div>
+						<div class="home__help">
+							如果遇到问题，<a href="https://github.com/holdno/gopherCron" target="_blank">寻求帮助</a>
+						</div>
+					</div>
+
+					<div class="admin__project-box">
+						<div class="admin__project-item" v-for="item in myCreated">
+							<div class="pic">
+                <h3>
+                	<div>
+                		{{item.title}}
+                	</div>
+                	<el-button type="success" @click="getProjectUsers(item.project_id)" size="mini">成员列表</el-button>
+								  <el-button type="primary" @click="showAddProjectUser(item)" size="mini">添加成员</el-button>
+								  <el-button type="warning" size="mini">编辑项目</el-button>
+								  <el-button type="danger" @click="deleteProject(item.project_id)" size="mini">删除项目</el-button>
+                </h3> 
+                <p>
+                	{{item.remark}}
+                </p>
+			          </div>
+						</div>
+					</div>
+				</div>
+			</div>
+			
+			<template v-if="position == 'project'">
+				<div class="project__box" v-loading="project.loading">
+					<div class="project__box-top iconfont">
+						<div class="project__box-title">
+							&#xec80; 项目列表
+						</div>
+						<div class="common__create-button" @click="project.showCreate = true">
+							&#xe6dd;
+						</div>
+					</div>
+					<div class="project__no-data iconfont" v-show="!project.list[0]">
+						&#xe635;
+					</div>
+				  <div class="project__box-list">
+						<div class="project__box-list-item" :class="detail.currentProject == item.project_id && 'active'" @click="changeProject(item)" v-for="item in project.currentList">
+							{{item.title}}
+						</div>
+					</div>
+				</div>
+
+				<div class="task__box" v-loading="task.loading">
+					<div class="task__box-top iconfont">
+						<div class="task__box-title">
+							&#xebb8; 任务列表
+						</div>
+						<div class="common__create-button" @click="task.showCreate = true">
+							&#xe6dd;
+						</div>
+					</div>
+					<el-input
+						class="task__search-input"
+				    size="mini"
+				    placeholder="请输入任务名称"
+				    suffix-icon="el-icon-search"
+				    clearable
+				    v-model="task.search"
+				   	@input="taskSearch">
+				  </el-input>
+					<div class="task__no-data iconfont" v-show="!task.currentList[0]">
+						&#xe635;
+					</div>
+				  <div class="task__box-list">
+						<div class="task__box-list-item" :class="detail.currentTask == item.task_id && 'active'" @click="showTaskDetail(item)" v-for="item in task.currentList">
+							<div :class="'task__status' + item.status">
+								{{item.status == 1 ? '调度中' : '已暂停'}}
+							</div>
+							<div class="task__title iconfont">
+								<div class="task__cron">
+									&#xe64b; {{item.cron}}
+								</div>
+								&#xe600; {{item.name}}
+							</div>
+							<div class="task__remark">
+								{{item.remark || '-'}}
+							</div>
+							<div class="task__bottom-box">
+								<div class="task__bottom-time">
+									{{item.create_time | parseTime('{y}-{m}-{d} {h}:{i}')}}
+								</div>
+								<div class="task__bottom-button" @click.stop="shutdown($event,item)">
+									结束进程
+								</div>
+							</div>
+						</div>
+				  </div>
+				</div>
+
+				<div class="detail__box">
+					<div class="detail__box-top" v-show="detail.currentProject">
+						<div class="detail__box-top-title iconfont">
+							&#xeb61; {{detail.project.title}} ID:{{detail.project.project_id}}
+						</div>
+						<div class="detail__box-top-buttons">
+							<div class="common__delete-button" @click="deleteProject">
+								删除项目
+							</div>
+
+							<div class="common__delete-button" @click="deleteTask" v-show="detail.currentTask">
+								删除任务
+							</div>
+						</div>
+					</div>
+					<div class="detail__des">
+						{{detail.project.remark}}
+					</div>
+					<div v-loading="worker.loading" v-show="detail.currentProject">
+						<div class="detail__worker-list-title iconfont">
+							&#xeb64; 在线节点 {{worker.list.length}}
+						</div>
+						<div class="detail__worker-list">
+							<div class="detail__worker-list-item" v-for="item in worker.list">
+								{{item}}
+							</div>
+						</div>
+					</div>
+					<div class="detail__no-data iconfont" v-show="detail.task.task_id == ''">
+						&#xe635;
+					</div>
+					<div class="detail__task" v-show="detail.task.task_id">
+						<el-tabs tab-position="right" @tab-click="tabClick">
+					    <el-tab-pane label="任务详情" v-loading="detail.loading">
+					      <el-form :model="detail.task">
+					      	<el-form-item label="任务ID">
+					          <el-input :value="detail.task.task_id" :readonly="true"></el-input>
+					        </el-form-item>
+					        <el-form-item label="所属项目">
+					          <el-input :value="detail.project.title" :readonly="true"></el-input>
+					        </el-form-item>
+					        <el-form-item label="任务名称 (如果修改则为创建任务,原任务不变)">
+					          <el-input v-model="detail.task.name" autocomplete="off"></el-input>
+					        </el-form-item>
+					        <el-form-item label="调度计划 (*秒 *分 *时 *日 *月 *周 *年)">
+					          <el-input v-model="detail.task.cron" autocomplete="off"></el-input>
+					        </el-form-item>
+					        <el-form-item label="超时时间 (单位:秒 s 0则不限制)">
+					          <el-input v-model="detail.task.timeout" autocomplete="off"></el-input>
+					        </el-form-item>
+					        <el-form-item label="执行指令 (eg:sh autotask.sh)">
+					          <el-input type="textarea" v-model="detail.task.command" autocomplete="off"></el-input>
+					        </el-form-item>
+					        <el-form-item label="任务备注">
+					          <el-input type="textarea" v-model="detail.task.remark" autocomplete="off"></el-input>
+					        </el-form-item>
+					        <el-form-item label="立即加入调度队列 (关闭后程序不被执行)">
+					          <el-switch
+					            v-model="detail.task.status">
+					          </el-switch>
+					        </el-form-item>
+					      </el-form>
+
+					      <el-button type="primary" size="small" icon="el-icon-edit" @click="updateTask(false)">提交更新</el-button>
+					    </el-tab-pane>
+					    <el-tab-pane label="查看日志" v-loading="log.loading">
+					    	<el-button class="detail__clean-log" type="danger" size="mini" round @click="cleanLog" :loading="log.cleanLoading">清空日志</el-button>
+					    	<el-table :data="log.list" border fit highlight-current-row style="width: 100%">
+						      <el-table-column width="110px" label="开始时间">
+						        <template slot-scope="scope">
+						          <span>{{scope.row.start_time | parseTime('{y}-{m}-{d} {h}:{i}:{s}')}}</span>
+						        </template>
+						      </el-table-column>
+
+						      <el-table-column class-name="status-col" label="结束时间" width="110px">
+						        <template slot-scope="scope">
+						          <span>{{scope.row.end_time | parseTime('{y}-{m}-{d} {h}:{i}:{s}')}}</span>
+						        </template>
+						      </el-table-column>
+
+						      <el-table-column class-name="status-col" label="节点ip" width="120px">
+						        <template slot-scope="scope">
+						          <span>{{scope.row.client_ip}}</span>
+						        </template>
+						      </el-table-column>
+
+						      <el-table-column class-name="status-col" label="执行结果">
+						        <template slot-scope="scope">
+						          <span>{{scope.row.result}}</span>
+						        </template>
+						      </el-table-column>
+
+						      <!-- <el-table-column align="center" label="操作" width="180">
+						        <template slot-scope="scope">
+						          <el-row>
+						            <el-button @click='deleteArticle(scope.row.id)' size="mini" icon="el-icon-delete">删除</el-button>
+						          </el-row>
+						        </template>
+						      </el-table-column> -->
+						    </el-table>
+
+						    <div class="detail__page-box" v-if="log.total">
+						      <el-pagination
+						        @size-change="changeSize"
+						        @current-change="gotoPage"
+						        :current-page="log.page"
+						        :page-sizes="[10, 20, 30, 100]"
+						        :page-size="log.pagesize"
+						        layout="total, sizes, prev, pager, next, jumper"
+						        :total="log.total">
+						      </el-pagination>
+						    </div>
+					    </el-tab-pane>
+					  </el-tabs>
+					</div>
+				</div>
+			</template>
+
+			<el-dialog title="创建项目" :visible.sync="project.showCreate" width="400px" v-loading="project.loading">
+				<el-form :model="project.detail">
+			    <el-form-item label="项目名称" label-width="80px">
+			      <el-input v-model="project.detail.title" placeholder="项目名称" autocomplete="off"></el-input>
+			    </el-form-item>
+			    <el-form-item label="项目备注" label-width="80px">
+						<el-input
+						  type="textarea"
+						  :autosize="{ minRows: 3 }"
+						  placeholder="请输入内容"
+						  v-model="project.detail.remark">
+						</el-input>
+			    </el-form-item>
+			  </el-form>
+			  <div slot="footer" class="dialog-footer">
+			    <el-button @click="project.showCreate = false">取 消</el-button>
+			    <el-button type="primary" @click="createProject(project.showUpdate)">确 定</el-button>
+			  </div>
+			</el-dialog>
+
+			<el-dialog title="创建任务" :visible.sync="task.showCreate" v-loading="task.loading">
+	      <el-form :model="task.detail">
+	        <el-form-item label="项目名称">
+	          <el-input :value="detail.project.title" :readonly="true"></el-input>
+	        </el-form-item>
+	        <el-form-item label="任务名称 (如果修改则为创建任务,原任务不变)">
+	          <el-input v-model="task.detail.name" autocomplete="off"></el-input>
+	        </el-form-item>
+	        <el-form-item label="调度计划 (*秒 *分 *时 *日 *月 *周 *年)">
+	          <el-input v-model="task.detail.cron" autocomplete="off"></el-input>
+	        </el-form-item>
+	        <el-form-item label="超时时间 (单位:秒 s, 0则不限制)">
+	          <el-input v-model="task.detail.timeout" autocomplete="off"></el-input>
+	        </el-form-item>
+	        <el-form-item label="执行指令 (eg:sh autotask.sh)">
+	          <el-input v-model="task.detail.command" autocomplete="off"></el-input>
+	        </el-form-item>
+	        <el-form-item label="任务备注">
+	          <el-input v-model="task.detail.remark" autocomplete="off"></el-input>
+	        </el-form-item>
+	        <el-form-item label="立即加入调度队列 (关闭后程序不被执行)">
+	          <el-switch
+	            v-model="task.detail.status">
+	          </el-switch>
+	        </el-form-item>
+	      </el-form>
+	      <div slot="footer" class="dialog-footer">
+	        <el-button @click="task.showCreate = false">取 消</el-button>
+	        <el-button type="primary" @click="updateTask(true)">确 定</el-button>
+	      </div>
+	    </el-dialog>
+
+	    <el-dialog title="修改密码" width="300px" :visible.sync="password.showChangePassword" v-loading="password.loading">
+	      <el-form :model="password">
+	        <el-form-item label="旧密码">
+	          <el-input v-model="password.password" type="password" autocomplete="off"></el-input>
+	        </el-form-item>
+	        <el-form-item label="新密码">
+	          <el-input v-model="password.newPassword" type="password" autocomplete="off"></el-input>
+	        </el-form-item>
+	        <el-form-item label="重复新密码">
+	          <el-input v-model="password.newPasswordAgain" type="password" autocomplete="off"></el-input>
+	        </el-form-item>
+	      </el-form>
+	      <div slot="footer" class="dialog-footer">
+	        <el-button @click="password.showChangePassword = false">取 消</el-button>
+	        <el-button type="primary" @click="changePassword()">确 定</el-button>
+	      </div>
+	    </el-dialog>
+
+	    <el-dialog title="创建用户" width="300px" :visible.sync="admin.showCreateUser" v-loading="admin.createLoading">
+	      <el-form :model="password">
+	      	<el-form-item label="昵称">
+	          <el-input v-model="admin.user.name" autocomplete="off"></el-input>
+	        </el-form-item>
+	        <el-form-item label="账号">
+	          <el-input v-model="admin.user.account" autocomplete="off"></el-input>
+	        </el-form-item>
+	        <el-form-item label="密码">
+	          <el-input v-model="admin.user.password" type="password" autocomplete="off"></el-input>
+	        </el-form-item>
+	      </el-form>
+	      <div slot="footer" class="dialog-footer">
+	        <el-button @click="admin.showCreateUser = false">取 消</el-button>
+	        <el-button type="primary" @click="createUser">确 定</el-button>
+	      </div>
+	    </el-dialog>
+
+	    <el-dialog class="black__dialog" title="成员列表" :visible.sync="projectUsers.showUserList">
+			  <el-table :data="projectUsers.list">
+			    <el-table-column property="name" label="昵称" width="150"></el-table-column>
+			    <el-table-column property="account" label="账号"></el-table-column>
+			    <el-table-column
+			      label="操作"
+			      width="100">
+			      <template slot-scope="scope">
+			        <el-button @click="removeUserFormProject(scope.row)" type="text" size="small">移除</el-button>
+			      </template>
+			    </el-table-column>
+			  </el-table>
+			</el-dialog>
+
+			<el-dialog title="添加成员" width="300px" :visible.sync="projectAdmin.showAddUser" v-loading="projectAdmin.addLoading">
+	      <el-form :model="projectAdmin">
+	      	<el-form-item label="项目名称">
+	          <el-input v-model="projectAdmin.project.title" readonly autocomplete="off"></el-input>
+	        </el-form-item>
+	        <el-form-item label="账号">
+	          <el-input v-model="projectAdmin.addUserAccount" autocomplete="off"></el-input>
+	        </el-form-item>
+	      </el-form>
+	      <div slot="footer" class="dialog-footer">
+	        <el-button @click="projectAdmin.showAddUser = false">取 消</el-button>
+	        <el-button type="primary" @click="addProjectUser">确 定</el-button>
+	      </div>
+	    </el-dialog>
+		</div>
+	</div>
+</body>
+<script>
+var request = axios.create({
+  baseURL: '/api/v1',
+  timeout: 5000,
+  headers: {
+  	'Content-Type': 'application/x-www-form-urlencoded',
+  },
+  transformRequest: [function (data) {
+    // 对 data 进行任意转换处理
+    return Qs.stringify(data, {arrayFormat: 'brackets'})
+  }],
+  paramsSerializer: function(params) {
+    return Qs.stringify(params, {arrayFormat: 'brackets'})
+  },
+})
+
+const init_task = {
+	task_id: '',
+	project_id: '',
+	name: '',
+	cron: '* * * * * * *',
+	command: '',
+	timeout: 0,
+	remark: '',
+	status: false,
+}
+
+const init_project = {
+	project_id: '',
+	title: '',
+	remark: '',
+}
+
+var distribution = {
+    // backgroundColor: '#2c343c',
+
+    title: {
+        text: '项目任务占比图',
+        left: 'center',
+        top: 20,
+        textStyle: {
+           color: '#999'
+        }
+    },
+
+    tooltip : {
+        trigger: 'item',
+        formatter: "{a} <br/>{b} : {c} ({d}%)"
+    },
+
+    series : [
+        {
+            name:'任务数',
+            type:'pie',
+            radius : '55%',
+            center: ['50%', '50%'],
+            data:[],
+            roseType: 'radius',
+            label: {
+                normal: {
+                    textStyle: {
+                        color: 'rgba(255, 255, 255, 0.3)'
+                    }
+                }
+            },
+            labelLine: {
+                normal: {
+                    lineStyle: {
+                        color: 'rgba(255, 255, 255, 0.3)'
+                    },
+                    smooth: 0.2,
+                    length: 10,
+                    length2: 20
+                }
+            },
+            itemStyle: {
+                normal: {
+		              	color: (params) => {
+                      var colorList = ['#409EFF', '#4497ec', '#4b9aea', '#57a0ea', '#137ae2', '#8db0d4']
+                      return colorList[params.dataIndex]
+                    },
+                }
+            },
+
+            animationType: 'scale',
+            animationEasing: 'elasticOut',
+            animationDelay: function (idx) {
+                return Math.random() * 200;
+            }
+        }
+    ]
+}
+
+var recent = {
+		title: {
+        text: '项目调度情况',
+        left: 'center',
+        top: 20,
+        textStyle: {
+           color: '#999'
+        }
+    },
+    color: ['#4cabce', '#e5323e'],
+    tooltip: {
+        trigger: 'axis',
+        axisPointer: {
+           type: 'shadow'
+        }
+    },
+    toolbox: {
+        show: true,
+        orient: 'vertical',
+        left: 'right',
+        top: 'center',
+        feature: {
+            mark: {show: true},
+            magicType: {show: true, type: ['line', 'bar', 'stack', 'tiled']},
+            restore: {show: true},
+            saveAsImage: {show: true}
+        }
+    },
+    calculable: true,
+    xAxis: [
+        {
+            type: 'category',
+            axisTick: {show: false},
+            splitLine: {
+            	show: false,
+            },
+            axisLine: {
+            	lineStyle: {
+            		color: 'rgba(255, 255, 255, 0.3)'
+            	}
+            },
+            data: ['2012', '2013', '2014', '2015', '2016']
+        }
+    ],
+    yAxis: [
+        {
+            type: 'value',
+            splitLine:{ 
+              show:false
+            },
+            axisLine: {
+            	lineStyle: {
+            		color: 'rgba(255, 255, 255, 0.3)'
+            	}
+            },
+        }
+    ],
+    series: [
+        {
+            name: 'Forest',
+            type: 'bar',
+            barGap: 0,
+            data: [320, 332, 301, 334, 390]
+        },
+        {
+            name: 'Steppe',
+            type: 'bar',
+            data: [220, 182, 191, 234, 290]
+        },
+        {
+            name: 'Desert',
+            type: 'bar',
+            data: [150, 232, 201, 154, 190]
+        },
+    ]
+};
+
+
+new Vue({
+	el: '#app',
+	data: {
+		isLogin: false,
+		loading: false,
+		position: 'homepage',
+		
+		login: {
+			form: {
+	      account: '',
+	      password: ''
+	    },
+	    passwordType: 'password'
+		},
+		user: {
+			accessToken: '',
+			name: '',
+			permission: []
+		},
+		project: {
+			currentList: [],
+			list: [],
+			loading: false,
+			showCreate: false,
+			showUpdate: false,
+			createLoading: false,
+			detail: init_project
+		},
+		task: {
+			project: '',
+			currentList: [],
+			list: [],
+			loading: false,
+			search: '',
+			searchTimeout: {},
+			showCreate: false,
+			detail: init_task,
+		},
+		detail: {
+			loading: false,
+			showCreate: false,
+			currentTab: 0,
+			currentProject: '',
+			currentTask: '', // task name
+			task: init_task,
+			project: {},
+		},
+		worker: {
+			loading: false,
+			list: []
+		},
+		log: {
+			list: [],
+			total: 0,
+			loading: false,
+			page: 1,
+			pagesize: 10,
+			cleanLoading: false
+		},
+		projectTaskSeries: {},
+		projectRecentSeries: {},
+		// 我创建的项目
+		myCreated: [],
+		password: {
+			showChangePassword: false,
+			loading: false,
+			password: '',
+			newPassword: '',
+			newPasswordAgain: '' 
+		},
+		admin: {
+			showCreateUser: false,
+			createLoading: false,
+			user: {
+				name: '',
+				account: '',
+				password: '',
+			}
+		},
+		projectUsers: {
+			list: [],
+			projectId: '',
+			loading: false,
+			showUserList: false
+		},
+		projectAdmin: {
+			addLoading: false,
+			showAddUser: false,
+			project: {},
+			addUserAccount: '',
+		} 
+	},
+	created () {
+		var accessToken = Cookies.get('access-token')
+		if (accessToken) {
+			this.isLogin = true
+			request.defaults.headers.common['access-token'] = accessToken
+			this.user.accessToken = accessToken
+			this.getUserInfo()
+		}
+	},
+	filters: {
+		parseTime (t) {
+			var date = new Date(t * 1000);//时间戳为10位需*1000，时间戳为13位的话不需乘1000
+	    var Y = date.getFullYear() + '-'
+	    var M = (date.getMonth()+1 < 10 ? '0'+(date.getMonth()+1) : date.getMonth()+1) + '-'
+	    var D = date.getDate() < 10 ?  '0'+date.getDate()+ ' ' : date.getDate()+ ' '
+	    var h = date.getHours() < 10 ? '0'+date.getHours()+ ':' : date.getHours()+ ':'
+	    var m = date.getMinutes() < 10 ? '0'+date.getMinutes()+ ':' : date.getMinutes()+ ':'
+	    var s = date.getSeconds()< 10 ? '0'+date.getSeconds() : date.getSeconds()
+	    return Y+M+D+h+m+s;
+		}
+	},
+	watch: {
+		isLogin (v, oldv) {
+			if (v && v != oldv) {
+				this.getProjects()
+				this.getProjectRecent()
+			}
+		}
+	},
+	methods: {
+		showPwd () {
+			this.login.passwordType = 'string'
+		},
+		handleLogin() {
+      this.login.loading = true
+      request.post('/user/login', {
+      	account: this.login.form.account,
+      	password: this.login.form.password
+      }).then(res => {
+      	res = res.data
+      	if (res.meta.code == 0) {
+      		Cookies.set('access-token', res.response.token, {expires: 7})
+      		request.defaults.headers.common['access-token'] = res.response.token
+					this.user.accessToken = res.response.token
+					this.user.name = res.response.name
+					this.user.permission = res.response.permission.split(',')
+      		this.$message({
+      			message: '登录成功',
+      			type: 'success'
+      		})
+      		this.isLogin = true
+      	} else {
+      		this.$message({
+      			message: res.meta.msg,
+      			type: 'warning'
+      		})
+      	}
+      }).finally(res => {
+      	this.login.loading = false
+      })
+    },
+    getUserInfo () {
+    	this.loading = true
+    	request.get('/user/info').then(res => {
+    		res = res.data
+    		if (res.meta.code == 0) {
+    			this.isLogin = true
+    			this.user.accessToken = res.response.token
+					this.user.name = res.response.name
+					this.user.permission = res.response.permission.split(',')
+    		} else {
+    			this.$message({
+    				message: res.meta.msg,
+    				type: 'warning'
+    			})
+    		}
+    	}).finally(res => {
+    		this.loading = false
+    	})
+    },
+    createUser () {
+    	if (this.admin.user.account == '') {
+    		this.$message('请输入账号')
+    		return
+    	}
+
+    	if (this.admin.user.password == '') {
+    		this.$message('请输入密码')
+    		return
+    	}
+
+    	this.admin.createLoading = true
+    	request.post('/user/create', {
+    		name: this.admin.user.name,
+    		account: this.admin.user.account,
+    		password: this.admin.user.password
+    	}).then(res => {
+    		res = res.data 
+    		if (res.meta.code == 0) {
+    			this.$message({
+    				message: '创建成功',
+    				type: 'success'
+    			})
+    		} else {
+    			this.$message({
+    				message: res.meta.msg,
+    				type: 'warning'
+    			})
+    			this.admin.showCreateUser = false
+    			this.admin.user = {
+    				name: '',
+    				account: '',
+    				password: ''
+    			}
+    		}
+    	}).finally(res => {
+    		this.admin.createLoading = false
+    	})
+    },
+    changePassword () {
+    	if (this.password.password == '') {
+    		this.$message('请输入旧密码')
+    		return
+    	}
+
+    	if (this.password.newPassword == '') {
+    		this.$message('请输入新密码')
+    		return
+    	}
+
+    	if (this.password.newPassword != this.password.newPasswordAgain) {
+    		this.$message('两次输入的新密码不一致')
+    		return
+    	}
+    	this.password.loading = true
+    	request.post('/user/change_password', {
+    		password: this.password.password,
+    		new_password: this.password.newPassword
+    	}).then(res => {
+    		res = res.data
+    		if (res.meta.code == 0) {
+    			this.$message({
+    				message: '修改成功',
+    				type: 'success'
+    			})
+    			this.password = {
+    				password: '',
+    				newPassword: '',
+    				newPasswordAgain: '',
+    				showChangePassword: false
+    			}
+    		} else {
+    			this.$message({
+    				message: res.meta.msg,
+    				type: 'warning'
+    			})
+    		}
+    	}).finally(res => {
+    		this.password.loading = false
+    	})
+    },
+    changeMenu (position) {
+    	if (position == 'homepage') {
+    		this.getProjects()
+    		this.getProjectRecent()
+    	}
+    	this.position = position
+    },
+    getProjectRecent () {
+    	request.get('/log/recent').then(res => {
+    		res = res.data
+    		if (res.meta.code == 0) {
+    			console.log(res.response)
+    			var xAxis = []
+    			var series = [
+    				{
+    					name: 'success',
+							type: 'bar',
+							label: {
+	            	normal: {
+	            		rich: {
+				            name: {
+				               textBorderColor: '#fff'
+				            }
+					        }
+	            	}
+	            },
+							data: []
+    				},
+    				{
+    					name: 'error',
+							type: 'bar',
+							label: {
+                normal: {
+                    textStyle: {
+                        color: 'rgba(255, 255, 255, 0.3)'
+                    }
+                }
+	            },
+							data: []
+    				},
+    			]
+    			res.response.forEach((v, k, a) => {
+						xAxis.push(v.date)
+						series[0].data.push(v.success_count)
+						series[1].data.push(v.error_count)
+    			})
+
+    			recent.xAxis[0].data = xAxis
+					recent.series = series
+
+					this.projectRecentSeries = echarts.init(document.getElementById('project_recent_series'))
+					this.projectRecentSeries.setOption(recent)
+    		} else {
+    			this.$message({
+    				message: res.meta.msg,
+    				type: 'warning'
+    			})
+    		}
+    	})
+    },
+		getProjects () {
+			this.project.loading = true
+			request.get('/project/list').then(res => {
+				res = res.data
+				if (res.meta.code == 0) {
+					this.project.list = res.response.list
+					this.project.currentList = res.response.list
+					// 计算任务分布图表
+					var seriesData = []
+					this.myCreated = []
+					res.response.list.forEach((v, k, a) => {
+						seriesData.push({value: v.task_count, name: v.title})
+						this.myCreated.push(v)
+					})
+					seriesData.sort(function (a, b) { return a.value - b.value; })
+					distribution.series[0].data = seriesData
+
+					this.projectTaskSeries = echarts.init(document.getElementById('project_task_series'))
+					this.projectTaskSeries.setOption(distribution)
+
+					if (this.project.list[0] && this.detail.currentProject == '') {
+						this.getTasks(this.project.list[0])
+					}
+				} else {
+					this.$message({
+						message: res.meta.msg,
+						type: 'warning'
+					})
+				}
+			}).finally(() => {
+				this.project.loading = false
+			})
+		},
+		changeProject (item) {
+			this.detail.task = JSON.parse(JSON.stringify(init_task))
+			this.detail.currentTask = ''
+			this.getTasks(item)
+		},
+		getTasks (project) {
+			if (!project && !this.detail.project.title) {
+				this.$message('缺少项目标识')
+				return
+			} else {
+				if (!project && this.detail.project.title) {
+					var project = this.detail.project
+				}
+				this.getWorkerList(project.project_id)
+			}
+
+			this.detail.currentProject = project.project_id
+			this.detail.project = project
+			this.task.loading = true
+			request.get('/crontab/list', {
+				params: {
+					'project_id': project.project_id
+				}
+			}).then(res => {
+				res = res.data
+				if (res.meta.code == 0) {
+					this.task.list = res.response.list
+					this.task.currentList = res.response.list
+				} else {
+					this.$message({
+						message: res.meta.msg,
+						type: 'warning'
+					})
+				}
+			}).finally(() => {
+				this.task.loading = false
+			})
+		},
+		taskSearch (value) {
+			if (value == '') {
+				this.task.currentList = this.task.list
+				return
+			}
+			if (this.task.searchTimeout) {
+				clearTimeout(this.task.searchTimeout)
+			}
+			var arr = []
+			this.task.searchTimeout = setTimeout(() => {
+				this.task.list.forEach((v, k, a) => {
+					if (v.name.indexOf(value) != -1 || v.remark.indexOf(value) != -1) {
+						arr.push(v)
+					}
+				})
+				this.task.currentList = arr
+			}, 200)
+		},
+		shutdown (e, task) {
+			if (task && e.toElement.innerText != '正在关闭') {
+			 	this.$confirm('此操作将立即终止该任务并停止定时执行, 是否继续?', '提示', {
+	        confirmButtonText: '确定',
+	        cancelButtonText: '取消',
+	        type: 'warning'
+	      }).then(() => {
+					var content = e.toElement.innerText
+					e.toElement.innerHTML = '正在关闭'
+					request.post('/crontab/kill', {
+						project: detail.currentProject,
+						name: task.name
+					}).then(res => {
+						res = res.data
+						if (res.meta.code == 0) {
+							this.$message('任务"' + task.name + '"已结束进程并暂停定时计划')
+						} else {
+							this.$message({
+								message: res.meta.msg,
+								type: 'warning'
+							})
+						}
+					}).finally(res => {
+						e.toElement.innerHTML = content
+					})
+				}).catch(res => {
+
+				})
+			}
+		},
+		showTaskDetail (task) {
+			var task = JSON.parse(JSON.stringify(task))
+			if (task.status == 1) {
+				task.status = true
+			} else {
+				task.status = false
+			}
+			this.detail.currentTask = task.task_id
+			this.detail.task = JSON.parse(JSON.stringify(task))
+			if (this.detail.currentTab == 1) {
+				this.getLogList()
+			}
+		},
+		tabClick (e) {
+			console.log(e)
+		},
+		createProject () {
+			var form = this.project.detail
+			if (form.title == '') {
+				this.$message('请输入项目标题')
+				return
+			}
+
+			if (form.project == '') {
+				this.$message('请输入项目英文标识')
+				return
+			}
+
+			this.project.loading = true
+
+			request.post('/project/create', {
+				title: form.title,
+				remark: form.remark
+			}).then(res => {
+				res = res.data
+				if (res.meta.code == 0) {
+					this.$message({
+						message: '创建成功',
+						type: 'success'
+					})
+					this.getProjects()
+					this.project.showCreate = false
+					this.project.detail = {
+						title: '',
+						project: '',
+						remark: ''
+					}
+				} else {
+					this.$message({
+						message: res.meta.msg,
+						type: 'warning'
+					})
+				}
+			}).finally(res => {
+				this.project.loading = false
+			})
+		},
+		getWorkerList (project) {
+			this.worker.loading = true
+			this.worker.list = []
+			request.get('/crontab/worker_list', {
+				params: {
+					project_id: project
+				}
+			}).then(res => {
+				res = res.data
+				if (res.meta.code == 0) {
+					this.worker.list = res.response.list
+				}
+			}).finally(res => {
+				this.worker.loading = false
+			})
+		},
+		updateTask (create) {
+			if (create) {
+				var form = this.task.detail 
+				form.project_id = this.detail.currentProject
+			} else {
+				var form = this.detail.task
+				form.task_id = this.detail.currentTask
+			}
+
+			if (form.project_id == '') {
+				this.$message('缺少项目标识')
+				return
+			}
+
+			if (form.name == '') {
+				this.$message('请输入任务名称')
+				return
+			}
+
+			if (form.cron == '') {
+				this.$message('请输入调度计划')
+				return
+			}
+
+			if (form.command == '') {
+				this.$message('请输入执行命令')
+				return
+			}
+			if (create) {
+				this.task.loading = true
+			} else {
+				this.detail.loading = true
+			}
+			
+			request.post('/crontab/save', {
+				project_id: form.project_id,
+				task_id: form.task_id,
+				name: form.name,
+				cron: form.cron,
+				command: form.command,
+				timeout: form.timeout,
+				remark: form.remark,
+				status: form.status ? 1 : 0,
+			}).then(res => {
+				res = res.data
+				if (res.meta.code == 0) {
+					if (create) {
+						this.initTaskDetail()
+					}
+					this.getTasks()
+					this.$message({
+						message: create ? '创建成功' : '更新成功',
+						type: 'success'
+					})
+					this.task.showCreate = false
+				} else {
+					this.$message({
+						message: res.meta.msg,
+						type: 'warning'
+					})
+				}
+			}).finally(res => {
+				if (create) {
+					this.task.loading = false
+				} else {
+					this.detail.loading = false
+				}
+			})
+		},
+		initTaskDetail () {
+			this.task.detail = JSON.parse(JSON.stringify(init_task))
+		},
+		getLogList () {
+			this.log.loading = true
+			request.get('/log/list', {
+				params: {
+					task_id: this.detail.currentTask,
+					project_id: this.detail.currentProject,
+					page: this.log.page,
+					pagesize: this.log.pagesize
+				}
+			}).then(res => {
+				res = res.data
+				if (res.meta.code == 0) {
+					this.log.list = res.response.list 
+					this.log.total = res.response.total
+				} else {
+					this.$message({
+						message: res.meta.msg,
+						type: 'warning'
+					})
+				}
+			}).finally(res => {
+				this.log.loading = false
+			})
+		},
+		tabClick (e) {
+			if (e.index == 1) {
+				// 查看日志
+				this.detail.currentTab = e.index
+				this.getLogList()
+			}
+		},
+		changeSize (changed) {
+      this.log.pagesize = changed
+      this.getLogList()
+    },
+    gotoPage (currentPage) {
+      this.log.page = currentPage 
+      this.getLogList()
+    },
+    deleteProject (projectId) {
+    	this.$confirm('此操作将立即删除该项目并删除项目下所有的定时任务, 是否继续?', '提示', {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }).then(() => {
+      	if (this.detail.currentProject == '') {
+      		this.$message('缺少项目参数')
+      		return
+      	}
+      	this.loading = true
+				request.post('/project/delete', {
+					project_id: projectId ? projectId : this.detail.currentProject
+				}).then(res => {
+					res = res.data 
+					if (res.meta.code == 0) {
+						this.detail.currentProject = ''
+						this.detail.currentTask = ''
+						this.getProjects()
+						this.$message({
+							message: '删除成功',
+							type: 'success'
+						})
+					} else {
+						this.$message({
+							message: res.meta.msg,
+							type: 'warning'
+						})
+					}
+				}).finally(res => {
+					this.loading = false
+				})
+			}).catch(() => {
+				
+			})
+    },
+    deleteTask () {
+    	this.$confirm('此操作将立即删除该任务, 是否继续?', '提示', {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }).then(() => {
+      	if (this.detail.task.project == '') {
+      		this.$message('缺少项目参数')
+      		return
+      	}
+      	if (this.detail.task.project == '') {
+      		this.$message('缺少项目参数')
+      		return
+      	}
+      	this.loading = true
+				request.post('/crontab/delete', {
+					project: this.detail.currentProject,
+					name: this.detail.currentTask
+				}).then(res => {
+					res = res.data 
+					if (res.meta.code == 0) {
+						this.initTaskDetail()
+						this.detail.currentTask = ''
+						this.getTasks()
+						this.$message({
+							message: '删除成功',
+							type: 'success'
+						})
+					} else {
+						this.$message({
+							message: res.meta.msg,
+							type: 'warning'
+						})
+					}
+				}).finally(res => {
+					this.loading = false
+				})
+			}).catch(() => {
+				
+			})
+    },
+    logout () {
+    	this.$confirm('确认退出系统吗？', '提示', {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }).then(() => {
+      	Cookies.remove('access-token')
+      	this.isLogin = false
+      }).catch(res => {
+
+      })
+    },
+    cleanLog () {
+    	this.$confirm('确认清除该任务的所有日志吗？', '提示', {
+    		confirmButtonText: '确定',
+    		cancelButtonText: '取消',
+    		type: 'warning'
+    	}).then(res => {
+    		this.log.cleanLoading = true
+    		request.post('/log/clean', {
+    			project_id: this.detail.currentProject,
+    			task_id: this.detail.currentTask,
+    		}).then(res => {
+    			res = res.data 
+    			if (res.meta.code == 0) {
+    				this.getLogList()
+    				this.$message({
+    					message: '清空成功',
+    					type: 'success'
+    				})
+    			} else {
+    				this.$message({
+    					message: res.meta.msg,
+    					type: 'warning'
+    				})
+    			}
+    		}).finally(res => {
+    			this.log.cleanLoading = false
+    		})
+    	})
+    },
+    getProjectUsers (projectId) {
+    	if (projectId == '') {
+    		this.$message('缺少参数 projectId')
+    		return
+    	}
+    	this.projectUsers.showUserList = true
+    	this.projectUsers.loading = true
+    	request.get('/project/users', {
+    		params: {
+    			'project_id': projectId
+    		}
+    	}).then(res => {
+    		res = res.data 
+    		if (res.meta.code == 0) {
+    			this.projectUsers.list = res.response.list
+    			this.projectUsers.projectId = projectId
+    		} else {
+    			this.$message({
+    				message: res.meta.msg,
+    				type: 'warning'
+    			})
+    		}
+    	}).finally(res => {
+    		this.projectUsers.loading = false
+    	})
+    },
+    removeUserFormProject (user) {
+    	this.$confirm('确定将' + user.name + '移出该项目吗？', '提示', {
+    		confirmButtonText: '确定',
+    		cancelButtonText: '取消',
+    		type: 'warning'
+    	}).then(res => {
+    		this.projectUsers.loading = true 
+    		request.post('/project/remove_user', {
+    			user_id: user.id,
+    			project_id: this.projectUsers.projectId
+    		}).then(res => {
+    			res = res.data
+    			if (res.meta.code == 0) {
+    				this.getProjectUsers(this.projectUsers.projectId)
+    			} else {
+    				this.$message({
+    					message: res.meta.msg,
+    					type: 'warning'
+    				})
+    			}
+    		})
+    	}).catch(res => {
+
+    	})
+    },
+    showAddProjectUser (project) {
+    	this.projectAdmin.showAddUser = true
+    	this.projectAdmin.project = project
+    },
+    addProjectUser () {
+    	if (this.projectAdmin.addUserAccount == '') {
+    		this.$message('请填写用户账号')
+    		return
+    	}
+    	this.projectAdmin.addLoading = true
+    	request.post('/project/add_user', {
+    		project_id: this.projectAdmin.project.project_id,
+    		user_account: this.projectAdmin.addUserAccount
+    	}).then(res => {
+    		res = res.data
+    		if (res.meta.code == 0) {
+    			this.$message({
+    				message: '添加成功',
+    				type: 'success'
+    			})
+    			this.projectAdmin.addUserAccount = ''
+    		} else {
+    			this.$message({
+    				message: res.meta.msg,
+    				type: 'warning'
+    			})
+    		}
+    	}).finally(res => {
+    		this.projectAdmin.addLoading = false
+    	})
+    }
+	}
+})
+
+</script>
+</html>

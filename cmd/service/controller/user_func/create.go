@@ -4,6 +4,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mongodb/mongo-go-driver/bson/primitive"
+
 	"ojbk.io/gopherCron/utils"
 
 	"github.com/gin-gonic/gin"
@@ -35,6 +37,7 @@ func CreateUser(c *gin.Context) {
 		permissions []string
 		isAdmin     bool
 		salt        string
+		objID       primitive.ObjectID
 	)
 
 	if err = utils.BindArgsWithGin(c, &req); err != nil {
@@ -42,7 +45,12 @@ func CreateUser(c *gin.Context) {
 		return
 	}
 
-	if info, err = db.GetUserInfo(uid); err != nil {
+	if objID, err = primitive.ObjectIDFromHex(uid); err != nil {
+		request.APIError(c, errors.ErrInvalidArgument)
+		return
+	}
+
+	if info, err = db.GetUserInfo(objID); err != nil {
 		request.APIError(c, err)
 		return
 	}
@@ -58,17 +66,26 @@ func CreateUser(c *gin.Context) {
 
 	if isAdmin {
 
+		// 检测用户账号是否已经存在
+		if info, err = db.GetUserWithAccount(req.Account); err != nil {
+			request.APIError(c, err)
+			return
+		}
+
+		if info != nil {
+			request.APIError(c, errors.ErrUserExist)
+			return
+		}
+
 		salt = utils.RandomStr(6)
 
-		err = db.CreateUser(&common.User{
+		if err = db.CreateUser(&common.User{
 			Account:    req.Account,
 			Password:   utils.BuildPassword(req.Password, salt),
 			Salt:       salt,
 			Name:       req.Name,
 			CreateTime: time.Now().Unix(),
-		})
-
-		if err != nil {
+		}); err != nil {
 			request.APIError(c, err)
 			return
 		}

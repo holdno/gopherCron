@@ -2,7 +2,6 @@ package etcd
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/coreos/etcd/mvcc/mvccpb"
 	"ojbk.io/gopherCron/common"
@@ -26,7 +25,7 @@ func (m *TaskManager) TaskWatcher(projects []string) error {
 
 			task      *common.TaskInfo
 			taskEvent *common.TaskEvent
-			taskName  string
+			taskID    string
 		)
 		preKey = common.BuildKey(v, "")
 
@@ -62,10 +61,9 @@ func (m *TaskManager) TaskWatcher(projects []string) error {
 						taskEvent = common.BuildTaskEvent(common.TASK_EVENT_SAVE, task)
 						// 推送一个更新事件给 scheduler
 					case mvccpb.DELETE: // 任务删除
-						fmt.Println("delete", string(watchEvent.Kv.Key))
-						taskName = common.ExtractTaskName(v, string(watchEvent.Kv.Key))
+						taskID = common.ExtractTaskID(v, string(watchEvent.Kv.Key))
 						// 构建一个delete event
-						task = &common.TaskInfo{Name: taskName, Project: v}
+						task = &common.TaskInfo{TaskID: taskID, ProjectID: v}
 						taskEvent = common.BuildTaskEvent(common.TASK_EVENT_DELETE, task)
 						// 推送给 scheduler 把任务终止掉
 					}

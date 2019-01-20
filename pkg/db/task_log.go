@@ -2,7 +2,10 @@ package db
 
 import (
 	"context"
-	"time"
+
+	"github.com/mongodb/mongo-go-driver/bson/primitive"
+
+	"ojbk.io/gopherCron/utils"
 
 	"github.com/sirupsen/logrus"
 
@@ -26,14 +29,23 @@ func CreateTaskLog(data *common.TaskLog) error {
 	var (
 		err    error
 		errObj errors.Error
+		ctx    context.Context
 	)
 
-	if _, err = Database.Collection(TaskLogTable).InsertOne(context.TODO(), data); err != nil {
+	ctx, _ = utils.GetContextWithTimeout()
+
+	if data.ID.IsZero() {
+		data.ID = primitive.NewObjectID()
+	}
+
+	if _, err = Database.Collection(TaskLogTable).InsertOne(ctx, data); err != nil {
 		logrus.WithFields(logrus.Fields{
-			"Project": data.Project,
-			"Name":    data.Name,
-			"Command": data.Command,
-			"Error":   err.Error(),
+			"ProjectID": data.ProjectID.Hex(),
+			"TaskID":    data.TaskID.Hex(),
+			"Project":   data.Project,
+			"Name":      data.Name,
+			"Command":   data.Command,
+			"Error":     err.Error(),
 		}).Error("执行结果写入mongodb失败")
 		errObj = errors.ErrInternalError
 		errObj.Log = "[TaskLog - CreateTaskLog] InsertOne error:" + err.Error()
@@ -43,19 +55,50 @@ func CreateTaskLog(data *common.TaskLog) error {
 	return nil
 }
 
+// GetLogCountByDate 获取某天的日志数
+func GetLogCountByDate(projects []primitive.ObjectID, timestamp int64, errType int) (int64, error) {
+	var (
+		err    error
+		errObj errors.Error
+		ctx    context.Context
+		count  int64
+	)
+
+	ctx, _ = utils.GetContextWithTimeout()
+	if count, err = Database.Collection(TaskLogTable).Count(ctx,
+		bson.M{
+			"project_id": bson.M{
+				"$in": projects,
+			},
+			"start_time": bson.M{
+				"$gte": timestamp,
+				"$lt":  timestamp + 86400,
+			},
+			"with_error": errType}); err != nil {
+		errObj = errors.ErrInternalError
+		errObj.Log = "[TaskLog - GetLogCountByDate] count error:" + err.Error()
+		return 0, errObj
+	}
+
+	return count, err
+}
+
 // GetLogList 获取日志列表
-func GetLogList(project, name string, page, pagesize int64) ([]*common.TaskLog, error) {
+func GetLogList(projectID, taskID primitive.ObjectID, page, pagesize int64) ([]*common.TaskLog, error) {
 	var (
 		err      error
 		errObj   errors.Error
 		skip     int64
 		findRes  mongo.Cursor
 		taskList []*common.TaskLog
+		ctx      context.Context
 	)
+
+	ctx, _ = utils.GetContextWithTimeout()
 
 	skip = (page - 1) * pagesize
 
-	if findRes, err = Database.Collection(TaskLogTable).Find(context.TODO(), bson.M{"project": project, "name": name}, &options.FindOptions{
+	if findRes, err = Database.Collection(TaskLogTable).Find(ctx, bson.M{"project_id": projectID, "task_id": taskID}, &options.FindOptions{
 		Skip:  &skip,
 		Limit: &pagesize,
 		Sort:  bson.M{"_id": -1},
@@ -75,7 +118,6 @@ func GetLogList(project, name string, page, pagesize int64) ([]*common.TaskLog, 
 			errObj.Log = "[TaskLog - GetLogList] Decode error:" + err.Error()
 			return nil, errObj
 		}
-		task.ID = task.ObjID.Hex()
 		taskList = append(taskList, &task)
 	}
 
@@ -83,14 +125,17 @@ func GetLogList(project, name string, page, pagesize int64) ([]*common.TaskLog, 
 }
 
 // GetLogTotal 获取日志列表总数
-func GetLogTotal(project, name string) (int64, error) {
+func GetLogTotal(project, name primitive.ObjectID) (int64, error) {
 	var (
 		err    error
 		errObj errors.Error
 		total  int64
+		ctx    context.Context
 	)
 
-	if total, err = Database.Collection(TaskLogTable).Count(context.TODO(), bson.M{"project": project, "name": name}); err != nil {
+	ctx, _ = utils.GetContextWithTimeout()
+
+	if total, err = Database.Collection(TaskLogTable).Count(ctx, bson.M{"project": project, "name": name}); err != nil {
 		errObj = errors.ErrInternalError
 		errObj.Log = "[TaskLog - GetLogTotal] Count error:" + err.Error()
 		return 0, errObj
@@ -100,15 +145,15 @@ func GetLogTotal(project, name string) (int64, error) {
 }
 
 // CleanLog 清除任务日志
-func CleanLog(project, task string) error {
+func CleanLog(projectID, taskID primitive.ObjectID) error {
 	var (
 		ctx    context.Context
 		err    error
 		errObj errors.Error
 	)
 
-	ctx, _ = context.WithTimeout(context.TODO(), time.Duration(common.DBTimeout)*time.Second)
-	if _, err = Database.Collection(TaskLogTable).DeleteMany(ctx, bson.M{"project": project, "name": task}); err != nil {
+	ctx, _ = utils.GetContextWithTimeout()
+	if _, err = Database.Collection(TaskLogTable).DeleteMany(ctx, bson.M{"project_id": projectID, "task_id": taskID}); err != nil {
 		errObj = errors.ErrInternalError
 		errObj.Log = "[TaskLog - CleanLog] Delete error:" + err.Error()
 		return errObj
@@ -118,15 +163,15 @@ func CleanLog(project, task string) error {
 }
 
 // CleanProjectLog 清除项目下全部任务的日志
-func CleanProjectLog(project string) error {
+func CleanProjectLog(projectID primitive.ObjectID) error {
 	var (
 		ctx    context.Context
 		err    error
 		errObj errors.Error
 	)
 
-	ctx, _ = context.WithTimeout(context.TODO(), time.Duration(common.DBTimeout)*time.Second)
-	if _, err = Database.Collection(TaskLogTable).DeleteMany(ctx, bson.M{"project": project}); err != nil {
+	ctx, _ = utils.GetContextWithTimeout()
+	if _, err = Database.Collection(TaskLogTable).DeleteMany(ctx, bson.M{"project_id": projectID}); err != nil {
 		errObj = errors.ErrInternalError
 		errObj.Log = "[TaskLog - CleanProjectLog] Delete error:" + err.Error()
 		return errObj

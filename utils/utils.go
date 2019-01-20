@@ -1,11 +1,17 @@
 package utils
 
 import (
+	"context"
 	"crypto/md5"
 	"encoding/hex"
 	"math/rand"
+	"net"
 	"strconv"
 	"time"
+
+	"ojbk.io/gopherCron/errors"
+
+	"ojbk.io/gopherCron/config"
 
 	"github.com/holdno/snowFlakeByGo"
 
@@ -73,4 +79,48 @@ func TernaryOperation(exist bool, res, el interface{}) interface{} {
 		return res
 	}
 	return el
+}
+
+// GetContextWithTimeout 返回一个带timeout的context
+func GetContextWithTimeout() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.TODO(), time.Duration(config.GetServiceConfig().Deploy.Timeout)*time.Second)
+}
+
+// GetBeforeDate 获取n天前的时间
+func GetDateFromNow(n int) time.Time {
+	timer, _ := time.ParseInLocation("2006-01-02", time.Now().Format("2006-01-02"), time.Local)
+	if n == 0 {
+		return timer
+	}
+	return timer.AddDate(0, 0, n)
+}
+
+// 获取机器ip
+func GetLocalIP() (string, error) {
+	var (
+		addrs   []net.Addr
+		addr    net.Addr
+		err     error
+		ipNet   *net.IPNet
+		isIpNet bool
+	)
+
+	if addrs, err = net.InterfaceAddrs(); err != nil {
+		return "", err
+	}
+
+	// 获取第一个非IO的网卡
+	for _, addr = range addrs {
+		// ipv4  ipv6
+		// 如果能反解成ip地址 则为我们需要的地址
+		if ipNet, isIpNet = addr.(*net.IPNet); isIpNet && !ipNet.IP.IsLoopback() {
+			// 是ip地址 不是 unix socket地址
+			// 继续判断 是ipv4 还是 ipv6
+			// 跳过ipv6
+			if ipNet.IP.To4() != nil {
+				return ipNet.IP.String(), nil
+			}
+		}
+	}
+	return "", errors.ErrLocalIPNotFound
 }

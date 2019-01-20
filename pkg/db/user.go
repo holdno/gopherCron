@@ -32,14 +32,13 @@ func createAdminUser() error {
 
 	salt = utils.RandomStr(6)
 	if _, err = Database.Collection(UserTable).InsertOne(context.TODO(), &common.User{
-		ID:         primitive.NewObjectID().Hex(),
+		ID:         primitive.NewObjectID(),
 		Account:    common.ADMIN_USER_ACCOUNT,
 		Password:   utils.BuildPassword(common.ADMIN_USER_PASSWORD, salt),
 		Salt:       salt,
 		Name:       common.ADMIN_USER_NAME,
 		Permission: common.ADMIN_USER_PERMISSION,
 		CreateTime: time.Now().Unix(),
-		Project:    []string{common.ADMIN_PROJECT},
 	}); err != nil {
 		logrus.WithField("Error", err).Error("goperCron create admin user error")
 		return err
@@ -56,7 +55,7 @@ func CreateUser(user *common.User) error {
 		errObj errors.Error
 	)
 	if _, err = Database.Collection(UserTable).InsertOne(context.TODO(), &common.User{
-		ID:         primitive.NewObjectID().Hex(),
+		ID:         primitive.NewObjectID(),
 		Account:    user.Account,
 		Password:   user.Password,
 		Salt:       user.Salt,
@@ -101,7 +100,7 @@ func GetUserWithAccount(account string) (*common.User, error) {
 }
 
 // GetUserInfo 获取用户信息
-func GetUserInfo(uid string) (*common.User, error) {
+func GetUserInfo(uid primitive.ObjectID) (*common.User, error) {
 	var (
 		res    *mongo.SingleResult
 		user   *common.User
@@ -129,14 +128,16 @@ func GetUserInfo(uid string) (*common.User, error) {
 }
 
 // ChangePassword 修改用户密码
-func ChangePassword(uid, password, salt string) error {
+func ChangePassword(uid primitive.ObjectID, password, salt string) error {
 	var (
 		res    *mongo.UpdateResult
 		errObj errors.Error
 		err    error
+		ctx    context.Context
 	)
 
-	res, err = Database.Collection(UserTable).UpdateOne(context.TODO(),
+	ctx, _ = utils.GetContextWithTimeout()
+	res, err = Database.Collection(UserTable).UpdateOne(ctx,
 		bson.M{"_id": uid},
 		bson.M{"$set": bson.M{"password": password, "salt": salt}})
 
@@ -146,9 +147,39 @@ func ChangePassword(uid, password, salt string) error {
 		return errObj
 	}
 
-	if res.ModifiedCount != 1 {
+	if res.ModifiedCount < 1 {
 		return errors.ErrDataNotFound
 	}
 
 	return nil
+}
+
+func GetUsers(users []primitive.ObjectID) ([]*common.User, error) {
+	var (
+		err    error
+		errObj errors.Error
+		ctx    context.Context
+		res    mongo.Cursor
+		list   []*common.User
+	)
+
+	ctx, _ = utils.GetContextWithTimeout()
+	if res, err = Database.Collection(UserTable).Find(ctx, bson.M{"_id": bson.M{"$in": users}}); err != nil {
+		errObj = errors.ErrInternalError
+		errObj.Log = "[User - GetUsers] 通过_id数组批量获取用户信息失败 error:" + err.Error()
+		return nil, errObj
+	}
+
+	for res.Next(context.TODO()) {
+		var item common.User
+		if err = res.Decode(&item); err != nil {
+			errObj = errors.ErrInternalError
+			errObj.Log = "[Project - GetUsers] convert error:" + err.Error()
+			return nil, errObj
+		}
+
+		list = append(list, &item)
+	}
+
+	return list, nil
 }

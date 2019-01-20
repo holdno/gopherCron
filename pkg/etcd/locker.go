@@ -74,7 +74,7 @@ func (tl *TaskLock) TryLock() error {
 	txn = tl.kv.Txn(context.TODO())
 
 	// 生成锁的路径
-	lockKey = common.BuildLockKey(tl.taskInfo.Project, tl.taskInfo.Name)
+	lockKey = common.BuildLockKey(tl.taskInfo.ProjectID, tl.taskInfo.TaskID)
 	// 事务抢锁
 	txn.If(clientv3.Compare(clientv3.CreateRevision(lockKey), "=", 0)).
 		Then(clientv3.OpPut(lockKey, "", clientv3.WithLease(leaseGrantResp.ID))).

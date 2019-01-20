@@ -1,3 +1,9 @@
+[deploy]
+# 当前的环境:dev、release
+environment = "release"
+# 数据库操作超时时间
+timeout = 5  # 秒为单位
+
 # etcd
 [etcd]
 service = ["0.0.0.0:2379"]

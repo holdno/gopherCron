@@ -26,7 +26,7 @@ func (m *TaskManager) SaveTask(task *common.TaskInfo) (*common.TaskInfo, error) 
 	)
 
 	// build etcd save key
-	saveKey = common.BuildKey(task.Project, task.Name)
+	saveKey = common.BuildKey(task.ProjectID, task.TaskID)
 
 	// task to json
 	if saveByte, err = json.Marshal(task); err != nil {
@@ -52,7 +52,7 @@ func (m *TaskManager) SaveTask(task *common.TaskInfo) (*common.TaskInfo, error) 
 	return oldTask, nil
 }
 
-func (m *TaskManager) DeleteTask(project, name string) (*common.TaskInfo, error) {
+func (m *TaskManager) DeleteTask(projectID, taskID string) (*common.TaskInfo, error) {
 	var (
 		deleteKey string
 		delResp   *clientv3.DeleteResponse
@@ -62,7 +62,7 @@ func (m *TaskManager) DeleteTask(project, name string) (*common.TaskInfo, error)
 	)
 
 	// build etcd delete key
-	deleteKey = common.BuildKey(project, name)
+	deleteKey = common.BuildKey(projectID, taskID)
 
 	// save to etcd
 	if delResp, err = m.kv.Delete(context.TODO(), deleteKey, clientv3.WithPrevKV(), clientv3.WithPrefix()); err != nil {
@@ -71,7 +71,7 @@ func (m *TaskManager) DeleteTask(project, name string) (*common.TaskInfo, error)
 		return nil, errObj
 	}
 
-	if name != "" && len(delResp.PrevKvs) != 0 {
+	if taskID != "" && len(delResp.PrevKvs) != 0 {
 		json.Unmarshal([]byte(delResp.PrevKvs[0].Value), &oldTask)
 	}
 
@@ -116,7 +116,7 @@ func (m *TaskManager) GetTask(project, name string) (*common.TaskInfo, error) {
 }
 
 // GetTaskList 获取任务列表
-func (m *TaskManager) GetTaskList(project string) ([]*common.TaskInfo, error) {
+func (m *TaskManager) GetTaskList(projectID string) ([]*common.TaskInfo, error) {
 	var (
 		preKey   string
 		getResp  *clientv3.GetResponse
@@ -128,7 +128,7 @@ func (m *TaskManager) GetTaskList(project string) ([]*common.TaskInfo, error) {
 	)
 
 	// build etcd pre key
-	preKey = common.BuildKey(project, "")
+	preKey = common.BuildKey(projectID, "")
 
 	if getResp, err = m.kv.Get(context.TODO(), preKey,
 		clientv3.WithPrefix()); err != nil {
@@ -151,6 +151,28 @@ func (m *TaskManager) GetTaskList(project string) ([]*common.TaskInfo, error) {
 	}
 
 	return taskList, nil
+}
+
+// GetTaskList 获取任务列表
+func (m *TaskManager) GetProjectTaskCount(projectID string) (int64, error) {
+	var (
+		preKey  string
+		getResp *clientv3.GetResponse
+		errObj  errors.Error
+		err     error
+	)
+
+	// build etcd pre key
+	preKey = common.BuildKey(projectID, "")
+
+	if getResp, err = m.kv.Get(context.TODO(), preKey,
+		clientv3.WithPrefix(), clientv3.WithCountOnly()); err != nil {
+		errObj = errors.ErrInternalError
+		errObj.Log = "[Etcd - GetProjectTaskCount] etcd client kv error:" + err.Error()
+		return 0, errObj
+	}
+
+	return getResp.Count, nil
 }
 
 // KillTask 强行结束任务
@@ -182,7 +204,7 @@ func (m *TaskManager) KillTask(project, name string) error {
 }
 
 // GetWorkerList 获取节点列表
-func (m *TaskManager) GetWorkerList(project string) ([]string, error) {
+func (m *TaskManager) GetWorkerList(projectID string) ([]string, error) {
 	var (
 		preKey  string
 		err     error
@@ -192,7 +214,7 @@ func (m *TaskManager) GetWorkerList(project string) ([]string, error) {
 		res     []string
 	)
 
-	preKey = common.BuildRegisterKey(project, "")
+	preKey = common.BuildRegisterKey(projectID, "")
 	if getResp, err = m.kv.Get(context.TODO(), preKey, clientv3.WithPrefix()); err != nil {
 		errObj = errors.ErrInternalError
 		errObj.Log = "[Etcd - GetWorkerList] get preKey error:" + err.Error()
@@ -200,7 +222,7 @@ func (m *TaskManager) GetWorkerList(project string) ([]string, error) {
 	}
 
 	for _, kv = range getResp.Kvs {
-		res = append(res, common.ExtractWorkerIP(project, string(kv.Key)))
+		res = append(res, common.ExtractWorkerIP(projectID, string(kv.Key)))
 	}
 
 	return res, nil

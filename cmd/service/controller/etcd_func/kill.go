@@ -2,6 +2,7 @@ package etcd_func
 
 import (
 	"github.com/gin-gonic/gin"
+	"github.com/mongodb/mongo-go-driver/bson/primitive"
 	"ojbk.io/gopherCron/cmd/service/request"
 	"ojbk.io/gopherCron/common"
 	"ojbk.io/gopherCron/errors"
@@ -11,8 +12,8 @@ import (
 )
 
 type KillTaskRequest struct {
-	Project string `form:"project" binding:"required"`
-	Name    string `form:"name" binding:"required"`
+	ProjectID string `form:"project_id" binding:"required"`
+	TaskID    string `form:"task_id" binding:"required"`
 }
 
 // KillTask kill task from etcd
@@ -20,11 +21,13 @@ type KillTaskRequest struct {
 // 一般强行结束任务就是想要停止任务 所以这里对任务的状态进行变更
 func KillTask(c *gin.Context) {
 	var (
-		err    error
-		req    KillTaskRequest
-		task   *common.TaskInfo
-		errObj errors.Error
-		uid    string
+		err       error
+		req       KillTaskRequest
+		task      *common.TaskInfo
+		errObj    errors.Error
+		uid       string
+		userID    primitive.ObjectID
+		projectID primitive.ObjectID
 	)
 
 	if err = utils.BindArgsWithGin(c, &req); err != nil {
@@ -36,19 +39,29 @@ func KillTask(c *gin.Context) {
 
 	uid = c.GetString("jwt_user")
 
+	if userID, err = primitive.ObjectIDFromHex(uid); err != nil {
+		request.APIError(c, errors.ErrInvalidArgument)
+		return
+	}
+
+	if projectID, err = primitive.ObjectIDFromHex(req.ProjectID); err != nil {
+		request.APIError(c, errors.ErrInvalidArgument)
+		return
+	}
+
 	// 这里主要是防止用户强杀不属于自己项目的业务
-	if _, err = db.CheckProjectExist(req.Project, uid); err != nil {
+	if _, err = db.CheckProjectExist(projectID, userID); err != nil {
 		request.APIError(c, err)
 		return
 	}
 
-	if err = etcd.Manager.KillTask(req.Project, req.Name); err != nil {
+	if err = etcd.Manager.KillTask(req.ProjectID, req.TaskID); err != nil {
 		request.APIError(c, err)
 		return
 	}
 
 	// 强杀任务后暂停任务
-	if task, err = etcd.Manager.GetTask(req.Project, req.Name); err != nil {
+	if task, err = etcd.Manager.GetTask(req.ProjectID, req.TaskID); err != nil {
 		goto ChangeStatusError
 	}
 

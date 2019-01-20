@@ -2,6 +2,7 @@ package log_func
 
 import (
 	"github.com/gin-gonic/gin"
+	"github.com/mongodb/mongo-go-driver/bson/primitive"
 	"ojbk.io/gopherCron/cmd/service/request"
 	"ojbk.io/gopherCron/errors"
 	"ojbk.io/gopherCron/pkg/db"
@@ -10,8 +11,8 @@ import (
 
 // ClearLogsRequest 清理日志请求参数
 type CleanLogsRequest struct {
-	Project  string `form:"project" binding:"required"`
-	TaskName string `form:"task_name"`
+	ProjectID string `form:"project_id" binding:"required"`
+	TaskID    string `form:"task_id"`
 }
 
 // CleanLogs 清理任务日志
@@ -23,8 +24,11 @@ func CleanLogs(c *gin.Context) {
 	}
 
 	var (
-		err error
-		req CleanLogsRequest
+		err       error
+		req       CleanLogsRequest
+		userID    primitive.ObjectID
+		projectID primitive.ObjectID
+		taskID    primitive.ObjectID
 	)
 
 	if err = utils.BindArgsWithGin(c, &req); err != nil {
@@ -32,15 +36,30 @@ func CleanLogs(c *gin.Context) {
 		return
 	}
 
-	if _, err = db.CheckProjectExist(req.Project, uid); err != nil {
+	if userID, err = primitive.ObjectIDFromHex(uid); err != nil {
+		request.APIError(c, errors.ErrInvalidArgument)
+		return
+	}
+
+	if projectID, err = primitive.ObjectIDFromHex(req.ProjectID); err != nil {
+		request.APIError(c, errors.ErrInvalidArgument)
+		return
+	}
+
+	if taskID, err = primitive.ObjectIDFromHex(req.TaskID); err != nil {
+		request.APIError(c, errors.ErrInvalidArgument)
+		return
+	}
+
+	if _, err = db.CheckProjectExist(projectID, userID); err != nil {
 		request.APIError(c, err)
 		return
 	}
 
-	if req.TaskName == "" {
-		err = db.CleanProjectLog(req.Project)
+	if req.TaskID == "" {
+		err = db.CleanProjectLog(projectID)
 	} else {
-		err = db.CleanLog(req.Project, req.TaskName)
+		err = db.CleanLog(projectID, taskID)
 	}
 
 	if err != nil {

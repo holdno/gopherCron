@@ -1,7 +1,10 @@
 package user_func
 
 import (
+	"fmt"
+
 	"github.com/gin-gonic/gin"
+	"github.com/mongodb/mongo-go-driver/bson/primitive"
 	"ojbk.io/gopherCron/cmd/service/request"
 	"ojbk.io/gopherCron/common"
 	"ojbk.io/gopherCron/errors"
@@ -23,11 +26,14 @@ func ChangePassword(c *gin.Context) {
 		return
 	}
 
+	fmt.Println(uid)
+
 	var (
 		req      ChangePasswordRequest
 		err      error
 		info     *common.User
 		password string
+		objID    primitive.ObjectID
 	)
 
 	if err = utils.BindArgsWithGin(c, &req); err != nil {
@@ -35,7 +41,12 @@ func ChangePassword(c *gin.Context) {
 		return
 	}
 
-	if info, err = db.GetUserInfo(uid); err != nil {
+	if objID, err = primitive.ObjectIDFromHex(uid); err != nil {
+		request.APIError(c, errors.ErrInvalidArgument)
+		return
+	}
+
+	if info, err = db.GetUserInfo(objID); err != nil {
 		request.APIError(c, err)
 		return
 	}
@@ -49,7 +60,7 @@ func ChangePassword(c *gin.Context) {
 	info.Salt = utils.RandomStr(6)
 	password = utils.BuildPassword(req.NewPassword, info.Salt)
 
-	if err = db.ChangePassword(uid, password, info.Salt); err != nil {
+	if err = db.ChangePassword(objID, password, info.Salt); err != nil {
 		request.APIError(c, err)
 		return
 	}
