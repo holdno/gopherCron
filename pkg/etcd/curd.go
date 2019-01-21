@@ -227,3 +227,23 @@ func (m *TaskManager) GetWorkerList(projectID string) ([]string, error) {
 
 	return res, nil
 }
+
+func (m *TaskManager) DeleteAll() error {
+	var (
+		deleteKey string
+		errObj    errors.Error
+		err       error
+	)
+
+	// build etcd delete key
+	deleteKey = common.ETCD_PREFIX + "/"
+
+	// save to etcd
+	if _, err = m.kv.Delete(context.TODO(), deleteKey, clientv3.WithPrevKV(), clientv3.WithPrefix()); err != nil {
+		errObj = errors.ErrInternalError
+		errObj.Log = "[Etcd - DeleteAll] etcd client kv delete error:" + err.Error()
+		return errObj
+	}
+
+	return nil
+}

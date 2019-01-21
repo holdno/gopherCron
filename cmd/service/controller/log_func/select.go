@@ -110,6 +110,10 @@ func GetRecentLogCount(c *gin.Context) {
 		return
 	}
 
+	if projects == nil {
+		goto EMPTY
+	}
+
 	for _, v := range projects {
 		projectIDs = append(projectIDs, v.ProjectID)
 	}
@@ -140,5 +144,6 @@ func GetRecentLogCount(c *gin.Context) {
 		})
 	}
 
+EMPTY:
 	request.APISuccess(c, utils.TernaryOperation(len(result) != 0, result, []struct{}{}))
 }

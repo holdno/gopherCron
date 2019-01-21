@@ -663,7 +663,7 @@ var vue = new Vue({
 			showCreate: false,
 			showUpdate: false,
 			createLoading: false,
-			detail: init_project
+			detail: JSON.pares(JSON.stringify(init_project))
 		},
 		task: {
 			project: '',
@@ -673,7 +673,7 @@ var vue = new Vue({
 			search: '',
 			searchTimeout: {},
 			showCreate: false,
-			detail: init_task,
+			detail: JSON.parse(JSON.stringify(init_task)),
 		},
 		detail: {
 			loading: false,
@@ -681,7 +681,7 @@ var vue = new Vue({
 			currentTab: 0,
 			currentProject: '',
 			currentTask: '', // task name
-			task: init_task,
+			task: JSON.parse(JSON.stringify(init_task)),
 			project: {},
 		},
 		worker: {

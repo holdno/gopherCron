@@ -43,6 +43,7 @@ func Connect(conf *config.MongoDBConf) {
 	//for _, table = range dbTables {
 	//	if table == conf.Table {
 	Database = client.Database(conf.Table)
+
 	user, err := GetUserWithAccount(common.ADMIN_USER_ACCOUNT)
 	if err != nil {
 		panic(err)
@@ -53,8 +54,6 @@ func Connect(conf *config.MongoDBConf) {
 	}
 	//	}
 	//}
-
-	Database = client.Database(conf.Table)
 
 	if !databaseExist {
 		fmt.Println("Start init database")
