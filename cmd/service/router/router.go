@@ -12,6 +12,7 @@ import (
 )
 
 func SetupRoute(r *gin.Engine) {
+	r.Use(gin.Recovery())
 	r.Use(middleware.CrossDomain())
 	r.Use(middleware.BuildResponse())
 
