@@ -62,6 +62,6 @@ func SetupRoute(r *gin.Engine) {
 		})
 	}
 
-	r.StaticFS("/admin", http.Dir("../../dist/view"))
+	r.StaticFS("/admin", http.Dir("./view"))
 	r.StaticFile("/favicon.ico", "./view/favicon.ico")
 }
