@@ -88,11 +88,8 @@ client runing
 
 ![image](http://img.holdno.com/github/holdno/gopher_cron/admin.png)
 
-### TODO   
-- 项目组概念  多个用户共享某些项目  
-- 继续完善admin后台管理页面   
-  - 修改密码  
-  - 管理员创建新用户
-  - 系统公告 
-  - 项目相关图标  
-  - 日志管理
+### 注意   
+client配置文件中的project配置需要用户先部署service  
+在service中创建项目后可以获得项目ID  
+需要将项目ID填写在client的配置中该client才会调度这个项目的任务  
+
