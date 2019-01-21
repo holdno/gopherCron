@@ -49,6 +49,13 @@ type TaskExecuteResult struct {
 	EndTime     time.Time // 结束时间
 }
 
+// TaskResultLog 任务执行结果日志
+type TaskResultLog struct {
+	Result       string `json:"result"`
+	CommandError string `json:"command_error"`
+	Error        string `json:"error"`
+}
+
 // ETCD_PREFIX topic prefix  default: /cron
 var ETCD_PREFIX = "/cron"
 

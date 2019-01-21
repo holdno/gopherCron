@@ -1,10 +1,8 @@
 package etcd
 
 import (
-	"fmt"
+	"encoding/json"
 	"time"
-
-	"ojbk.io/gopherCron/utils"
 
 	"github.com/mongodb/mongo-go-driver/bson/primitive"
 
@@ -166,12 +164,14 @@ func (ts *TaskScheduler) handleTaskResult(result *common.TaskExecuteResult) {
 	// 删除任务的正在执行状态
 	delete(ts.TaskExecutingTable, result.ExecuteInfo.Task.ScheduleKey())
 	var (
-		resultString string
-		projectID    primitive.ObjectID
-		projectInfo  *common.Project
-		err          error
-		getError     int
-		logInfo      *common.TaskLog
+		resultBytes    []byte
+		projectID      primitive.ObjectID
+		projectInfo    *common.Project
+		err            error
+		getError       int
+		logInfo        *common.TaskLog
+		taskResult     *common.TaskResultLog
+		jsonMarshalErr error
 	)
 
 	if projectID, err = primitive.ObjectIDFromHex(result.ExecuteInfo.Task.ProjectID); err != nil {
@@ -181,22 +181,36 @@ func (ts *TaskScheduler) handleTaskResult(result *common.TaskExecuteResult) {
 	projectInfo, err = db.GetProject(projectID)
 
 WITH_ERROR:
-	resultString = fmt.Sprintf(`{"result": "%s", "command_error": "%v", "error": "%v"}`,
-		string(result.Output), result.Err, err)
+
+	taskResult = &common.TaskResultLog{
+		Result: string(result.Output),
+	}
 
 	if result.Err != nil {
+		taskResult.CommandError = result.Err.Error()
 		getError = 1
 	}
 
+	if err != nil {
+		taskResult.Error = err.Error()
+		getError = 1
+	}
+	if resultBytes, jsonMarshalErr = json.Marshal(taskResult); jsonMarshalErr != nil {
+		resultBytes = []byte("result log json marshal error:" + jsonMarshalErr.Error())
+	}
+
 	logInfo = &common.TaskLog{
-		Project:   utils.TernaryOperation(projectInfo == nil, "", projectInfo.Title).(string),
 		Name:      result.ExecuteInfo.Task.Name,
-		Result:    resultString,
+		Result:    string(resultBytes),
 		StartTime: result.StartTime.Unix(),
 		EndTime:   result.EndTime.Unix(),
 		Command:   result.ExecuteInfo.Task.Command,
 		WithError: getError,
 		ClientIP:  common.LocalIP,
+	}
+
+	if projectInfo != nil {
+		logInfo.Project = projectInfo.Title
 	}
 
 	logInfo.ProjectID, _ = primitive.ObjectIDFromHex(result.ExecuteInfo.Task.ProjectID)
