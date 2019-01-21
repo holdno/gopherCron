@@ -54,7 +54,7 @@ a {
 div::-webkit-scrollbar
 {
     width: 6px;
-    height: 16px;
+    height: 6px;
     background-color: #000;
 }
  

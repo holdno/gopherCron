@@ -11,9 +11,9 @@ import (
 )
 
 type UpdateRequest struct {
+	ProjectID string `form:"project_id" binding:"required"`
 	Title     string `form:"title" binding:"required"`
 	Remark    string `form:"remark"`
-	ProjectID string `form:"id"`
 }
 
 // Update 更新项目信息
@@ -45,15 +45,14 @@ func Update(c *gin.Context) {
 		return
 	}
 
-	if project, err = db.CheckProjectExist(projectID, userID); err != nil {
-		if err != errors.ErrProjectNotExist {
-			request.APIError(c, err)
-			return
-		}
+	// 检测该项目是否属于请求人
+	if project, err = db.CheckUserProject(projectID, userID); err != nil {
+		request.APIError(c, err)
+		return
 	}
 
-	if project != nil {
-		request.APIError(c, errors.ErrProjectExist)
+	if project == nil {
+		request.APIError(c, errors.ErrProjectNotExist)
 		return
 	}
 

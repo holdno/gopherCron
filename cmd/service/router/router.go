@@ -41,6 +41,7 @@ func SetupRoute(r *gin.Engine) {
 			project.Use(middleware.TokenVerify())
 			project.POST("/create", project_func.Create)
 			project.GET("/list", project_func.GetUserProjects)
+			project.POST("/update", project_func.Update)
 			project.POST("/delete", project_func.DeleteOne)
 			project.GET("/users", user_func.GetUsersByProject)
 			project.POST("/remove_user", project_func.RemoveUser)
