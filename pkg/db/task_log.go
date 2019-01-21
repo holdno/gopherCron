@@ -125,7 +125,7 @@ func GetLogList(projectID, taskID primitive.ObjectID, page, pagesize int64) ([]*
 }
 
 // GetLogTotal 获取日志列表总数
-func GetLogTotal(project, name primitive.ObjectID) (int64, error) {
+func GetLogTotal(projectID, taskID primitive.ObjectID) (int64, error) {
 	var (
 		err    error
 		errObj errors.Error
@@ -135,7 +135,7 @@ func GetLogTotal(project, name primitive.ObjectID) (int64, error) {
 
 	ctx, _ = utils.GetContextWithTimeout()
 
-	if total, err = Database.Collection(TaskLogTable).Count(ctx, bson.M{"project": project, "name": name}); err != nil {
+	if total, err = Database.Collection(TaskLogTable).Count(ctx, bson.M{"project_id": projectID, "task_id": taskID}); err != nil {
 		errObj = errors.ErrInternalError
 		errObj.Log = "[TaskLog - GetLogTotal] Count error:" + err.Error()
 		return 0, errObj
