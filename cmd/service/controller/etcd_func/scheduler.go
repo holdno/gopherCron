@@ -1,11 +1,6 @@
 package etcd_func
 
 import (
-	"fmt"
-	"time"
-
-	"github.com/mongodb/mongo-go-driver/bson/primitive"
-
 	"github.com/gin-gonic/gin"
 	"ojbk.io/gopherCron/cmd/service/request"
 	"ojbk.io/gopherCron/common"
@@ -49,18 +44,8 @@ func ExecuteTask(c *gin.Context) {
 		return
 	}
 
-	// 实现一个方案  put一个 下一秒立即执行的任务 然后自动过期掉
-	if err = etcd.Manager.TemporarySchedulerTask(&common.TaskInfo{
-		ProjectID:  req.ProjectID,
-		TaskID:     utils.TernaryOperation(req.TaskID == "", primitive.NewObjectID().Hex(), req.TaskID).(string),
-		Name:       task.Name,
-		Cron:       fmt.Sprintf(common.TEMPORARY_CRON, time.Now().AddDate(0, 0, 1).Format("02")),
-		Command:    task.Command,
-		Remark:     task.Remark,
-		Timeout:    task.Timeout,
-		Status:     common.TASK_STATUS_START,
-		CreateTime: time.Now().Unix(),
-	}); err != nil {
+	// 调用etcd的put方法以出发watcher从而调度该任务
+	if err = etcd.Manager.TemporarySchedulerTask(task); err != nil {
 		request.APIError(c, err)
 		return
 	}

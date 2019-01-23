@@ -8,9 +8,6 @@ const (
 
 	TASK_STATUS_START = 1
 
-	// Scheduler
-	TEMPORARY_CRON = "0 0 10 %s * * *"
-
 	// Database
 	ADMIN_USER_ACCOUNT    = "admin"
 	ADMIN_USER_PASSWORD   = "123456"
