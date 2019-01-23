@@ -2,7 +2,6 @@ package db
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"ojbk.io/gopherCron/errors"
@@ -92,7 +91,6 @@ func GetUserWithAccount(account string) (*common.User, error) {
 		}
 		errObj = errors.ErrInternalError
 		errObj.Log = "[DB - GetUserWithAccount] get user with account error:" + err.Error()
-		fmt.Println(errObj.Log)
 		return nil, errObj
 	}
 
@@ -120,7 +118,6 @@ func GetUserInfo(uid primitive.ObjectID) (*common.User, error) {
 		}
 		errObj = errors.ErrInternalError
 		errObj.Log = "[DB - GetUserWithAccount] get user with account error:" + err.Error()
-		fmt.Println(errObj.Log)
 		return nil, errObj
 	}
 

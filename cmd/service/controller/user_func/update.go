@@ -1,8 +1,6 @@
 package user_func
 
 import (
-	"fmt"
-
 	"github.com/gin-gonic/gin"
 	"github.com/mongodb/mongo-go-driver/bson/primitive"
 	"ojbk.io/gopherCron/cmd/service/request"
@@ -25,8 +23,6 @@ func ChangePassword(c *gin.Context) {
 		request.APIError(c, errors.ErrUnauthorized)
 		return
 	}
-
-	fmt.Println(uid)
 
 	var (
 		req      ChangePasswordRequest

@@ -1,7 +1,6 @@
 package log_func
 
 import (
-	"fmt"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -125,12 +124,10 @@ func GetRecentLogCount(c *gin.Context) {
 			timer        = utils.GetDateFromNow(-i)
 		)
 
-		fmt.Println(timer.Format("2006-01-02"))
 		if successCount, err = db.GetLogCountByDate(projectIDs, timer.Unix(), common.SuccessLog); err != nil {
 			request.APIError(c, err)
 			return
 		}
-		fmt.Println(successCount, timer.Unix())
 
 		if errorCount, err = db.GetLogCountByDate(projectIDs, timer.Unix(), common.ErrorLog); err != nil {
 			request.APIError(c, err)

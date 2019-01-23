@@ -1,7 +1,6 @@
 package etcd
 
 import (
-	"fmt"
 	"testing"
 	"time"
 
@@ -98,7 +97,6 @@ func TestTaskManager_TaskWatcher(t *testing.T) {
 					taskEvent = common.BuildTaskEvent(common.TASK_EVENT_SAVE, task)
 					// 推送一个更新事件给 scheduler
 				case mvccpb.DELETE: // 任务删除
-					fmt.Println("delete", string(watchEvent.Kv.Key))
 					taskName = common.ExtractTaskID("testProject", string(watchEvent.Kv.Key))
 					// 构建一个delete event
 					task = &common.TaskInfo{TaskID: taskName, ProjectID: "testProject"}

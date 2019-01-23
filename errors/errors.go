@@ -83,6 +83,7 @@ const (
 	CodeCron
 	CodeUserExist
 	CodeDontRemoveProjectAdmin
+	CodeNoWorkingNode
 )
 
 var (
@@ -120,4 +121,6 @@ var (
 	ErrInsufficientPermissions = Error{Code: CodeInsufficientPermissions, Msg: "权限不足", MsgEn: "Insufficient permissions", Log: "无权限"}
 	// ErrDontRemoveProjectAdmin 不能将管理员从项目中移除
 	ErrDontRemoveProjectAdmin = Error{Code: CodeDontRemoveProjectAdmin, Msg: "无法将项目管理员移出项目", MsgEn: "Don't remove the administrator from the project", Log: "无法将项目管理员移出项目"}
+	// ErrNoWorkingNode 没有工作节点
+	ErrNoWorkingNode = Error{Code: CodeNoWorkingNode, Msg: "没有工作节点", MsgEn: "No working node", Log: "当前项目没有工作节点"}
 )

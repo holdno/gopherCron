@@ -43,12 +43,12 @@ func (e *TaskExecuter) ExecuteTask(info *common.TaskExecutingInfo) {
 			StartTime:   time.Now(), // 记录任务开始时间
 		}
 
-		// 避免分布式集群上锁偏斜 (每天机器的时钟可能不是特别的准确 导致某一台机器总能抢到锁)
+		// 避免分布式集群上锁偏斜 (每台机器的时钟可能不是特别的准确 导致某一台机器总能抢到锁)
 		time.Sleep(time.Duration(rand.Intn(1000)) * time.Millisecond)
 		if err = taskLock.TryLock(); err != nil {
-			// 上锁失败
-			result.Err = err
-			result.EndTime = time.Now()
+			// 上锁失败 证明任务已被其他客户端调度
+			//result.Err = err
+			//result.EndTime = time.Now()
 			return
 		} else {
 			result.StartTime = time.Now()

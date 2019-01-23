@@ -1,9 +1,15 @@
 package common
 
 const (
-	TASK_EVENT_SAVE   = 1
-	TASK_EVENT_DELETE = 2
-	TASK_EVENT_KILL   = 3
+	TASK_EVENT_SAVE      = 1
+	TASK_EVENT_DELETE    = 2
+	TASK_EVENT_KILL      = 3
+	TASK_EVENT_TEMPORARY = 4
+
+	TASK_STATUS_START = 1
+
+	// Scheduler
+	TEMPORARY_CRON = "0 0 10 %s * * *"
 
 	// Database
 	ADMIN_USER_ACCOUNT    = "admin"

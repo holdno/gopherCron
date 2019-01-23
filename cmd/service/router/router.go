@@ -34,6 +34,7 @@ func SetupRoute(r *gin.Engine) {
 			cron.POST("/delete", etcd_func.DeleteTask)
 			cron.GET("/list", etcd_func.GetTaskList)
 			cron.POST("/kill", etcd_func.KillTask)
+			cron.POST("/execute", etcd_func.ExecuteTask)
 			cron.GET("/worker_list", etcd_func.GetWorkerList)
 		}
 

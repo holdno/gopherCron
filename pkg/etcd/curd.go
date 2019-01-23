@@ -3,6 +3,8 @@ package etcd
 import (
 	"context"
 
+	"ojbk.io/gopherCron/utils"
+
 	"github.com/coreos/etcd/mvcc/mvccpb"
 
 	"ojbk.io/gopherCron/errors"
@@ -21,6 +23,7 @@ func (m *TaskManager) SaveTask(task *common.TaskInfo) (*common.TaskInfo, error) 
 		saveByte []byte
 		putResp  *clientv3.PutResponse
 		oldTask  *common.TaskInfo
+		ctx      context.Context
 		errObj   errors.Error
 		err      error
 	)
@@ -35,8 +38,9 @@ func (m *TaskManager) SaveTask(task *common.TaskInfo) (*common.TaskInfo, error) 
 		return nil, errObj
 	}
 
+	ctx, _ = utils.GetContextWithTimeout()
 	// save to etcd
-	if putResp, err = m.kv.Put(context.TODO(), saveKey, string(saveByte), clientv3.WithPrevKV()); err != nil {
+	if putResp, err = m.kv.Put(ctx, saveKey, string(saveByte), clientv3.WithPrevKV()); err != nil {
 		errObj = errors.ErrInternalError
 		errObj.Log = "[Etcd - SaveTask] etcd client kv put error:" + err.Error()
 		return nil, errObj
@@ -52,11 +56,53 @@ func (m *TaskManager) SaveTask(task *common.TaskInfo) (*common.TaskInfo, error) 
 	return oldTask, nil
 }
 
+// TemporarySchedulerTask 临时调度任务
+func (m *TaskManager) TemporarySchedulerTask(task *common.TaskInfo) error {
+	var (
+		schedulerKey   string
+		saveByte       []byte
+		leaseGrantResp *clientv3.LeaseGrantResponse
+		ctx            context.Context
+		errObj         errors.Error
+		err            error
+	)
+
+	// task to json
+	if saveByte, err = json.Marshal(task); err != nil {
+		errObj = errors.ErrInternalError
+		errObj.Log = "[Etcd - TemporarySchedulerTask] json.mashal task error:" + err.Error()
+		return errObj
+	}
+
+	// build etcd save key
+	schedulerKey = common.BuildSchedulerKey(task.ProjectID, task.TaskID)
+
+	ctx, _ = utils.GetContextWithTimeout()
+	// make lease to notify worker
+	// 创建一个租约 让其稍后过期并自动删除
+	if leaseGrantResp, err = m.lease.Grant(ctx, 1); err != nil {
+		errObj = errors.ErrInternalError
+		errObj.Log = "[Etcd - TemporarySchedulerTask] lease grant error:" + err.Error()
+		return errObj
+	}
+
+	ctx, _ = utils.GetContextWithTimeout()
+	// save to etcd
+	if _, err = m.kv.Put(ctx, schedulerKey, string(saveByte), clientv3.WithLease(leaseGrantResp.ID)); err != nil {
+		errObj = errors.ErrInternalError
+		errObj.Log = "[Etcd - TemporarySchedulerTask] etcd client kv put error:" + err.Error()
+		return errObj
+	}
+
+	return nil
+}
+
 func (m *TaskManager) DeleteTask(projectID, taskID string) (*common.TaskInfo, error) {
 	var (
 		deleteKey string
 		delResp   *clientv3.DeleteResponse
 		oldTask   *common.TaskInfo
+		ctx       context.Context
 		errObj    errors.Error
 		err       error
 	)
@@ -64,8 +110,9 @@ func (m *TaskManager) DeleteTask(projectID, taskID string) (*common.TaskInfo, er
 	// build etcd delete key
 	deleteKey = common.BuildKey(projectID, taskID)
 
+	ctx, _ = utils.GetContextWithTimeout()
 	// save to etcd
-	if delResp, err = m.kv.Delete(context.TODO(), deleteKey, clientv3.WithPrevKV(), clientv3.WithPrefix()); err != nil {
+	if delResp, err = m.kv.Delete(ctx, deleteKey, clientv3.WithPrevKV(), clientv3.WithPrefix()); err != nil {
 		errObj = errors.ErrInternalError
 		errObj.Log = "[Etcd - DeleteTask] etcd client kv delete error:" + err.Error()
 		return nil, errObj
@@ -79,19 +126,22 @@ func (m *TaskManager) DeleteTask(projectID, taskID string) (*common.TaskInfo, er
 }
 
 // GetTask 获取任务
-func (m *TaskManager) GetTask(project, name string) (*common.TaskInfo, error) {
+func (m *TaskManager) GetTask(projectID, nameID string) (*common.TaskInfo, error) {
 	var (
 		saveKey string
 		getResp *clientv3.GetResponse
 		task    *common.TaskInfo
+		ctx     context.Context
 		errObj  errors.Error
 		err     error
 	)
 
 	// build etcd save key
-	saveKey = common.BuildKey(project, name) // 保存的key同样也是获取的key
+	saveKey = common.BuildKey(projectID, nameID) // 保存的key同样也是获取的key
 
-	if getResp, err = m.kv.Get(context.TODO(), saveKey); err != nil {
+	ctx, _ = utils.GetContextWithTimeout()
+
+	if getResp, err = m.kv.Get(ctx, saveKey); err != nil {
 		errObj = errors.ErrInternalError
 		errObj.Log = "[Etcd - GetTask] etcd client kv get one error:" + err.Error()
 		return nil, errObj
@@ -123,6 +173,7 @@ func (m *TaskManager) GetTaskList(projectID string) ([]*common.TaskInfo, error) 
 		taskList []*common.TaskInfo
 		task     *common.TaskInfo
 		kvPair   *mvccpb.KeyValue
+		ctx      context.Context
 		errObj   errors.Error
 		err      error
 	)
@@ -130,7 +181,8 @@ func (m *TaskManager) GetTaskList(projectID string) ([]*common.TaskInfo, error) 
 	// build etcd pre key
 	preKey = common.BuildKey(projectID, "")
 
-	if getResp, err = m.kv.Get(context.TODO(), preKey,
+	ctx, _ = utils.GetContextWithTimeout()
+	if getResp, err = m.kv.Get(ctx, preKey,
 		clientv3.WithPrefix()); err != nil {
 		errObj = errors.ErrInternalError
 		errObj.Log = "[Etcd - GetTaskList] etcd client kv getlist error:" + err.Error()
@@ -160,12 +212,13 @@ func (m *TaskManager) GetProjectTaskCount(projectID string) (int64, error) {
 		getResp *clientv3.GetResponse
 		errObj  errors.Error
 		err     error
+		ctx     context.Context
 	)
 
 	// build etcd pre key
 	preKey = common.BuildKey(projectID, "")
-
-	if getResp, err = m.kv.Get(context.TODO(), preKey,
+	ctx, _ = utils.GetContextWithTimeout()
+	if getResp, err = m.kv.Get(ctx, preKey,
 		clientv3.WithPrefix(), clientv3.WithCountOnly()); err != nil {
 		errObj = errors.ErrInternalError
 		errObj.Log = "[Etcd - GetProjectTaskCount] etcd client kv error:" + err.Error()
@@ -182,19 +235,21 @@ func (m *TaskManager) KillTask(project, name string) error {
 		leaseGrantResp *clientv3.LeaseGrantResponse
 		errObj         errors.Error
 		err            error
+		ctx            context.Context
 	)
 
 	killKey = common.BuildKillKey(project, name)
-
+	ctx, _ = utils.GetContextWithTimeout()
 	// make lease to notify worker
 	// 创建一个租约 让其稍后过期并自动删除
-	if leaseGrantResp, err = m.lease.Grant(context.TODO(), 1); err != nil {
+	if leaseGrantResp, err = m.lease.Grant(ctx, 1); err != nil {
 		errObj = errors.ErrInternalError
 		errObj.Log = "[Etcd - KillTask] lease grant error:" + err.Error()
 		return errObj
 	}
 
-	if _, err = m.kv.Put(context.TODO(), killKey, "", clientv3.WithLease(leaseGrantResp.ID)); err != nil {
+	ctx, _ = utils.GetContextWithTimeout()
+	if _, err = m.kv.Put(ctx, killKey, "", clientv3.WithLease(leaseGrantResp.ID)); err != nil {
 		errObj = errors.ErrInternalError
 		errObj.Log = "[Etcd - KillTask] put kill task error:" + err.Error()
 		return errObj
@@ -211,11 +266,13 @@ func (m *TaskManager) GetWorkerList(projectID string) ([]string, error) {
 		errObj  errors.Error
 		getResp *clientv3.GetResponse
 		kv      *mvccpb.KeyValue
+		ctx     context.Context
 		res     []string
 	)
 
 	preKey = common.BuildRegisterKey(projectID, "")
-	if getResp, err = m.kv.Get(context.TODO(), preKey, clientv3.WithPrefix()); err != nil {
+	ctx, _ = utils.GetContextWithTimeout()
+	if getResp, err = m.kv.Get(ctx, preKey, clientv3.WithPrefix()); err != nil {
 		errObj = errors.ErrInternalError
 		errObj.Log = "[Etcd - GetWorkerList] get preKey error:" + err.Error()
 		return nil, errObj
@@ -231,15 +288,16 @@ func (m *TaskManager) GetWorkerList(projectID string) ([]string, error) {
 func (m *TaskManager) DeleteAll() error {
 	var (
 		deleteKey string
+		ctx       context.Context
 		errObj    errors.Error
 		err       error
 	)
 
 	// build etcd delete key
 	deleteKey = common.ETCD_PREFIX + "/"
-
+	ctx, _ = utils.GetContextWithTimeout()
 	// save to etcd
-	if _, err = m.kv.Delete(context.TODO(), deleteKey, clientv3.WithPrevKV(), clientv3.WithPrefix()); err != nil {
+	if _, err = m.kv.Delete(ctx, deleteKey, clientv3.WithPrevKV(), clientv3.WithPrefix()); err != nil {
 		errObj = errors.ErrInternalError
 		errObj.Log = "[Etcd - DeleteAll] etcd client kv delete error:" + err.Error()
 		return errObj

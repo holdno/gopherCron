@@ -222,6 +222,7 @@
 					<div class="detail__task" v-show="detail.task.task_id">
 						<el-tabs tab-position="right" @tab-click="tabClick">
 					    <el-tab-pane label="任务详情" v-loading="detail.loading">
+					    	<el-button class="detail__execute-task" @click="executeTask" type="primary" size="mini" round @click="cleanLog">立即执行</el-button>
 					      <el-form :model="detail.task">
 					      	<el-form-item label="任务ID">
 					          <el-input :value="detail.task.task_id" :readonly="true"></el-input>
@@ -268,7 +269,7 @@
 						        </template>
 						      </el-table-column>
 
-						      <el-table-column class-name="status-col" label="节点ip" width="120px">
+						      <el-table-column class-name="status-col" label="节点IP" width="120px">
 						        <template slot-scope="scope">
 						          <span>{{scope.row.client_ip}}</span>
 						        </template>
@@ -1371,6 +1372,33 @@ var vue = new Vue({
     		}).finally(res => {
     			this.log.cleanLoading = false
     		})
+    	})
+    },
+    executeTask () {
+    	this.$confirm('确定要立即执行当前任务吗？', '提示', {
+    		confirmButtonText: '确定',
+    		cancelButtonText: '取消',
+    		type: 'warning'
+    	}).then(res => {
+    		request.post('/crontab/execute', {
+    			project_id: this.detail.currentProject,
+    			task_id: this.detail.currentTask,
+    		}).then(res => {
+    			res = res.data 
+    			if (res.meta.code == 0) {
+    				this.$message({
+    					message: "调度成功,请稍后观察任务日志查看结果",
+    					type: 'success'
+    				})
+    			} else {
+    				this.$message({
+    					message: res.meta.msg,
+    					type: 'warning'
+    				})
+    			}
+    		})
+    	}).catch(res => {
+
     	})
     },
     getProjectUsers (projectId) {

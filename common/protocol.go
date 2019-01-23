@@ -57,11 +57,24 @@ type TaskResultLog struct {
 }
 
 // ETCD_PREFIX topic prefix  default: /cron
-var ETCD_PREFIX = "/cron"
+var (
+	ETCD_PREFIX = "/cron"
+	TEMPORARY   = "/t_scheduler"
+)
 
 // BuildKey etcd 保存任务的key
 func BuildKey(projectID, taskID string) string {
 	return ETCD_PREFIX + "/" + projectID + "/" + taskID
+}
+
+// BuildSchedulerKey 临时调度的key
+func BuildSchedulerKey(projectID, taskID string) string {
+	return ETCD_PREFIX + "/" + projectID + TEMPORARY + "/" + taskID
+}
+
+// IsTemporaryKey 检测是否为临时调度key
+func IsTemporaryKey(key string) bool {
+	return strings.Contains(key, TEMPORARY+"/")
 }
 
 // BuildLockKey etcd 分布式锁key
@@ -80,7 +93,7 @@ func BuildRegisterKey(projectID, ip string) string {
 }
 
 // BuildTableKey 构建scheduler 关系表中的key
-func (t *TaskInfo) ScheduleKey() string {
+func (t *TaskInfo) SchedulerKey() string {
 	return t.ProjectID + t.TaskID
 }
 
@@ -122,7 +135,7 @@ func BuildTaskEvent(eventType int, task *TaskInfo) *TaskEvent {
 }
 
 // 构造执行计划
-func BuildTaskSchedulePlan(task *TaskInfo) (*TaskSchedulePlan, error) {
+func BuildTaskSchedulerPlan(task *TaskInfo) (*TaskSchedulePlan, error) {
 	var (
 		expr *cronexpr.Expression
 		err  error

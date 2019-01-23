@@ -471,6 +471,13 @@ div::-webkit-scrollbar-thumb
     width: 80px;
 }
 
+.detail__execute-task {
+	position: absolute;
+    top: 5px;
+    right: 0;
+    z-index: 9999;
+    width: 80px;
+}
 
 /** login **/
 .login-container {

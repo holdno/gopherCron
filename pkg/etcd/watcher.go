@@ -57,16 +57,25 @@ func (m *TaskManager) TaskWatcher(projects []string) error {
 						if task, err = common.Unmarshal(watchEvent.Kv.Value); err != nil {
 							continue
 						}
-						// 构建一个event
-						taskEvent = common.BuildTaskEvent(common.TASK_EVENT_SAVE, task)
+						// 构建一个临时调度任务的事件
+						if common.IsTemporaryKey(string(watchEvent.Kv.Key)) {
+							taskEvent = common.BuildTaskEvent(common.TASK_EVENT_TEMPORARY, task)
+						} else {
+							// 构建一个event
+							taskEvent = common.BuildTaskEvent(common.TASK_EVENT_SAVE, task)
+						}
 						// 推送一个更新事件给 scheduler
 					case mvccpb.DELETE: // 任务删除
+						if common.IsTemporaryKey(string(watchEvent.Kv.Key)) {
+							continue
+						}
 						taskID = common.ExtractTaskID(v, string(watchEvent.Kv.Key))
 						// 构建一个delete event
 						task = &common.TaskInfo{TaskID: taskID, ProjectID: v}
 						taskEvent = common.BuildTaskEvent(common.TASK_EVENT_DELETE, task)
 						// 推送给 scheduler 把任务终止掉
 					}
+
 					Scheduler.PushEvent(taskEvent)
 				}
 			}
