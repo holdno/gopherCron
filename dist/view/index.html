@@ -48,7 +48,7 @@
 					<div class="menu__item iconfont" @click="changeMenu('project')" :class="position == 'project' && 'active'">
 						&#xeb88;
 					</div>
-					<div class="menu__item iconfont" v-if="user.permission.indexOf('admin') != -1" @click="changeMenu('admin')" :class="position == 'admin' && 'active'">
+					<div class="menu__item iconfont" @click="changeMenu('admin')" :class="position == 'admin' && 'active'">
 						&#xebb8;
 					</div>
 				</div>
