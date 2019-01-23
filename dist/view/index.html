@@ -834,17 +834,17 @@ var vue = new Vue({
     				message: '创建成功',
     				type: 'success'
     			})
-    		} else {
-    			this.$message({
-    				message: res.meta.msg,
-    				type: 'warning'
-    			})
     			this.admin.showCreateUser = false
     			this.admin.user = {
     				name: '',
     				account: '',
     				password: ''
     			}
+    		} else {
+    			this.$message({
+    				message: res.meta.msg,
+    				type: 'warning'
+    			})
     		}
     	}).finally(res => {
     		this.admin.createLoading = false
@@ -1339,7 +1339,7 @@ var vue = new Vue({
         type: 'warning'
       }).then(() => {
       	Cookies.remove('access-token')
-      	this.isLogin = false
+      	location.reload()
       }).catch(res => {
 
       })
