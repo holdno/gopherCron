@@ -77,10 +77,10 @@
 								公告
 							</div>
 						</div> -->
-						<div class="home__box-recent" id="project_recent_series">
+						<div class="home__box-distribution" id="project_task_series">
 
 						</div>
-						<div class="home__box-distribution" id="project_task_series">
+						<div class="home__box-recent" id="project_recent_series">
 
 						</div>
 					</div>
@@ -1044,16 +1044,16 @@ var vue = new Vue({
 		},
 		shutdown (e, task) {
 			if (task && e.toElement.innerText != '正在关闭') {
+				var content = e.toElement.innerText
 			 	this.$confirm('此操作将立即终止该任务并停止定时执行, 是否继续?', '提示', {
 	        confirmButtonText: '确定',
 	        cancelButtonText: '取消',
 	        type: 'warning'
 	      }).then(() => {
-					var content = e.toElement.innerText
 					e.toElement.innerHTML = '正在关闭'
 					request.post('/crontab/kill', {
-						project: detail.currentProject,
-						name: task.name
+						project_id: task.project_id,
+						task_id: task.task_id
 					}).then(res => {
 						res = res.data
 						if (res.meta.code == 0) {
@@ -1116,7 +1116,7 @@ var vue = new Vue({
 					this.project.showCreate = false
 					this.project.detail = {
 						title: '',
-						project: '',
+						project_id: '',
 						remark: ''
 					}
 				} else {
@@ -1217,6 +1217,9 @@ var vue = new Vue({
 		initTaskDetail () {
 			this.task.detail = JSON.parse(JSON.stringify(init_task))
 		},
+		initDetailTask () {
+			this.detail.task = JSON.parse(JSON.stringify(init_task))
+		},
 		getLogList () {
 			this.log.loading = true
 			request.get('/log/list', {
@@ -1308,12 +1311,12 @@ var vue = new Vue({
       	}
       	this.loading = true
 				request.post('/crontab/delete', {
-					project: this.detail.currentProject,
-					name: this.detail.currentTask
+					project_id: this.detail.currentProject,
+					task_id: this.detail.currentTask
 				}).then(res => {
 					res = res.data 
 					if (res.meta.code == 0) {
-						this.initTaskDetail()
+						this.initDetailTask()
 						this.detail.currentTask = ''
 						this.getTasks()
 						this.$message({

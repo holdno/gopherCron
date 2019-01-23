@@ -258,6 +258,7 @@ div::-webkit-scrollbar-thumb
 	margin: 10px 0;
 	border-bottom: 1px solid #222;
 	position: relative;
+	overflow: hidden;
 }
 
 .task__box-list-item:hover, .task__box-list-item.active {
@@ -295,6 +296,7 @@ div::-webkit-scrollbar-thumb
 	height: 24px;
 	line-height: 24px;
 	margin-left: 15px;
+	margin-bottom: 5px;
 	display: flex;
 	justify-content: space-between;
 }
