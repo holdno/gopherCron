@@ -36,3 +36,12 @@ type TaskLog struct {
 	WithError int    `json:"with_error" bson:"with_error"`
 	ClientIP  string `json:"client_ip" bson:"client_ip"`
 }
+
+// MonitorInfo 监控信息
+type MonitorInfo struct {
+	IP            string `json:"ip"`
+	CpuPercent    string `json:"cpu_percent"`
+	MemoryPercent string `json:"memory_percent"`
+	MemoryTotal   uint64 `json:"memory_total"`
+	MemoryFree    uint64 `json:"memory_free"`
+}

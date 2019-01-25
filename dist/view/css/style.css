@@ -580,6 +580,7 @@ div::-webkit-scrollbar-thumb
 	flex: 1;
 	padding: 20px;
 	height: 100%;
+	overflow-y: auto;
 }
 
 .home__box-top {
@@ -617,6 +618,28 @@ div::-webkit-scrollbar-thumb
 .home__box-distribution {
 	width: 400px;
 	height: 400px;
+}
+
+.home__box-monitor {
+	font-size: 14px;
+	color: #999;
+	width: 300px;
+	overflow: hidden;
+	padding: 20px;
+	box-sizing: border-box;
+	float: left;
+	margin-right: 30px;
+	flex: 0 0 25%;
+}
+
+.home__monitor-title {
+	line-height: 30px;
+	font-size: 18px;
+}
+
+.home__monitor-line {
+ 	line-height: 26px;
+ 	margin-bottom: 10px;
 }
 
 .admin__project-box {

@@ -92,6 +92,11 @@ func BuildRegisterKey(projectID, ip string) string {
 	return ETCD_PREFIX + "/register/" + projectID + "/" + ip
 }
 
+// BuildMonitorKey 构建监控信息存储的key
+func BuildMonitorKey(ip string) string {
+	return ETCD_PREFIX + "/monitor/" + ip
+}
+
 // BuildTableKey 构建scheduler 关系表中的key
 func (t *TaskInfo) SchedulerKey() string {
 	return t.ProjectID + t.TaskID

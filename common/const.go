@@ -8,6 +8,8 @@ const (
 
 	TASK_STATUS_START = 1
 
+	MonitorFrequency = 5
+
 	// Database
 	ADMIN_USER_ACCOUNT    = "admin"
 	ADMIN_USER_PASSWORD   = "123456"

@@ -26,6 +26,7 @@ func (m *TaskManager) Register(config *config.EtcdConf) {
 	if common.LocalIP == "" {
 		common.LocalIP = "未知IP节点"
 	}
+
 	for _, v := range config.Projects {
 		go func(projectID string) {
 			var (
@@ -33,12 +34,15 @@ func (m *TaskManager) Register(config *config.EtcdConf) {
 				leaseGrantResp     *clientv3.LeaseGrantResponse
 				leaseKeepAliveChan <-chan *clientv3.LeaseKeepAliveResponse
 				leaseKeepAliveResp *clientv3.LeaseKeepAliveResponse
+				ctx                context.Context
 			)
 			regKey = common.BuildRegisterKey(projectID, common.LocalIP)
 			fmt.Println("register key", regKey)
 			for {
+				ctx, _ = utils.GetContextWithTimeout()
+
 				// 创建租约
-				if leaseGrantResp, err = Manager.lease.Grant(context.TODO(), 5); err != nil {
+				if leaseGrantResp, err = Manager.lease.Grant(ctx, 10); err != nil {
 					goto RETRY
 				}
 
@@ -47,8 +51,7 @@ func (m *TaskManager) Register(config *config.EtcdConf) {
 					goto RETRY
 				}
 
-				cancelCtx, cancelFunc = context.WithCancel(context.TODO())
-
+				cancelCtx, cancelFunc = utils.GetContextWithTimeout()
 				// 注册到etcd
 				if _, err = Manager.kv.Put(cancelCtx, regKey, "", clientv3.WithLease(leaseGrantResp.ID)); err != nil {
 					goto RETRY
@@ -66,7 +69,7 @@ func (m *TaskManager) Register(config *config.EtcdConf) {
 
 			RETRY:
 				time.Sleep(time.Duration(1) * time.Second)
-				if cancelFunc == nil {
+				if cancelFunc != nil {
 					cancelFunc()
 				}
 			}

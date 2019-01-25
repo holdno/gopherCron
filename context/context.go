@@ -3,6 +3,8 @@ package context
 import (
 	"fmt"
 
+	"ojbk.io/gopherCron/pkg/monitor"
+
 	"ojbk.io/gopherCron/jwt"
 
 	"ojbk.io/gopherCron/utils"
@@ -59,4 +61,7 @@ func InitWorkerContext(conf *config.ServiceConfig) {
 	fmt.Println("TaskKiller")
 	go etcd.Manager.Register(conf.Etcd)
 	fmt.Println("Register")
+	if len(conf.Etcd.Projects) > 0 {
+		go monitor.Monitor()
+	}
 }

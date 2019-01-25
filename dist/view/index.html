@@ -84,6 +84,26 @@
 
 						</div>
 					</div>
+					<div class="home__box-middle" style="flex-wrap: wrap">
+						<div class="detail__no-data iconfont" v-show="monitor.length == 0">
+							&#xe635;
+						</div>
+						<div class="home__box-monitor" v-for="item in monitor.list">
+							<div class="home__monitor-title">
+								节点: {{item.ip}}
+							</div>
+							<div class="home__monitor-line">
+								CPU: <el-progress :text-inside="true" :stroke-width="18" :percentage="Number(item.cpu_percent)"></el-progress>
+							</div>
+							<div class="home__monitor-line">
+								MEM: <el-progress :text-inside="true" :stroke-width="18" :percentage="Number(item.memory_percent)"></el-progress>
+							</div>
+							<div class="home__monitor-line">
+								MEM-Total: {{item.memory_total}}k <br>  
+								MEM-Free:&nbsp; {{item.memory_free}}k
+							</div>
+						</div>
+					</div>
 				</div>
 			</div>
 
@@ -730,7 +750,11 @@ var vue = new Vue({
 			project: {},
 			addUserAccount: '',
 			updateProject: {}
-		} 
+		},
+		monitor: {
+			list: [],
+			interval: {}
+		}
 	},
 	created () {
 		var accessToken = Cookies.get('access-token')
@@ -762,6 +786,38 @@ var vue = new Vue({
 		}
 	},
 	methods: {
+		startMonitor () {
+			if (JSON.stringify(this.monitor.interval) != "{}") {
+				clearInterval(this.monitor.interval)
+			} else {
+				this.getMonitor()
+			}
+			this.monitor.interval = setInterval(() => {
+				this.getMonitor()
+			}, 5000)
+		},
+		getMonitor () {
+			var projectIds = []
+			for (var i = 0; i < this.project.list.length; i++) {
+				projectIds.push(this.project.list[i].project_id)
+			}
+			projectIds = projectIds.join(',')
+			if (projectIds != '') {
+				request.post('/crontab/monitor', {
+					project_ids: projectIds,
+				}).then(res => {
+					res = res.data
+					if (res.meta.code == 0) {
+						this.monitor.list = res.response.list
+					} else {
+						this.$message({
+							message: res.meta.msg,
+							type: 'warning'
+						})
+					}
+				})
+			}
+		},
 		showPwd () {
 			this.login.passwordType = 'string'
 		},
@@ -975,6 +1031,7 @@ var vue = new Vue({
 
 					if (this.project.list[0] && this.detail.currentProject == '') {
 						this.getTasks(this.project.list[0])
+						this.startMonitor()
 					}
 				} else {
 					this.$message({

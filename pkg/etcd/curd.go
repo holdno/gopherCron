@@ -305,3 +305,76 @@ func (m *TaskManager) DeleteAll() error {
 
 	return nil
 }
+
+// SaveMonitor 保存节点的监控信息
+func (m *TaskManager) SaveMonitor(ip string, monitorInfo []byte) error {
+	var (
+		monitorKey     string
+		leaseGrantResp *clientv3.LeaseGrantResponse
+		ctx            context.Context
+		errObj         errors.Error
+		err            error
+	)
+
+	// build worker monitor key
+	monitorKey = common.BuildMonitorKey(ip)
+
+	ctx, _ = utils.GetContextWithTimeout()
+	// make lease to notify worker
+	// 创建一个租约 让其稍后过期并自动删除
+	if leaseGrantResp, err = m.lease.Grant(ctx, common.MonitorFrequency+1); err != nil {
+		errObj = errors.ErrInternalError
+		errObj.Log = "[Etcd - SaveMonitor] lease grant error:" + err.Error()
+		return errObj
+	}
+
+	ctx, _ = utils.GetContextWithTimeout()
+	// save to etcd
+	if _, err = m.kv.Put(ctx, monitorKey, string(monitorInfo), clientv3.WithLease(leaseGrantResp.ID)); err != nil {
+		errObj = errors.ErrInternalError
+		errObj.Log = "[Etcd - SaveMonitor] etcd client kv put error:" + err.Error()
+		return errObj
+	}
+
+	return nil
+}
+
+// GetMonitor 获取节点的监控信息
+func (m *TaskManager) GetMonitor(ip string) (*common.MonitorInfo, error) {
+
+	var (
+		monitorKey string
+		getResp    *clientv3.GetResponse
+		monitor    *common.MonitorInfo
+		ctx        context.Context
+		errObj     errors.Error
+		err        error
+	)
+	// build worker monitor key
+	monitorKey = common.BuildMonitorKey(ip)
+
+	ctx, _ = utils.GetContextWithTimeout()
+
+	if getResp, err = m.kv.Get(ctx, monitorKey); err != nil {
+		errObj = errors.ErrInternalError
+		errObj.Log = "[Etcd - GetMonitor] etcd client kv get one error:" + err.Error()
+		return nil, errObj
+	}
+
+	if getResp.Count > 1 {
+		errObj = errors.ErrInternalError
+		errObj.Log = "[Etcd - GetMonitor] etcd client kv get one task but result > 1"
+		return nil, errObj
+	} else if getResp.Count == 0 {
+		return nil, errors.ErrDataNotFound
+	}
+
+	monitor = &common.MonitorInfo{}
+	if err = json.Unmarshal(getResp.Kvs[0].Value, monitor); err != nil {
+		errObj = errors.ErrInternalError
+		errObj.Log = "[Etcd - GetMonitor] monitor json.Unmarshal error:" + err.Error()
+		return nil, errObj
+	}
+
+	return monitor, nil
+}

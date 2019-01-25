@@ -1,6 +1,8 @@
 package etcd_func
 
 import (
+	"strings"
+
 	"github.com/gin-gonic/gin"
 	"github.com/mongodb/mongo-go-driver/bson/primitive"
 	"ojbk.io/gopherCron/cmd/service/request"
@@ -89,5 +91,64 @@ func GetWorkerList(c *gin.Context) {
 
 	request.APISuccess(c, &gin.H{
 		"list": utils.TernaryOperation(res != nil, res, []struct{}{}),
+	})
+}
+
+// 通过多个projectID来获取所有workerlist
+// GetWorkerListInfoRequest 获取节点的请求参数
+type GetWorkerListInfoRequest struct {
+	ProjectIDs string `form:"project_ids" binding:"required"`
+}
+
+// GetWorkerList 获取节点
+func GetWorkerListInfo(c *gin.Context) {
+	var (
+		err                error
+		req                GetWorkerListInfoRequest
+		workerList         []string
+		noRepeatWorkerList []string
+		projects           []string
+		monitorList        []*common.MonitorInfo
+	)
+
+	if err = utils.BindArgsWithGin(c, &req); err != nil {
+		request.APIError(c, errors.ErrInvalidArgument)
+		return
+	}
+
+	projects = strings.Split(req.ProjectIDs, ",")
+
+	if len(projects) == 0 {
+		request.APISuccess(c, &gin.H{
+			"list": []struct{}{},
+		})
+		return
+	}
+
+	for _, v := range projects {
+		if workerList, err = etcd.Manager.GetWorkerList(v); err != nil {
+			request.APIError(c, err)
+			return
+		}
+
+		for _, worker := range workerList {
+			if !utils.StrArrExist(noRepeatWorkerList, worker) {
+				noRepeatWorkerList = append(noRepeatWorkerList, worker)
+			}
+		}
+	}
+
+	// 遍历去重后的节点列表 获取对应的监控信息
+	for _, worker := range noRepeatWorkerList {
+		if m, err := etcd.Manager.GetMonitor(worker); err == nil {
+			monitorList = append(monitorList, m)
+		} else {
+			request.APIError(c, err)
+			return
+		}
+	}
+
+	request.APISuccess(c, &gin.H{
+		"list": utils.TernaryOperation(monitorList != nil, monitorList, []struct{}{}),
 	})
 }

@@ -1,4 +1,13 @@
-## gopherCron  
+<p align="center"><a href="/" target="_blank" rel="noopener noreferrer"><img width="200" src="http://img.holdno.com/github/holdno/gopher_cron/gopherCronLogo.png" alt="firetower logo"></a></p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/download-fast-brightgreen.svg" alt="Downloads"></a>
+  <img src="https://img.shields.io/badge/build-passing-brightgreen.svg" alt="Build Status">
+  <img src="https://img.shields.io/badge/package%20utilities-go modules-blue.svg" alt="Package Utilities">
+  <img src="https://img.shields.io/badge/golang-1.11.0-%23ff69b4.svg" alt="Version">
+  <img src="https://img.shields.io/badge/license-MIT-brightgreen.svg" alt="license">
+</p>
+<h1 align="center">GopherCron</h2>
 开箱即用的分布式可视化crontab  
 
 可以通过配置文件指定某个节点所受理的业务线，从而做到业务统一管理但隔离调度

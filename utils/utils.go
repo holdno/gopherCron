@@ -124,3 +124,13 @@ func GetLocalIP() (string, error) {
 	}
 	return "", errors.ErrLocalIPNotFound
 }
+
+// StrArrExist 检测string数组中是否包含某个字符串
+func StrArrExist(arr []string, check string) bool {
+	for _, v := range arr {
+		if v == check {
+			return true
+		}
+	}
+	return false
+}

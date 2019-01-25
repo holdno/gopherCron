@@ -1,6 +1,8 @@
 package project_func
 
 import (
+	"fmt"
+
 	"github.com/gin-gonic/gin"
 	"github.com/mongodb/mongo-go-driver/bson/primitive"
 	"ojbk.io/gopherCron/cmd/service/request"
@@ -30,6 +32,7 @@ func GetUserProjects(c *gin.Context) {
 	)
 
 	uid = c.GetString("jwt_user")
+	fmt.Println(uid)
 
 	objID, err = primitive.ObjectIDFromHex(uid)
 	if err != nil {
@@ -61,9 +64,4 @@ func GetUserProjects(c *gin.Context) {
 	request.APISuccess(c, &gin.H{
 		"list": utils.TernaryOperation(res != nil, res, []struct{}{}),
 	})
-}
-
-// 获取用户所有相关的项目 最近一条日志为错误状态的数据
-func GetUserErrorProjects(c *gin.Context) {
-
 }

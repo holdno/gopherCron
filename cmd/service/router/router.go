@@ -36,6 +36,7 @@ func SetupRoute(r *gin.Engine) {
 			cron.POST("/kill", etcd_func.KillTask)
 			cron.POST("/execute", etcd_func.ExecuteTask)
 			cron.GET("/worker_list", etcd_func.GetWorkerList)
+			cron.POST("/monitor", etcd_func.GetWorkerListInfo)
 		}
 
 		project := api.Group("/project")
