@@ -95,7 +95,9 @@ client runing
   
 > 管理员初始账号密码为 admin  123456  
 
-![image](http://img.holdno.com/github/holdno/gopher_cron/admin_new.png)
+![image](http://img.holdno.com/github/holdno/gopher_cron/admin_home.png)  
+
+![image](http://img.holdno.com/github/holdno/gopher_cron/admin_task.png)
 
 ### 注意   
 client配置文件中的project配置需要用户先部署service  
