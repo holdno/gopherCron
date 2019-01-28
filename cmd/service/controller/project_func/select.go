@@ -1,8 +1,6 @@
 package project_func
 
 import (
-	"fmt"
-
 	"github.com/gin-gonic/gin"
 	"github.com/mongodb/mongo-go-driver/bson/primitive"
 	"ojbk.io/gopherCron/cmd/service/request"
@@ -32,7 +30,6 @@ func GetUserProjects(c *gin.Context) {
 	)
 
 	uid = c.GetString("jwt_user")
-	fmt.Println(uid)
 
 	objID, err = primitive.ObjectIDFromHex(uid)
 	if err != nil {
