@@ -21,23 +21,23 @@ type GetUserProjectsResponse struct {
 
 func GetUserProjects(c *gin.Context) {
 	var (
-		err   error
-		list  []*common.Project
-		uid   string
-		objID primitive.ObjectID
-		res   []*GetUserProjectsResponse
-		count int64
+		err    error
+		list   []*common.Project
+		uid    string
+		uObjID primitive.ObjectID
+		res    []*GetUserProjectsResponse
+		count  int64
 	)
 
 	uid = c.GetString("jwt_user")
 
-	objID, err = primitive.ObjectIDFromHex(uid)
+	uObjID, err = primitive.ObjectIDFromHex(uid)
 	if err != nil {
 		request.APIError(c, errors.ErrInvalidArgument)
 		return
 	}
 
-	if list, err = db.GetUserProjects(objID); err != nil {
+	if list, err = db.GetUserProjects(uObjID); err != nil {
 		request.APIError(c, err)
 		return
 	}
