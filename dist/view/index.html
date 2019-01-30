@@ -859,10 +859,12 @@ var vue = new Vue({
 					this.user.name = res.response.name
 					this.user.permission = res.response.permission.split(',')
     		} else {
-    			this.$message({
-    				message: res.meta.msg,
-    				type: 'warning'
-    			})
+    			// this.$message({
+    			// 	message: res.meta.msg,
+    			// 	type: 'warning'
+    			// })
+    			Cookies.remove('access-token')
+      		location.reload()
     		}
     	}).finally(res => {
     		this.loading = false

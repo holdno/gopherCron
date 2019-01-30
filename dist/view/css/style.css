@@ -466,17 +466,16 @@ div::-webkit-scrollbar-thumb
 }
 
 .detail__clean-log {
-	position: absolute;
+	position: absolute !important;
     top: 10px;
     right: 10px;
     z-index: 9999;
-    width: 80px;
 }
 
 .detail__execute-task {
 	position: absolute;
     top: 5px;
-    right: 0;
+    right: 5px;
     z-index: 9999;
     width: 80px;
 }
@@ -638,6 +637,7 @@ div::-webkit-scrollbar-thumb
 }
 
 .home__monitor-line {
+	font-size: 12px;
  	line-height: 26px;
  	margin-bottom: 10px;
 }
