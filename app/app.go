@@ -1,7 +1,6 @@
 package app
 
 import (
-	"fmt"
 	"time"
 
 	"github.com/coreos/etcd/clientv3"
@@ -135,7 +134,7 @@ func NewClient(conf *config.ServiceConfig) Client {
 		panic(err)
 	}
 
-	fmt.Println(clusterID % 1024)
+	// why 1024. view https://github.com/holdno/snowFlakeByGo
 	utils.InitIDWorker(clusterID % 1024)
 
 	client.scheduler = initScheduler()
