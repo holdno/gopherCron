@@ -26,12 +26,26 @@ func DeleteOne(c *gin.Context) {
 		return
 	}
 
-	if _, err = srv.DeleteTask(req.ProjectID, ""); err != nil {
+	tx := srv.BeginTx()
+	defer func() {
+		if r := recover(); r != nil || err != nil {
+			tx.Rollback()
+		} else {
+			tx.Commit()
+		}
+	}()
+
+	if err = srv.DeleteProject(tx, req.ProjectID, uid); err != nil {
 		response.APIError(c, err)
 		return
 	}
 
-	if err = srv.DeleteProject(req.ProjectID, uid); err != nil {
+	if err = srv.CleanProjectLog(tx, req.ProjectID); err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	if _, err = srv.DeleteTask(req.ProjectID, ""); err != nil {
 		response.APIError(c, err)
 		return
 	}

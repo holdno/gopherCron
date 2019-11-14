@@ -2,6 +2,8 @@ package sqlStore
 
 import (
 	"fmt"
+
+	"github.com/jinzhu/gorm"
 	"ojbk.io/gopherCron/common"
 	"ojbk.io/gopherCron/pkg/selection"
 	"ojbk.io/gopherCron/pkg/store"
@@ -48,8 +50,11 @@ func (s *taskLogStore) GetList(selector selection.Selector) ([]*common.TaskLog, 
 	return res, nil
 }
 
-func (s *taskLogStore) Clean(selector selection.Selector) error {
-	db := parseSelector(s.GetMaster(), selector, true)
+func (s *taskLogStore) Clean(tx *gorm.DB, selector selection.Selector) error {
+	if tx == nil {
+		tx = s.GetMaster()
+	}
+	db := parseSelector(tx, selector, true)
 
 	if err := db.Table(s.GetTable()).Delete(nil).Error; err != nil {
 		return err

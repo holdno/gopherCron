@@ -46,9 +46,9 @@ func CleanLogs(c *gin.Context) {
 	}
 
 	if req.TaskID == "" {
-		err = srv.CleanProjectLog(req.ProjectID)
+		err = srv.CleanProjectLog(nil, req.ProjectID)
 	} else {
-		err = srv.CleanLog(req.ProjectID, req.TaskID)
+		err = srv.CleanLog(nil, req.ProjectID, req.TaskID)
 	}
 
 	if err != nil {

@@ -77,6 +77,7 @@ func (m *TaskManager) Inc(key string) (int64, error) {
 		err     error
 		errObj  errors.Error
 	)
+
 	if putResp, err = m.kv.Put(context.TODO(), key, ""); err != nil {
 		errObj = errors.ErrInternalError
 		errObj.Log = "[TaskManager - Inc] get inc num error:" + err.Error()

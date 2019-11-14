@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/coreos/etcd/clientv3"
@@ -28,7 +29,7 @@ type App interface {
 	CheckUserIsInProject(pid, uid int64) (bool, error)        // 确认该用户是否加入该项目
 	CheckUserProject(pid, uid int64) (*common.Project, error) // 确认项目是否属于该用户
 	UpdateProject(pid int64, title, remark string) error
-	DeleteProject(pid, uid int64) error
+	DeleteProject(tx *gorm.DB, pid, uid int64) error
 	SaveTask(task *common.TaskInfo) (*common.TaskInfo, error)
 	DeleteTask(pid int64, tid string) (*common.TaskInfo, error)
 	KillTask(pid int64, tid string) error
@@ -41,8 +42,8 @@ type App interface {
 	GetTaskLogList(pid int64, tid string, page, pagesize int) ([]*common.TaskLog, error)
 	GetLogTotalByDate(projects []int64, timestamp int64, errType int) (int, error)
 	GetTaskLogTotal(pid int64, tid string) (int, error)
-	CleanProjectLog(pid int64) error
-	CleanLog(pid int64, tid string) error
+	CleanProjectLog(tx *gorm.DB, pid int64) error
+	CleanLog(tx *gorm.DB, pid int64, tid string) error
 	DeleteAll() error
 	CreateProjectRelevance(tx *gorm.DB, pid, uid int64) error
 	DeleteProjectRelevance(tx *gorm.DB, pid, uid int64) error
@@ -129,12 +130,13 @@ func NewClient(conf *config.ServiceConfig) Client {
 		panic(err)
 	}
 
-	clusterID, err := client.etcd.Inc("gopherCron_cluster_key")
+	clusterID, err := client.etcd.Inc(common.CLUSTER_AUTO_INDEX)
 	if err != nil {
 		panic(err)
 	}
 
-	utils.InitIDWorker(clusterID)
+	fmt.Println(clusterID % 1024)
+	utils.InitIDWorker(clusterID % 1024)
 
 	client.scheduler = initScheduler()
 	if err := client.TaskWatcher(conf.Etcd.Projects); err != nil {
@@ -238,9 +240,9 @@ func (a *app) GetUserProjects(uid int64) ([]*common.Project, error) {
 	return projects, nil
 }
 
-func (a *app) CleanProjectLog(pid int64) error {
+func (a *app) CleanProjectLog(tx *gorm.DB, pid int64) error {
 	opt := selection.NewSelector(selection.NewRequirement("project_id", selection.Equals, pid))
-	if err := a.store.TaskLog().Clean(opt); err != nil {
+	if err := a.store.TaskLog().Clean(tx, opt); err != nil {
 		errObj := errors.ErrInternalError
 		errObj.Msg = "清除项目日志失败"
 		errObj.Log = err.Error()
@@ -250,10 +252,10 @@ func (a *app) CleanProjectLog(pid int64) error {
 	return nil
 }
 
-func (a *app) CleanLog(pid int64, tid string) error {
+func (a *app) CleanLog(tx *gorm.DB, pid int64, tid string) error {
 	opt := selection.NewSelector(selection.NewRequirement("project_id", selection.Equals, pid),
 		selection.NewRequirement("task_id", selection.Equals, tid))
-	if err := a.store.TaskLog().Clean(opt); err != nil {
+	if err := a.store.TaskLog().Clean(tx, opt); err != nil {
 		errObj := errors.ErrInternalError
 		errObj.Msg = "清除日志失败"
 		errObj.Log = err.Error()
@@ -343,10 +345,10 @@ func (a *app) CreateProject(tx *gorm.DB, p common.Project) (int64, error) {
 	return id, nil
 }
 
-func (a *app) DeleteProject(pid, uid int64) error {
+func (a *app) DeleteProject(tx *gorm.DB, pid, uid int64) error {
 	opt := selection.NewSelector(selection.NewRequirement("id", selection.Equals, pid),
 		selection.NewRequirement("uid", selection.Equals, uid))
-	if err := a.store.Project().DeleteProject(opt); err != nil {
+	if err := a.store.Project().DeleteProject(tx, opt); err != nil {
 		errObj := errors.ErrInternalError
 		errObj.Msg = "删除项目失败"
 		errObj.Log = err.Error()
@@ -477,7 +479,7 @@ func (a *app) ChangePassword(uid int64, password, salt string) error {
 
 func (a *app) AutoCleanLogs() {
 	opt := selection.NewSelector(selection.NewRequirement("start_time", selection.LessThan, time.Now().Unix()-86400*7))
-	if err := a.store.TaskLog().Clean(opt); err != nil {
+	if err := a.store.TaskLog().Clean(nil, opt); err != nil {
 		a.logger.WithFields(logrus.Fields{
 			"error": err.Error(),
 		}).Error("failed to clean logs by auto clean")

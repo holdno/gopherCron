@@ -67,8 +67,11 @@ func (s *projectStore) GetProject(selector selection.Selector) ([]*common.Projec
 	return res, nil
 }
 
-func (s *projectStore) DeleteProject(selector selection.Selector) error {
-	db := parseSelector(s.GetMaster(), selector, false)
+func (s *projectStore) DeleteProject(tx *gorm.DB, selector selection.Selector) error {
+	if tx == nil {
+		tx = s.GetMaster()
+	}
+	db := parseSelector(tx, selector, false)
 	if err := db.Table(s.GetTable()).Delete(nil).Error; err != nil {
 		return err
 	}

@@ -20,7 +20,7 @@ type ProjectStore interface {
 	CreateProject(tx *gorm.DB, obj common.Project) (int64, error)
 	UpdateProject(id int64, title, remark string) error
 	GetProject(selector selection.Selector) ([]*common.Project, error)
-	DeleteProject(selector selection.Selector) error
+	DeleteProject(tx *gorm.DB, selector selection.Selector) error
 	UpdateRelation(projectID int64, relation string) error
 }
 
@@ -44,5 +44,5 @@ type TaskLogStore interface {
 	Commons
 	CreateTaskLog(data common.TaskLog) error
 	GetList(selector selection.Selector) ([]*common.TaskLog, error)
-	Clean(selector selection.Selector) error
+	Clean(tx *gorm.DB, selector selection.Selector) error
 }

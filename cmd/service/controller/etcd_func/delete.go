@@ -45,6 +45,20 @@ func DeleteTask(c *gin.Context) {
 		return
 	}
 
+	tx := srv.BeginTx()
+	defer func() {
+		if r := recover(); r != nil || err != nil {
+			tx.Rollback()
+		} else {
+			tx.Commit()
+		}
+	}()
+
+	if err = srv.CleanLog(tx, req.ProjectID, req.TaskID); err != nil {
+		response.APIError(c, err)
+		return
+	}
+
 	if oldTask, err = srv.DeleteTask(req.ProjectID, req.TaskID); err != nil {
 		response.APIError(c, err)
 	}
