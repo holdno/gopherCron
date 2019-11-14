@@ -2,6 +2,7 @@ package sqlStore
 
 import (
 	"database/sql"
+
 	"github.com/jinzhu/gorm"
 	"ojbk.io/gopherCron/pkg/selection"
 )
@@ -22,6 +23,10 @@ func parseSelector(db *gorm.DB, selector selection.Selector, toSelecter bool) *g
 
 		if selector.Select != "" {
 			db = db.Select(selector.Select)
+		}
+
+		if selector.OrderBy != "" {
+			db = db.Order(selector.OrderBy)
 		}
 	}
 

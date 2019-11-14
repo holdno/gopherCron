@@ -12,7 +12,7 @@ service = ["0.0.0.0:2379"]
 dialtimeout = 5000
 # etcd kv存储的key前缀 用来与其他业务做区分
 prefix = "/gopher_cron"
-# 当前节点需要处理的项目名称
+# 当前节点需要处理的项目ID
 projects = ["project_a", "project_b"]
 # 命令调用脚本 /bin/sh  /bin/bash 根据自己系统情况决定
 shell = "/bin/bash"

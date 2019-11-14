@@ -3,6 +3,8 @@ package router
 import (
 	"net/http"
 
+	"ojbk.io/gopherCron/config"
+
 	"github.com/gin-gonic/gin"
 	"ojbk.io/gopherCron/cmd/service/controller/etcd_func"
 	"ojbk.io/gopherCron/cmd/service/controller/log_func"
@@ -11,7 +13,7 @@ import (
 	"ojbk.io/gopherCron/cmd/service/middleware"
 )
 
-func SetupRoute(r *gin.Engine) {
+func SetupRoute(r *gin.Engine, conf *config.DeployConf) {
 	r.Use(gin.Recovery())
 	r.Use(middleware.CrossDomain())
 	r.Use(middleware.BuildResponse())
@@ -64,6 +66,9 @@ func SetupRoute(r *gin.Engine) {
 		})
 	}
 
-	r.StaticFS("/admin", http.Dir("./view"))
-	r.StaticFile("/favicon.ico", "./view/favicon.ico")
+	if conf.ViewPath == "" {
+		conf.ViewPath = "./view"
+	}
+	r.StaticFS("/admin", http.Dir(conf.ViewPath))
+	r.StaticFile("/favicon.ico", conf.ViewPath+"/favicon.ico")
 }

@@ -34,7 +34,7 @@ type TaskLog struct {
 	Result    string `json:"result" gorm:"column:result;type:varchar(20);not null;comment:'任务执行结果'"`
 	StartTime int64  `json:"start_time" gorm:"column:start_time;type:bigint(20);not null;comment:'任务开始时间'"`
 	EndTime   int64  `json:"end_time" gorm:"column:end_time;type:bigint(20);not null;comment:'任务结束时间'"`
-	Command   string `json:"command" gorm:"column:command;type:bigint(20);not null;comment:'任务指令'"`
+	Command   string `json:"command" gorm:"column:command;type:varchar(255);not null;comment:'任务指令'"`
 	WithError int    `json:"with_error" gorm:"column:with_error;type:int(11);not null;comment:'是否发生错误'"`
 	ClientIP  string `json:"client_ip" gorm:"client_ip;index:client_ip;type:varchar(20);not null;comment:'节点ip'"`
 }

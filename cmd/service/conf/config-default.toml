@@ -7,6 +7,8 @@ environment = "release"
 host = ["0.0.0.0:6306"]
 # 数据库操作超时时间
 timeout = 5  # 秒为单位
+# 前端文件路径
+view_path = "./view"
 
 # etcd
 [etcd]

@@ -19,5 +19,5 @@ func newSetupOptions() *SetupOptions {
 func (o *SetupOptions) AddFlags(flagSet *pflag.FlagSet) {
 	// Add flags for generic options
 	flagSet.StringVarP(&o.LogLevel, "log-level", "l", "INFO", "log print level")
-	flagSet.StringVarP(&o.ConfigPath, "config path", "c", "./service/conf/config-dev.toml", "init api by given config")
+	flagSet.StringVarP(&o.ConfigPath, "config", "c", "./service/conf/config-dev.toml", "init api by given config")
 }

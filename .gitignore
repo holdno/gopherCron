@@ -2,7 +2,7 @@
 /cmd/service/config/
 config-dev.toml
 config-pre.toml
-build.sh
 gopherCron
 gopherCronClient
 .idea
+_build

@@ -18,6 +18,7 @@ type DeployConf struct {
 	Environment string   `toml:"environment"`
 	Timeout     int      `toml:"timeout"`
 	Host        []string `toml:"host"`
+	ViewPath    string   `toml:"view_path"`
 }
 
 // EtcdConf etcd配置

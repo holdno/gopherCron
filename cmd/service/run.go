@@ -45,7 +45,7 @@ func apiServer(srv app.App, conf *config.DeployConf) {
 	})
 
 	//URI路由设置
-	router.SetupRoute(engine)
+	router.SetupRoute(engine, conf)
 
 	go func() {
 		serverAddress := resolveServerAddress(conf.Host)
