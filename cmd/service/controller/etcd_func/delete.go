@@ -1,18 +1,17 @@
 package etcd_func
 
 import (
-	"github.com/gin-gonic/gin"
-	"github.com/mongodb/mongo-go-driver/bson/primitive"
-	"ojbk.io/gopherCron/cmd/service/request"
+	"ojbk.io/gopherCron/app"
+	"ojbk.io/gopherCron/cmd/service/response"
 	"ojbk.io/gopherCron/common"
 	"ojbk.io/gopherCron/errors"
-	"ojbk.io/gopherCron/pkg/db"
-	"ojbk.io/gopherCron/pkg/etcd"
 	"ojbk.io/gopherCron/utils"
+
+	"github.com/gin-gonic/gin"
 )
 
 type DeleteTaskRequest struct {
-	ProjectID string `form:"project_id" binding:"required"`
+	ProjectID int64  `form:"project_id" binding:"required"`
 	TaskID    string `form:"task_id" binding:"required"`
 }
 
@@ -20,43 +19,35 @@ type DeleteTaskRequest struct {
 // post project & task name
 func DeleteTask(c *gin.Context) {
 	var (
-		err       error
-		req       DeleteTaskRequest
-		oldTask   *common.TaskInfo
-		errObj    errors.Error
-		uid       string
-		userID    primitive.ObjectID
-		projectID primitive.ObjectID
+		err     error
+		req     DeleteTaskRequest
+		oldTask *common.TaskInfo
+		errObj  errors.Error
+		exist   bool
+		uid     = utils.GetUserID(c)
+		srv     = app.GetApp(c)
 	)
 
 	if err = utils.BindArgsWithGin(c, &req); err != nil {
 		errObj = errors.ErrInvalidArgument
-		errObj.Log = "[Controller - DeleteTask] DeleteTaskRequest binding error:" + err.Error()
-		request.APIError(c, errObj)
+		errObj.Log = err.Error()
+		response.APIError(c, errObj)
 		return
 	}
 
-	uid = c.GetString("jwt_user")
-
-	if userID, err = primitive.ObjectIDFromHex(uid); err != nil {
-		request.APIError(c, errors.ErrInvalidArgument)
+	if exist, err = srv.CheckUserIsInProject(req.ProjectID, uid); err != nil {
+		response.APIError(c, err)
 		return
 	}
 
-	if projectID, err = primitive.ObjectIDFromHex(req.ProjectID); err != nil {
-		request.APIError(c, errors.ErrInvalidArgument)
+	if !exist {
+		response.APIError(c, errors.ErrProjectNotExist)
 		return
 	}
 
-	if _, err = db.CheckProjectExist(projectID, userID); err != nil {
-		request.APIError(c, err)
-		return
+	if oldTask, err = srv.DeleteTask(req.ProjectID, req.TaskID); err != nil {
+		response.APIError(c, err)
 	}
 
-	if oldTask, err = etcd.Manager.DeleteTask(req.ProjectID, req.TaskID); err != nil {
-		request.APIError(c, err)
-		return
-	}
-
-	request.APISuccess(c, oldTask)
+	response.APISuccess(c, oldTask)
 }

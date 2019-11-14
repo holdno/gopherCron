@@ -19,9 +19,23 @@ type TaskManager struct {
 	watcher clientv3.Watcher
 }
 
-var Manager *TaskManager
+func (t *TaskManager) Client() *clientv3.Client {
+	return t.client
+}
 
-func Connect(config *config.EtcdConf) error {
+func (t *TaskManager) KV() clientv3.KV {
+	return t.kv
+}
+
+func (t *TaskManager) Lease() clientv3.Lease {
+	return t.lease
+}
+
+func (t *TaskManager) Watcher() clientv3.Watcher {
+	return t.watcher
+}
+
+func Connect(config *config.EtcdConf) (*TaskManager, error) {
 	var (
 		etcdConf clientv3.Config
 		client   *clientv3.Client
@@ -39,16 +53,16 @@ func Connect(config *config.EtcdConf) error {
 
 	if client, err = clientv3.New(etcdConf); err != nil {
 		errObj = errors.NewError(500, "[api_context - InitAPIContext] etcd.Connect get error:"+err.Error(), "")
-		return errObj
+		return nil, errObj
 	}
 
-	Manager = &TaskManager{
+	Manager := &TaskManager{
 		client:  client,
 		kv:      clientv3.NewKV(client),
 		lease:   clientv3.NewLease(client),
 		watcher: clientv3.NewWatcher(client),
 	}
-	return nil
+	return Manager, nil
 }
 
 // 创建任务执行锁

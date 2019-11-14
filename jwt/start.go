@@ -26,7 +26,7 @@ func InitJWT(conf *config.JWTConf) {
 }
 
 // Build 生成AccessToken
-func Build(user string) string {
+func Build(user int64) string {
 	Token := build("SH256") // 传入JWT加密算法
 	Token.Payload.Exp = time.Now().Add(time.Hour * time.Duration(expHours)).Unix()
 	Token.Payload.User = user
@@ -40,7 +40,7 @@ type VerifyRes struct {
 	Code  int
 	Error string
 	Biz   string
-	User  string
+	User  int64
 }
 
 // Verify 验证JWT的方法

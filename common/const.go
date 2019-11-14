@@ -8,6 +8,9 @@ const (
 
 	TASK_STATUS_START = 1
 
+	APP_KEY = "app_impl"
+	USER_ID = "user_id"
+
 	MonitorFrequency = 5
 
 	// Database

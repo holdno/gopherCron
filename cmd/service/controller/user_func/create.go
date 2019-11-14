@@ -4,15 +4,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mongodb/mongo-go-driver/bson/primitive"
-
+	"ojbk.io/gopherCron/app"
+	"ojbk.io/gopherCron/cmd/service/response"
+	"ojbk.io/gopherCron/common"
+	"ojbk.io/gopherCron/errors"
 	"ojbk.io/gopherCron/utils"
 
 	"github.com/gin-gonic/gin"
-	"ojbk.io/gopherCron/cmd/service/request"
-	"ojbk.io/gopherCron/common"
-	"ojbk.io/gopherCron/errors"
-	"ojbk.io/gopherCron/pkg/db"
 )
 
 // CreateUserRequest 创建用户请求参数
@@ -24,12 +22,6 @@ type CreateUserRequest struct {
 
 // CreateUser 创建用户
 func CreateUser(c *gin.Context) {
-	uid := c.GetString("jwt_user")
-	if uid == "" {
-		request.APIError(c, errors.ErrUnauthorized)
-		return
-	}
-
 	var (
 		req         CreateUserRequest
 		err         error
@@ -37,21 +29,22 @@ func CreateUser(c *gin.Context) {
 		permissions []string
 		isAdmin     bool
 		salt        string
-		objID       primitive.ObjectID
+		uid         = utils.GetUserID(c)
+		srv         = app.GetApp(c)
 	)
 
 	if err = utils.BindArgsWithGin(c, &req); err != nil {
-		request.APIError(c, errors.ErrInvalidArgument)
+		response.APIError(c, errors.ErrInvalidArgument)
 		return
 	}
 
-	if objID, err = primitive.ObjectIDFromHex(uid); err != nil {
-		request.APIError(c, errors.ErrInvalidArgument)
+	if info, err = srv.GetUserInfo(uid); err != nil {
+		response.APIError(c, err)
 		return
 	}
 
-	if info, err = db.GetUserInfo(objID); err != nil {
-		request.APIError(c, err)
+	if info == nil {
+		response.APIError(c, errors.ErrUserNotFound)
 		return
 	}
 
@@ -65,34 +58,33 @@ func CreateUser(c *gin.Context) {
 	}
 
 	if isAdmin {
-
 		// 检测用户账号是否已经存在
-		if info, err = db.GetUserWithAccount(req.Account); err != nil {
-			request.APIError(c, err)
+		if info, err = srv.GetUserByAccount(req.Account); err != nil {
+			response.APIError(c, err)
 			return
 		}
 
 		if info != nil {
-			request.APIError(c, errors.ErrUserExist)
+			response.APIError(c, errors.ErrUserExist)
 			return
 		}
 
 		salt = utils.RandomStr(6)
 
-		if err = db.CreateUser(&common.User{
+		if err = srv.CreateUser(common.User{
 			Account:    req.Account,
 			Password:   utils.BuildPassword(req.Password, salt),
 			Salt:       salt,
 			Name:       req.Name,
 			CreateTime: time.Now().Unix(),
 		}); err != nil {
-			request.APIError(c, err)
+			response.APIError(c, err)
 			return
 		}
 	} else {
-		request.APIError(c, errors.ErrInsufficientPermissions)
+		response.APIError(c, errors.ErrInsufficientPermissions)
 		return
 	}
 
-	request.APISuccess(c, nil)
+	response.APISuccess(c, nil)
 }

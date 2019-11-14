@@ -3,6 +3,7 @@ package common
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -13,7 +14,7 @@ import (
 type TaskInfo struct {
 	TaskID    string `json:"task_id"`
 	Name      string `json:"name"`
-	ProjectID string `json:"project_id"`
+	ProjectID int64  `json:"project_id"`
 
 	Command    string `json:"command"`
 	Cron       string `json:"cron"`
@@ -63,13 +64,13 @@ var (
 )
 
 // BuildKey etcd 保存任务的key
-func BuildKey(projectID, taskID string) string {
-	return ETCD_PREFIX + "/" + projectID + "/" + taskID
+func BuildKey(projectID int64, taskID string) string {
+	return fmt.Sprintf("%s/%d/%s", ETCD_PREFIX, projectID, taskID)
 }
 
 // BuildSchedulerKey 临时调度的key
-func BuildSchedulerKey(projectID, taskID string) string {
-	return ETCD_PREFIX + "/" + projectID + TEMPORARY + "/" + taskID
+func BuildSchedulerKey(projectID int64, taskID string) string {
+	return fmt.Sprintf("%s/%d%s/%s", ETCD_PREFIX, projectID, TEMPORARY, taskID)
 }
 
 // IsTemporaryKey 检测是否为临时调度key
@@ -78,18 +79,18 @@ func IsTemporaryKey(key string) bool {
 }
 
 // BuildLockKey etcd 分布式锁key
-func BuildLockKey(projectID, taskID string) string {
-	return ETCD_PREFIX + "/lock/" + projectID + "/" + taskID
+func BuildLockKey(projectID int64, taskID string) string {
+	return fmt.Sprintf("%s/lock/%d/%s", ETCD_PREFIX)
 }
 
 // BuildLockKey etcd 分布式锁key
-func BuildKillKey(projectID, taskID string) string {
-	return ETCD_PREFIX + "/kill/" + projectID + "/" + taskID
+func BuildKillKey(projectID int64, taskID string) string {
+	return fmt.Sprintf("%s/kill/%d/%s", ETCD_PREFIX, projectID, taskID)
 }
 
 // BuildRegisterKey etcd 服务发现key
-func BuildRegisterKey(projectID, ip string) string {
-	return ETCD_PREFIX + "/register/" + projectID + "/" + ip
+func BuildRegisterKey(projectID int64, ip string) string {
+	return fmt.Sprintf("%s/register/%d/%s", ETCD_PREFIX, projectID, ip)
 }
 
 // BuildMonitorKey 构建监控信息存储的key
@@ -99,7 +100,7 @@ func BuildMonitorKey(ip string) string {
 
 // BuildTableKey 构建scheduler 关系表中的key
 func (t *TaskInfo) SchedulerKey() string {
-	return t.ProjectID + t.TaskID
+	return fmt.Sprintf("%d%s", t.ProjectID, t.TaskID)
 }
 
 func Unmarshal(value []byte) (*TaskInfo, error) {
@@ -113,17 +114,17 @@ func Unmarshal(value []byte) (*TaskInfo, error) {
 }
 
 // 从etcd的key中提取任务名称
-func ExtractTaskID(project, key string) string {
+func ExtractTaskID(project int64, key string) string {
 	return strings.TrimPrefix(key, BuildKey(project, ""))
 }
 
 // 从etcd的key中提取节点ip
-func ExtractWorkerIP(project, key string) string {
+func ExtractWorkerIP(project int64, key string) string {
 	return strings.TrimPrefix(key, BuildRegisterKey(project, ""))
 }
 
 // 从etcd的key中提取任务名称
-func ExtractKillID(project, key string) string {
+func ExtractKillID(project int64, key string) string {
 	return strings.TrimPrefix(key, BuildKillKey(project, ""))
 }
 

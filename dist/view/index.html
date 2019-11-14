@@ -84,26 +84,26 @@
 
 						</div>
 					</div>
-					<div class="home__box-middle" style="flex-wrap: wrap">
-						<div class="detail__no-data iconfont" v-show="monitor.length == 0">
-							&#xe635;
-						</div>
-						<div class="home__box-monitor" v-for="item in monitor.list">
-							<div class="home__monitor-title">
-								节点: {{item.ip}}
-							</div>
-							<div class="home__monitor-line">
-								CPU: <el-progress :text-inside="true" :stroke-width="18" :percentage="Number(item.cpu_percent)"></el-progress>
-							</div>
-							<div class="home__monitor-line">
-								MEM: <el-progress :text-inside="true" :stroke-width="18" :percentage="Number(item.memory_percent)"></el-progress>
-							</div>
-							<div class="home__monitor-line">
-								MEM-Total: {{item.memory_total}}k <br>  
-								MEM-Free:&nbsp; {{item.memory_free}}k
-							</div>
-						</div>
-					</div>
+{{/*					<div class="home__box-middle" style="flex-wrap: wrap">*/}}
+{{/*						<div class="detail__no-data iconfont" v-show="monitor.length == 0">*/}}
+{{/*							&#xe635;*/}}
+{{/*						</div>*/}}
+{{/*						<div class="home__box-monitor" v-for="item in monitor.list">*/}}
+{{/*							<div class="home__monitor-title">*/}}
+{{/*								节点: {{item.ip}}*/}}
+{{/*							</div>*/}}
+{{/*							<div class="home__monitor-line">*/}}
+{{/*								CPU: <el-progress :text-inside="true" :stroke-width="18" :percentage="Number(item.cpu_percent)"></el-progress>*/}}
+{{/*							</div>*/}}
+{{/*							<div class="home__monitor-line">*/}}
+{{/*								MEM: <el-progress :text-inside="true" :stroke-width="18" :percentage="Number(item.memory_percent)"></el-progress>*/}}
+{{/*							</div>*/}}
+{{/*							<div class="home__monitor-line">*/}}
+{{/*								MEM-Total: {{item.memory_total}}k <br>  */}}
+{{/*								MEM-Free:&nbsp; {{item.memory_free}}k*/}}
+{{/*							</div>*/}}
+{{/*						</div>*/}}
+{{/*					</div>*/}}
 				</div>
 			</div>
 
@@ -758,6 +758,7 @@ var vue = new Vue({
 	},
 	created () {
 		var accessToken = Cookies.get('access-token')
+		console.log(accessToken)
 		if (accessToken) {
 			this.isLogin = true
 			request.defaults.headers.common['access-token'] = accessToken
@@ -787,14 +788,14 @@ var vue = new Vue({
 	},
 	methods: {
 		startMonitor () {
-			if (JSON.stringify(this.monitor.interval) != "{}") {
-				clearInterval(this.monitor.interval)
-			} else {
-				this.getMonitor()
-			}
-			this.monitor.interval = setInterval(() => {
-				this.getMonitor()
-			}, 5000)
+			// if (JSON.stringify(this.monitor.interval) != "{}") {
+			// 	clearInterval(this.monitor.interval)
+			// } else {
+			// 	this.getMonitor()
+			// }
+			// this.monitor.interval = setInterval(() => {
+			// 	this.getMonitor()
+			// }, 5000)
 		},
 		getMonitor () {
 			var projectIds = []
@@ -822,32 +823,32 @@ var vue = new Vue({
 			this.login.passwordType = 'string'
 		},
 		handleLogin() {
-      this.login.loading = true
-      request.post('/user/login', {
-      	account: this.login.form.account,
-      	password: this.login.form.password
-      }).then(res => {
-      	res = res.data
-      	if (res.meta.code == 0) {
-      		Cookies.set('access-token', res.response.token, {expires: 7})
-      		request.defaults.headers.common['access-token'] = res.response.token
-					this.user.accessToken = res.response.token
-					this.user.name = res.response.name
-					this.user.permission = res.response.permission.split(',')
-      		this.$message({
-      			message: '登录成功',
-      			type: 'success'
-      		})
-      		this.isLogin = true
-      	} else {
-      		this.$message({
-      			message: res.meta.msg,
-      			type: 'warning'
-      		})
-      	}
-      }).finally(res => {
-      	this.login.loading = false
-      })
+		  this.login.loading = true
+		  request.post('/user/login', {
+			account: this.login.form.account,
+			password: this.login.form.password
+		  }).then(res => {
+			res = res.data
+			if (res.meta.code == 0) {
+				Cookies.set('access-token', res.response.token, {expires: 7})
+				request.defaults.headers.common['access-token'] = res.response.token
+						this.user.accessToken = res.response.token
+						this.user.name = res.response.name
+						this.user.permission = res.response.permission.split(',')
+				this.$message({
+					message: '登录成功',
+					type: 'success'
+				})
+				this.isLogin = true
+			} else {
+				this.$message({
+					message: res.meta.msg,
+					type: 'warning'
+				})
+			}
+		  }).finally(res => {
+			this.login.loading = false
+		  })
     },
     getUserInfo () {
     	this.loading = true

@@ -1,13 +1,13 @@
 package user_func
 
 import (
-	"github.com/gin-gonic/gin"
-	"github.com/mongodb/mongo-go-driver/bson/primitive"
-	"ojbk.io/gopherCron/cmd/service/request"
+	"ojbk.io/gopherCron/app"
+	"ojbk.io/gopherCron/cmd/service/response"
 	"ojbk.io/gopherCron/common"
 	"ojbk.io/gopherCron/errors"
-	"ojbk.io/gopherCron/pkg/db"
 	"ojbk.io/gopherCron/utils"
+
+	"github.com/gin-gonic/gin"
 )
 
 func GetUserInfo(c *gin.Context) {
@@ -15,29 +15,22 @@ func GetUserInfo(c *gin.Context) {
 		err    error
 		errObj errors.Error
 		user   *common.User
-		uid    string
-		objID  primitive.ObjectID
+		uid    = utils.GetUserID(c)
+		srv    = app.GetApp(c)
 	)
 
-	uid = c.GetString("jwt_user")
-
-	if objID, err = primitive.ObjectIDFromHex(uid); err != nil {
-		request.APIError(c, errors.ErrInvalidArgument)
-		return
-	}
-
-	if user, err = db.GetUserInfo(objID); err != nil {
-		request.APIError(c, err)
+	if user, err = srv.GetUserInfo(uid); err != nil {
+		response.APIError(c, err)
 		return
 	}
 
 	if user == nil {
-		errObj = errors.ErrDataNotFound
-		request.APIError(c, errObj)
+		errObj = errors.ErrUserNotFound
+		response.APIError(c, errObj)
 		return
 	}
 
-	request.APISuccess(c, &gin.H{
+	response.APISuccess(c, &gin.H{
 		"name":       user.Name,
 		"permission": user.Permission,
 		"id":         user.ID,
@@ -45,40 +38,45 @@ func GetUserInfo(c *gin.Context) {
 }
 
 type GetUsersByProjectRequest struct {
-	ProjectID string `form:"project_id"`
+	ProjectID int64 `form:"project_id" json:"project_id"`
 }
 
 // GetUsersByProject 获取项目下的用户列表
-func GetUsersByProject(c *gin.Context) {
+func GetUsersUnderTheProject(c *gin.Context) {
 	var (
-		err       error
-		req       GetUsersByProjectRequest
-		projectID primitive.ObjectID
-		project   *common.Project
-		res       []*common.User
+		err error
+		req GetUsersByProjectRequest
+		pr  []*common.ProjectRelevance
+		res []*common.User
+		srv = app.GetApp(c)
 	)
 
 	if err = utils.BindArgsWithGin(c, &req); err != nil {
-		request.APIError(c, errors.ErrInvalidArgument)
+		response.APIError(c, errors.ErrInvalidArgument)
 		return
 	}
 
-	if projectID, err = primitive.ObjectIDFromHex(req.ProjectID); err != nil {
-		request.APIError(c, errors.ErrInvalidArgument)
+	if pr, err = srv.GetProjectRelevanceUsers(req.ProjectID); err != nil {
+		response.APIError(c, err)
 		return
 	}
 
-	if project, err = db.GetProject(projectID); err != nil {
-		request.APIError(c, err)
+	if len(pr) == 0 {
+		response.APIError(c, errors.ErrProjectNotExist)
 		return
 	}
 
-	if res, err = db.GetUsers(project.Relation); err != nil {
-		request.APIError(c, err)
+	var userIDs []int64
+	for _, v := range pr {
+		userIDs = append(userIDs, v.UID)
+	}
+
+	if res, err = srv.GetUsersByIDs(userIDs); err != nil {
+		response.APIError(c, err)
 		return
 	}
 
-	request.APISuccess(c, &gin.H{
+	response.APISuccess(c, &gin.H{
 		"list": utils.TernaryOperation(res != nil, res, []struct{}{}),
 	})
 }

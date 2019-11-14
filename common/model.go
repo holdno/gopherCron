@@ -1,40 +1,42 @@
 package common
 
-import (
-	"github.com/mongodb/mongo-go-driver/bson/primitive"
-)
-
 type User struct {
-	ID         primitive.ObjectID `json:"id" bson:"_id"`
-	Name       string             `json:"name" bson:"name"`
-	Permission string             `json:"permission" bson:"permission"`
-	Account    string             `json:"account" bson:"account"`
-	Password   string             `json:"-" bson:"password"`
-	Salt       string             `json:"-" bson:"salt"`
-	CreateTime int64              `json:"create_time" bson:"create_time"`
+	ID         int64  `json:"id" gorm:"column:id;pirmary_key;auto_increment"`
+	Name       string `json:"name" gorm:"column:name;index:name;type:varchar(100);not null;comment:'用户名称'"`
+	Permission string `json:"permission" gorm:"column:permission;type:varchar(100);not null;comment:'用户权限'"`
+	Account    string `json:"account" gorm:"column:account;index:account;type:varchar(100);not null;comment:'用户账号'"`
+	Password   string `json:"-" gorm:"password;type:varchar(255);not null;comment:'用户密码'"`
+	Salt       string `json:"-" gorm:"salt;type:varchar(6);not null;comment:'密码盐'"`
+	CreateTime int64  `json:"create_time" gorm:"column:create_time;type:bigint(20);not null;comment:'创建时间'"`
 }
 
 type Project struct {
-	ProjectID primitive.ObjectID   `json:"project_id" bson:"_id"`
-	UID       primitive.ObjectID   `json:"uid" bson:"uid"`
-	Title     string               `json:"title" bson:"title"`
-	Remark    string               `json:"remark" bson:"remark"`
-	Relation  []primitive.ObjectID `json:"-" bson:"relation"`
+	ID     int64  `json:"id" gorm:"column:id;pirmary_key;auto_increment"`
+	UID    int64  `json:"uid" gorm:"column:uid;index:uid;type:bigint(20);not null;comment:'关联用户id'"`
+	Title  string `json:"title" gorm:"column:title;index:title;type:varchar(100);not null;comment:'项目名称'"`
+	Remark string `json:"remark" gorm:"column:remark;type:varchar(255);not null;comment:'项目备注'"`
+}
+
+type ProjectRelevance struct {
+	ID         int64 `json:"id" gorm:"column:id;pirmary_key;auto_increment"`
+	UID        int64 `json:"uid" gorm:"column:uid;index:uid;type:bigint(20);not null;comment:'关联用户id'"`
+	ProjectID  int64 `json:"project_id" gorm:"column:project_id;index:project_id;type:bigint(20);not null;comment:'关联项目id'"`
+	CreateTime int64 `json:"create_time" gorm:"column:create_time;type:bigint(20);not null;comment:'创建时间'"`
 }
 
 type TaskLog struct {
-	ID        primitive.ObjectID `json:"id" bson:"_id"`
-	ProjectID primitive.ObjectID `json:"project_id" bson:"project_id"`
-	TaskID    primitive.ObjectID `json:"task_id" bson:"task_id"`
-	Project   string             `json:"project" bson:"project"`
+	ID        int64  `json:"id" gorm:"column:id;pirmary_key;auto_increment"`
+	ProjectID int64  `json:"project_id" gorm:"column:project_id;index:project_id;type:bigint(20);not null;comment:'关联项目id'"`
+	TaskID    string `json:"task_id" gorm:"column:task_id;index:task_id;type:bigint(20);not null;comment:'关联任务id'"`
+	Project   string `json:"project" gorm:"column:project;type:varchar(100);not null;comment:'项目名称'"`
 
-	Name      string `json:"name" bson:"name"`
-	Result    string `json:"result" bson:"result"`
-	StartTime int64  `json:"start_time" bson:"start_time"`
-	EndTime   int64  `json:"end_time" bson:"end_time"`
-	Command   string `json:"command" bson:"command"`
-	WithError int    `json:"with_error" bson:"with_error"`
-	ClientIP  string `json:"client_ip" bson:"client_ip"`
+	Name      string `json:"name" gorm:"column:name;index:name;type:varchar(100);not null;comment:'任务名称'"`
+	Result    string `json:"result" gorm:"column:result;type:varchar(20);not null;comment:'任务执行结果'"`
+	StartTime int64  `json:"start_time" gorm:"column:start_time;type:bigint(20);not null;comment:'任务开始时间'"`
+	EndTime   int64  `json:"end_time" gorm:"column:end_time;type:bigint(20);not null;comment:'任务结束时间'"`
+	Command   string `json:"command" gorm:"column:command;type:bigint(20);not null;comment:'任务指令'"`
+	WithError int    `json:"with_error" gorm:"column:with_error;type:int(11);not null;comment:'是否发生错误'"`
+	ClientIP  string `json:"client_ip" gorm:"client_ip;index:client_ip;type:varchar(20);not null;comment:'节点ip'"`
 }
 
 // MonitorInfo 监控信息

@@ -46,7 +46,7 @@ func SetupRoute(r *gin.Engine) {
 			project.GET("/list", project_func.GetUserProjects)
 			project.POST("/update", project_func.Update)
 			project.POST("/delete", project_func.DeleteOne)
-			project.GET("/users", user_func.GetUsersByProject)
+			project.GET("/users", user_func.GetUsersUnderTheProject)
 			project.POST("/remove_user", project_func.RemoveUser)
 			project.POST("/add_user", project_func.AddUser)
 		}

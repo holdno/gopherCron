@@ -1,17 +1,18 @@
 package etcd_func
 
 import (
-	"github.com/gin-gonic/gin"
-	"ojbk.io/gopherCron/cmd/service/request"
+	"ojbk.io/gopherCron/app"
+	"ojbk.io/gopherCron/cmd/service/response"
 	"ojbk.io/gopherCron/common"
 	"ojbk.io/gopherCron/errors"
-	"ojbk.io/gopherCron/pkg/etcd"
 	"ojbk.io/gopherCron/utils"
+
+	"github.com/gin-gonic/gin"
 )
 
 // ExecuteTask 手动调用任务的请求参数
 type ExecuteTaskRequest struct {
-	ProjectID string `form:"project_id" binding:"required"`
+	ProjectID int64  `form:"project_id" binding:"required"`
 	TaskID    string `form:"task_id" binding:"required"`
 }
 
@@ -22,33 +23,35 @@ func ExecuteTask(c *gin.Context) {
 		err  error
 		task *common.TaskInfo
 		res  []string
+
+		srv = app.GetApp(c)
 	)
 
 	if err = utils.BindArgsWithGin(c, &req); err != nil {
-		request.APIError(c, errors.ErrInvalidArgument)
+		response.APIError(c, errors.ErrInvalidArgument)
 		return
 	}
 
-	if res, err = etcd.Manager.GetWorkerList(req.ProjectID); err != nil {
-		request.APIError(c, err)
+	if res, err = srv.GetWorkerList(req.ProjectID); err != nil {
+		response.APIError(c, err)
 		return
 	}
 
 	if len(res) == 0 {
-		request.APIError(c, errors.ErrNoWorkingNode)
+		response.APIError(c, errors.ErrNoWorkingNode)
 		return
 	}
 
-	if task, err = etcd.Manager.GetTask(req.ProjectID, req.TaskID); err != nil {
-		request.APIError(c, err)
+	if task, err = srv.GetTask(req.ProjectID, req.TaskID); err != nil {
+		response.APIError(c, err)
 		return
 	}
 
 	// 调用etcd的put方法以出发watcher从而调度该任务
-	if err = etcd.Manager.TemporarySchedulerTask(task); err != nil {
-		request.APIError(c, err)
+	if err = srv.TemporarySchedulerTask(task); err != nil {
+		response.APIError(c, err)
 		return
 	}
 
-	request.APISuccess(c, nil)
+	response.APISuccess(c, nil)
 }

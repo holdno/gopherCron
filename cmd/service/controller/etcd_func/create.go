@@ -1,26 +1,20 @@
 package etcd_func
 
 import (
-	"strings"
 	"time"
 
-	"github.com/gorhill/cronexpr"
-
-	"github.com/mongodb/mongo-go-driver/bson/primitive"
-
-	"ojbk.io/gopherCron/pkg/db"
-
-	"ojbk.io/gopherCron/pkg/etcd"
-
-	"github.com/gin-gonic/gin"
-	"ojbk.io/gopherCron/cmd/service/request"
+	"ojbk.io/gopherCron/app"
+	"ojbk.io/gopherCron/cmd/service/response"
 	"ojbk.io/gopherCron/common"
 	"ojbk.io/gopherCron/errors"
 	"ojbk.io/gopherCron/utils"
+
+	"github.com/gin-gonic/gin"
+	"github.com/gorhill/cronexpr"
 )
 
 type TaskSaveRequest struct {
-	ProjectID string `form:"project_id" binding:"required"`
+	ProjectID int64  `form:"project_id" binding:"required"`
 	TaskID    string `form:"task_id"`
 	Name      string `form:"name" binding:"required"`
 	Command   string `form:"command" binding:"required"`
@@ -37,53 +31,36 @@ func SaveTask(c *gin.Context) {
 		req         TaskSaveRequest
 		oldTaskInfo *common.TaskInfo
 		err         error
-		uid         string
-		project     *common.Project
+		exist       bool
 
-		userID    primitive.ObjectID
-		projectID primitive.ObjectID
+		uid = utils.GetUserID(c)
+		srv = app.GetApp(c)
 	)
 
 	if err = utils.BindArgsWithGin(c, &req); err != nil {
-		request.APIError(c, errors.ErrInvalidArgument)
+		response.APIError(c, errors.ErrInvalidArgument)
 		return
 	}
 
 	// 验证 cron表达式
 	if _, err = cronexpr.Parse(req.Cron); err != nil {
-		request.APIError(c, errors.ErrCron)
+		response.APIError(c, errors.ErrCron)
 		return
 	}
 
-	// 项目名称和任务名称会作为etcd的key进行保存 所以要去除包含空格的情况
-	req.ProjectID = strings.Replace(req.ProjectID, " ", "", -1)
-	req.TaskID = strings.Replace(req.TaskID, " ", "", -1)
-
-	uid = c.GetString("jwt_user")
-
-	if userID, err = primitive.ObjectIDFromHex(uid); err != nil {
-		request.APIError(c, errors.ErrInvalidArgument)
+	if exist, err = srv.CheckUserIsInProject(req.ProjectID, uid); err != nil {
+		response.APIError(c, err)
 		return
 	}
 
-	if projectID, err = primitive.ObjectIDFromHex(req.ProjectID); err != nil {
-		request.APIError(c, errors.ErrInvalidArgument)
+	if !exist {
+		response.APIError(c, errors.ErrProjectNotExist)
 		return
 	}
 
-	if project, err = db.CheckProjectExist(projectID, userID); err != nil {
-		request.APIError(c, err)
-		return
-	}
-
-	if project == nil {
-		request.APIError(c, errors.ErrProjectNotExist)
-		return
-	}
-
-	if oldTaskInfo, err = etcd.Manager.SaveTask(&common.TaskInfo{
+	if oldTaskInfo, err = srv.SaveTask(&common.TaskInfo{
 		ProjectID:  req.ProjectID,
-		TaskID:     utils.TernaryOperation(req.TaskID == "", primitive.NewObjectID().Hex(), req.TaskID).(string),
+		TaskID:     utils.TernaryOperation(req.TaskID == "", utils.GetStrID(), req.TaskID).(string),
 		Name:       req.Name,
 		Cron:       req.Cron,
 		Command:    req.Command,
@@ -92,9 +69,9 @@ func SaveTask(c *gin.Context) {
 		Status:     req.Status,
 		CreateTime: time.Now().Unix(),
 	}); err != nil {
-		request.APIError(c, err)
+		response.APIError(c, err)
 		return
 	}
 
-	request.APISuccess(c, oldTaskInfo)
+	response.APISuccess(c, oldTaskInfo)
 }

@@ -1,17 +1,17 @@
 package project_func
 
 import (
-	"github.com/gin-gonic/gin"
-	"github.com/mongodb/mongo-go-driver/bson/primitive"
-	"ojbk.io/gopherCron/cmd/service/request"
+	"ojbk.io/gopherCron/app"
+	"ojbk.io/gopherCron/cmd/service/response"
 	"ojbk.io/gopherCron/common"
 	"ojbk.io/gopherCron/errors"
-	"ojbk.io/gopherCron/pkg/db"
 	"ojbk.io/gopherCron/utils"
+
+	"github.com/gin-gonic/gin"
 )
 
 type UpdateRequest struct {
-	ProjectID string `form:"project_id" binding:"required"`
+	ProjectID int64  `form:"project_id" binding:"required"`
 	Title     string `form:"title" binding:"required"`
 	Remark    string `form:"remark"`
 }
@@ -20,172 +20,135 @@ type UpdateRequest struct {
 // 只有项目创建者才可以更新
 func Update(c *gin.Context) {
 	var (
-		req       UpdateRequest
-		err       error
-		uid       string
-		project   *common.Project
-		userID    primitive.ObjectID
-		projectID primitive.ObjectID
+		req     UpdateRequest
+		err     error
+		project *common.Project
+		uid     = utils.GetUserID(c)
+		srv     = app.GetApp(c)
 	)
 
-	uid = c.GetString("jwt_user")
-
 	if err = utils.BindArgsWithGin(c, &req); err != nil {
-		request.APIError(c, errors.ErrInvalidArgument)
-		return
-	}
-
-	if userID, err = primitive.ObjectIDFromHex(uid); err != nil {
-		request.APIError(c, errors.ErrInvalidArgument)
-		return
-	}
-
-	if projectID, err = primitive.ObjectIDFromHex(req.ProjectID); err != nil {
-		request.APIError(c, errors.ErrInvalidArgument)
+		response.APIError(c, errors.ErrInvalidArgument)
 		return
 	}
 
 	// 检测该项目是否属于请求人
-	if project, err = db.CheckUserProject(projectID, userID); err != nil {
-		request.APIError(c, err)
+	if project, err = srv.CheckUserProject(req.ProjectID, uid); err != nil {
+		response.APIError(c, err)
 		return
 	}
 
 	if project == nil {
-		request.APIError(c, errors.ErrProjectNotExist)
+		response.APIError(c, errors.ErrProjectNotExist)
 		return
 	}
 
-	if err = db.UpdateProject(&common.Project{
-		Title:     req.Title,
-		Remark:    req.Remark,
-		ProjectID: projectID,
-	}); err != nil {
-		request.APIError(c, err)
+	if err = srv.UpdateProject(req.ProjectID, req.Title, req.Remark); err != nil {
+		response.APIError(c, err)
 		return
 	}
 
-	request.APISuccess(c, nil)
+	response.APISuccess(c, nil)
 }
 
 type RemoveUserRequest struct {
-	UserID    string `form:"user_id" binding:"required"`
-	ProjectID string `form:"project_id" binding:"required"`
+	UserID    int64 `form:"user_id" binding:"required"`
+	ProjectID int64 `form:"project_id" binding:"required"`
 }
 
 func RemoveUser(c *gin.Context) {
 	var (
-		err          error
-		req          RemoveUserRequest
-		uid          string
-		userID       primitive.ObjectID
-		removeUserId primitive.ObjectID
-		projectID    primitive.ObjectID
+		err     error
+		req     RemoveUserRequest
+		project *common.Project
+		uid     = utils.GetUserID(c)
+		srv     = app.GetApp(c)
 	)
 
 	if err = utils.BindArgsWithGin(c, &req); err != nil {
-		request.APIError(c, errors.ErrInvalidArgument)
+		response.APIError(c, errors.ErrInvalidArgument)
 		return
 	}
 
 	// 验证该项目是否属于该用户
-	uid = c.GetString("jwt_user")
-
 	if req.UserID == uid {
 		// 不能将项目管理员移出项目
-		request.APIError(c, errors.ErrDontRemoveProjectAdmin)
-		return
-	}
-
-	if userID, err = primitive.ObjectIDFromHex(uid); err != nil {
-		request.APIError(c, errors.ErrInvalidArgument)
-		return
-	}
-
-	if projectID, err = primitive.ObjectIDFromHex(req.ProjectID); err != nil {
-		request.APIError(c, errors.ErrInvalidArgument)
+		response.APIError(c, errors.ErrDontRemoveProjectAdmin)
 		return
 	}
 
 	// 首先确认操作的用户是否为该项目的管理员
-	if _, err = db.CheckUserProject(projectID, userID); err != nil {
-		request.APIError(c, err)
+	if project, err = srv.CheckUserProject(req.ProjectID, uid); err != nil {
+		response.APIError(c, err)
 		return
 	}
 
-	if removeUserId, err = primitive.ObjectIDFromHex(req.UserID); err != nil {
-		request.APIError(c, errors.ErrInvalidArgument)
+	if project == nil {
+		response.APIError(c, errors.ErrUnauthorized)
 		return
 	}
 
 	// 验证通过后再执行移出操作
-	if err = db.RemoveUserFromProject(projectID, removeUserId); err != nil {
-		request.APIError(c, err)
+	if err = srv.DeleteProjectRelevance(nil, req.ProjectID, req.UserID); err != nil {
+		response.APIError(c, err)
 		return
 	}
 
-	request.APISuccess(c, nil)
+	response.APISuccess(c, nil)
 }
 
 type AddUserRequest struct {
-	ProjectID   string `form:"project_id" binding:"required"`
+	ProjectID   int64  `form:"project_id" binding:"required"`
 	UserAccount string `form:"user_account" binding:"required"`
 }
 
 func AddUser(c *gin.Context) {
 	var (
-		err       error
-		req       AddUserRequest
-		uid       string
-		userID    primitive.ObjectID
-		projectID primitive.ObjectID
-		userInfo  *common.User
+		err      error
+		req      AddUserRequest
+		uid      = utils.GetUserID(c)
+		srv      = app.GetApp(c)
+		userInfo *common.User
+		project  *common.Project
 	)
 
 	if err = utils.BindArgsWithGin(c, &req); err != nil {
-		request.APIError(c, errors.ErrInvalidArgument)
+		response.APIError(c, errors.ErrInvalidArgument)
 		return
 	}
 
-	uid = c.GetString("jwt_user")
-
-	if userID, err = primitive.ObjectIDFromHex(uid); err != nil {
-		request.APIError(c, errors.ErrInvalidArgument)
+	if project, err = srv.CheckUserProject(req.ProjectID, uid); err != nil {
+		response.APIError(c, err)
 		return
 	}
 
-	if projectID, err = primitive.ObjectIDFromHex(req.ProjectID); err != nil {
-		request.APIError(c, errors.ErrInvalidArgument)
+	if project == nil {
+		response.APIError(c, errors.ErrUnauthorized)
 		return
 	}
 
-	if _, err = db.CheckUserProject(projectID, userID); err != nil {
-		request.APIError(c, err)
-		return
-	}
-
-	if userInfo, err = db.GetUserWithAccount(req.UserAccount); err != nil {
-		request.APIError(c, err)
+	if userInfo, err = srv.GetUserByAccount(req.UserAccount); err != nil {
+		response.APIError(c, err)
 		return
 	}
 
 	if userInfo == nil {
-		request.APIError(c, errors.ErrUserNotFound)
+		response.APIError(c, errors.ErrUserNotFound)
 		return
 	}
 
 	// 检测用户是否存在项目组中
-	if _, err = db.CheckUserProject(projectID, userInfo.ID); err != nil {
+	if _, err = srv.CheckUserIsInProject(req.ProjectID, userInfo.ID); err != nil {
 		if err != errors.ErrProjectNotExist {
-			request.APIError(c, err)
+			response.APIError(c, err)
 			return
 		}
 	}
 
-	if err = db.AddUserToProject(projectID, userInfo.ID); err != nil {
-		request.APIError(c, err)
+	if err = srv.CreateProjectRelevance(nil, req.ProjectID, userInfo.ID); err != nil {
+		response.APIError(c, err)
 		return
 	}
 
-	request.APISuccess(c, nil)
+	response.APISuccess(c, nil)
 }

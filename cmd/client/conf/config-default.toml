@@ -1,3 +1,5 @@
+log_levle = "debug"
+
 [deploy]
 # 当前的环境:dev、release
 environment = "release"
@@ -15,11 +17,8 @@ projects = ["project_a", "project_b"]
 # 命令调用脚本 /bin/sh  /bin/bash 根据自己系统情况决定
 shell = "/bin/bash"
 
-[mongodb]
-service = ["mongodb://0.0.0.0:27017"]
-username = ""
-password = ""
-# 可自行修改数据库表名 新表会自动生成admin账号
-table = "gopher_cron"
-# mongodb的验证方式
-auth_mechanism = "SCRAM-SHA-1"
+[mysql]
+service="0.0.0.0:3306"
+username=""
+password=""
+table=""

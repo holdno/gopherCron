@@ -1,13 +1,13 @@
 package project_func
 
 import (
-	"github.com/gin-gonic/gin"
-	"github.com/mongodb/mongo-go-driver/bson/primitive"
-	"ojbk.io/gopherCron/cmd/service/request"
+	"ojbk.io/gopherCron/app"
+	"ojbk.io/gopherCron/cmd/service/response"
 	"ojbk.io/gopherCron/common"
 	"ojbk.io/gopherCron/errors"
-	"ojbk.io/gopherCron/pkg/db"
 	"ojbk.io/gopherCron/utils"
+
+	"github.com/gin-gonic/gin"
 )
 
 type CreateRequest struct {
@@ -19,41 +19,51 @@ func Create(c *gin.Context) {
 	var (
 		req     CreateRequest
 		err     error
-		uid     string
 		project *common.Project
-		userID  primitive.ObjectID
+		id      int64
+		uid     = utils.GetUserID(c)
+		srv     = app.GetApp(c)
 	)
 
-	uid = c.GetString("jwt_user")
-
 	if err = utils.BindArgsWithGin(c, &req); err != nil {
-		request.APIError(c, errors.ErrInvalidArgument)
+		response.APIError(c, errors.ErrInvalidArgument)
 		return
 	}
 
-	if project, err = db.CheckProjectExistByName(req.Title); err != nil {
+	if project, err = srv.CheckProjectExistByName(req.Title); err != nil {
 		if err != errors.ErrProjectNotExist {
-			request.APIError(c, err)
+			response.APIError(c, err)
 			return
 		}
 	}
 
 	if project != nil {
-		request.APIError(c, errors.ErrProjectExist)
+		response.APIError(c, errors.ErrProjectExist)
 		return
 	}
 
-	userID, _ = primitive.ObjectIDFromHex(uid)
+	tx := srv.BeginTx()
+	defer func() {
+		if r := recover(); r != nil || err != nil {
+			tx.Rollback()
+		} else {
+			tx.Commit()
+		}
+	}()
 
-	if err = db.CreateProject(&common.Project{
-		Title:    req.Title,
-		Remark:   req.Remark,
-		UID:      userID,
-		Relation: []primitive.ObjectID{userID},
+	if id, err = srv.CreateProject(tx, common.Project{
+		Title:  req.Title,
+		Remark: req.Remark,
+		UID:    uid,
 	}); err != nil {
-		request.APIError(c, err)
+		response.APIError(c, err)
 		return
 	}
 
-	request.APISuccess(c, nil)
+	if err = srv.CreateProjectRelevance(tx, id, uid); err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	response.APISuccess(c, nil)
 }

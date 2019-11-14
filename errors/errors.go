@@ -17,7 +17,7 @@ type Error struct {
 	Code  int    `json:"code"`   //错误码
 	Msg   string `json:"msg"`    //中文错误信息,客户端展示
 	MsgEn string `json:"msg_en"` //英文错误信息,客户端展示
-	Log   string `json:"-"`      //不需要展示给终端，用于存放详细日志信息
+	Log   string `json:"log"`    //不需要展示给终端，用于存放详细日志信息
 	Cause *Error `json:"cause"`  //引起错误的具体错误，可以展示给终端(作为详细错误信息)
 }
 

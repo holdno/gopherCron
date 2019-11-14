@@ -5,3 +5,4 @@ config-pre.toml
 build.sh
 gopherCron
 gopherCronClient
+.idea

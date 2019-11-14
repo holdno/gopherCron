@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"math/rand"
 	"net"
+	"ojbk.io/gopherCron/common"
 	"strconv"
 	"time"
 
@@ -53,6 +54,16 @@ func MakeMD5(data string) string {
 	h.Write([]byte(data)) // 需要加密的字符串为 123456
 	cipherStr := h.Sum(nil)
 	return hex.EncodeToString(cipherStr) // 输出加密结果
+}
+
+// Random 生成随机数
+func Random(min, max int) int {
+	if min == max {
+		return max
+	}
+	max = max + 1
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	return min + r.Intn(max-min)
 }
 
 // RandomStr 随机字符串
@@ -133,4 +144,8 @@ func StrArrExist(arr []string, check string) bool {
 		}
 	}
 	return false
+}
+
+func GetUserID(c *gin.Context) int64 {
+	return c.GetInt64(common.USER_ID)
 }

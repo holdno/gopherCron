@@ -1,71 +1,60 @@
 package log_func
 
 import (
-	"github.com/gin-gonic/gin"
-	"github.com/mongodb/mongo-go-driver/bson/primitive"
-	"ojbk.io/gopherCron/cmd/service/request"
+	"ojbk.io/gopherCron/app"
+	"ojbk.io/gopherCron/cmd/service/response"
 	"ojbk.io/gopherCron/errors"
-	"ojbk.io/gopherCron/pkg/db"
 	"ojbk.io/gopherCron/utils"
+
+	"github.com/gin-gonic/gin"
 )
 
 // ClearLogsRequest 清理日志请求参数
 type CleanLogsRequest struct {
-	ProjectID string `form:"project_id" binding:"required"`
+	ProjectID int64  `form:"project_id" binding:"required"`
 	TaskID    string `form:"task_id"`
 }
 
 // CleanLogs 清理任务日志
 func CleanLogs(c *gin.Context) {
-	uid := c.GetString("jwt_user")
-	if uid == "" {
-		request.APIError(c, errors.ErrUnauthorized)
+	uid := utils.GetUserID(c)
+	if uid == 0 {
+		response.APIError(c, errors.ErrUnauthorized)
 		return
 	}
 
 	var (
-		err       error
-		req       CleanLogsRequest
-		userID    primitive.ObjectID
-		projectID primitive.ObjectID
-		taskID    primitive.ObjectID
+		err   error
+		req   CleanLogsRequest
+		srv   = app.GetApp(c)
+		exist bool
 	)
 
 	if err = utils.BindArgsWithGin(c, &req); err != nil {
-		request.APIError(c, errors.ErrInvalidArgument)
+		response.APIError(c, errors.ErrInvalidArgument)
 		return
 	}
 
-	if userID, err = primitive.ObjectIDFromHex(uid); err != nil {
-		request.APIError(c, errors.ErrInvalidArgument)
+	if exist, err = srv.CheckUserIsInProject(req.ProjectID, uid); err != nil {
+		response.APIError(c, err)
 		return
 	}
 
-	if projectID, err = primitive.ObjectIDFromHex(req.ProjectID); err != nil {
-		request.APIError(c, errors.ErrInvalidArgument)
-		return
-	}
-
-	if taskID, err = primitive.ObjectIDFromHex(req.TaskID); err != nil {
-		request.APIError(c, errors.ErrInvalidArgument)
-		return
-	}
-
-	if _, err = db.CheckProjectExist(projectID, userID); err != nil {
-		request.APIError(c, err)
+	if !exist {
+		response.APIError(c, errors.ErrProjectNotExist)
 		return
 	}
 
 	if req.TaskID == "" {
-		err = db.CleanProjectLog(projectID)
+		err = srv.CleanProjectLog(req.ProjectID)
 	} else {
-		err = db.CleanLog(projectID, taskID)
+		err = srv.CleanLog(req.ProjectID, req.TaskID)
 	}
 
 	if err != nil {
-		request.APIError(c, err)
+		response.APIError(c, err)
 		return
 	}
 
-	request.APISuccess(c, nil)
+	response.APISuccess(c, nil)
 }

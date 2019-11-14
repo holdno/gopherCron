@@ -1,13 +1,14 @@
 package user_func
 
 import (
-	"github.com/gin-gonic/gin"
-	"ojbk.io/gopherCron/cmd/service/request"
+	"ojbk.io/gopherCron/app"
+	"ojbk.io/gopherCron/cmd/service/response"
 	"ojbk.io/gopherCron/common"
 	"ojbk.io/gopherCron/errors"
 	"ojbk.io/gopherCron/jwt"
-	"ojbk.io/gopherCron/pkg/db"
 	"ojbk.io/gopherCron/utils"
+
+	"github.com/gin-gonic/gin"
 )
 
 type LoginRequest struct {
@@ -22,34 +23,35 @@ func Login(c *gin.Context) {
 		errObj   errors.Error
 		user     *common.User
 		password string
+		srv      = app.GetApp(c)
 	)
 
 	if err = utils.BindArgsWithGin(c, &req); err != nil {
-		request.APIError(c, errors.ErrInvalidArgument)
+		response.APIError(c, errors.ErrInvalidArgument)
 		return
 	}
 
-	if user, err = db.GetUserWithAccount(req.Account); err != nil {
-		request.APIError(c, err)
+	if user, err = srv.GetUserByAccount(req.Account); err != nil {
+		response.APIError(c, err)
 		return
 	}
 
 	if user == nil {
-		errObj = errors.ErrDataNotFound
-		request.APIError(c, errObj)
+		errObj = errors.ErrUserNotFound
+		response.APIError(c, errObj)
 		return
 	}
 
 	if password = utils.BuildPassword(req.Password, user.Salt); password != user.Password {
 		errObj = errors.ErrPasswordErr
-		request.APIError(c, errObj)
+		response.APIError(c, errObj)
 		return
 	}
 
-	request.APISuccess(c, &gin.H{
+	response.APISuccess(c, &gin.H{
 		"name":       user.Name,
 		"permission": user.Permission,
 		"id":         user.ID,
-		"token":      jwt.Build(user.ID.Hex()),
+		"token":      jwt.Build(user.ID),
 	})
 }

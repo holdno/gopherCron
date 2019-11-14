@@ -49,7 +49,7 @@ type Header struct {
 // 私有声明是提供者和消费者所共同定义的声明，一般不建议存放敏感信息，因为base64是对称解密的，意味着该部分信息可以归类为明文信息。
 type Payload struct {
 	Biz  string `json:"biz"`  // 对应标准中的iss 表示业务方
-	User string `json:"user"` // 对应标准中的aud 表示接收用户
+	User int64  `json:"user"` // 对应标准中的aud 表示接收用户
 	Exp  int64  `json:"exp"`
 	Iat  int64  `json:"iat"`
 }
@@ -75,7 +75,7 @@ func build(method string) *Jwt {
 			Alg: method,
 		},
 		Payload{
-			User: "",
+			User: 0,
 			Exp:  0,
 			Iat:  time.Now().Unix(),
 		},

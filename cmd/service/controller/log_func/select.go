@@ -3,86 +3,69 @@ package log_func
 import (
 	"time"
 
-	"github.com/gin-gonic/gin"
-	"github.com/mongodb/mongo-go-driver/bson/primitive"
-	"ojbk.io/gopherCron/cmd/service/request"
+	"ojbk.io/gopherCron/app"
+	"ojbk.io/gopherCron/cmd/service/response"
 	"ojbk.io/gopherCron/common"
 	"ojbk.io/gopherCron/errors"
-	"ojbk.io/gopherCron/pkg/db"
 	"ojbk.io/gopherCron/utils"
+
+	"github.com/gin-gonic/gin"
 )
 
 // GetListRequest 获取任务执行日志
 type GetListRequest struct {
-	Page      int64  `form:"page" binding:"required"`
-	Pagesize  int64  `form:"pagesize" binding:"required"`
-	ProjectID string `form:"project_id" binding:"required"`
+	Page      int    `form:"page" binding:"required"`
+	Pagesize  int    `form:"pagesize" binding:"required"`
+	ProjectID int64  `form:"project_id" binding:"required"`
 	TaskID    string `form:"task_id" binding:"required"`
 }
 
 // GetList 获取任务执行日志
 func GetList(c *gin.Context) {
 	var (
-		err       error
-		req       GetListRequest
-		logList   []*common.TaskLog
-		total     int64
-		uid       string
-		userID    primitive.ObjectID
-		projectID primitive.ObjectID
-		TaskID    primitive.ObjectID
+		err     error
+		req     GetListRequest
+		logList []*common.TaskLog
+		total   int
+		exist   bool
+		uid     = utils.GetUserID(c)
+		srv     = app.GetApp(c)
 	)
 
 	if err = utils.BindArgsWithGin(c, &req); err != nil {
-		request.APIError(c, errors.ErrInvalidArgument)
+		response.APIError(c, errors.ErrInvalidArgument)
 		return
 	}
 
-	uid = c.GetString("jwt_user")
-
-	if userID, err = primitive.ObjectIDFromHex(uid); err != nil {
-		request.APIError(c, errors.ErrInvalidArgument)
+	if exist, err = srv.CheckUserIsInProject(req.ProjectID, uid); err != nil {
+		response.APIError(c, err)
 		return
 	}
 
-	if projectID, err = primitive.ObjectIDFromHex(req.ProjectID); err != nil {
-		request.APIError(c, errors.ErrInvalidArgument)
+	if !exist {
+		response.APIError(c, errors.ErrProjectNotExist)
 		return
 	}
 
-	if TaskID, err = primitive.ObjectIDFromHex(req.TaskID); err != nil {
-		request.APIError(c, errors.ErrInvalidArgument)
+	if logList, err = srv.GetTaskLogList(req.ProjectID, req.TaskID, req.Page, req.Pagesize); err != nil {
+		response.APIError(c, err)
 		return
 	}
 
-	if _, err = db.CheckProjectExist(projectID, userID); err != nil {
-		request.APIError(c, err)
+	if total, err = srv.GetTaskLogTotal(req.ProjectID, req.TaskID); err != nil {
+		response.APIError(c, err)
 		return
 	}
 
-	if logList, err = db.GetLogList(projectID, TaskID, req.Page, req.Pagesize); err != nil {
-		request.APIError(c, err)
-		return
-	}
-
-	if total, err = db.GetLogTotal(projectID, TaskID); err != nil {
-		request.APIError(c, err)
-		return
-	}
-
-	request.APISuccess(c, &gin.H{
+	response.APISuccess(c, &gin.H{
 		"list":  utils.TernaryOperation(logList != nil, logList, []struct{}{}),
 		"total": total,
 	})
 }
 
-//type GetRecentLogCountRequest struct {
-//	ProjectID string `form:"project_id" binding:"required"`
-//}
-
 type GetRecentLogCountResponse struct {
-	SuccessCount int64  `json:"success_count"`
-	ErrorCount   int64  `json:"error_count"`
+	SuccessCount int    `json:"success_count"`
+	ErrorCount   int    `json:"error_count"`
 	Date         string `json:"date"`
 }
 
@@ -90,22 +73,16 @@ type GetRecentLogCountResponse struct {
 func GetRecentLogCount(c *gin.Context) {
 	var (
 		err        error
-		uid        string
-		userID     primitive.ObjectID
 		projects   []*common.Project
-		projectIDs []primitive.ObjectID
+		projectIDs []int64
 		result     []*GetRecentLogCountResponse
+
+		uid = utils.GetUserID(c)
+		srv = app.GetApp(c)
 	)
 
-	uid = c.GetString("jwt_user")
-
-	if userID, err = primitive.ObjectIDFromHex(uid); err != nil {
-		request.APIError(c, errors.ErrInvalidArgument)
-		return
-	}
-
-	if projects, err = db.GetUserProjects(userID); err != nil {
-		request.APIError(c, err)
+	if projects, err = srv.GetUserProjects(uid); err != nil {
+		response.APIError(c, err)
 		return
 	}
 
@@ -114,23 +91,23 @@ func GetRecentLogCount(c *gin.Context) {
 	}
 
 	for _, v := range projects {
-		projectIDs = append(projectIDs, v.ProjectID)
+		projectIDs = append(projectIDs, v.ID)
 	}
 
 	for i := 6; i >= 0; i-- {
 		var (
-			successCount int64
-			errorCount   int64
+			successCount int
+			errorCount   int
 			timer        = utils.GetDateFromNow(-i)
 		)
 
-		if successCount, err = db.GetLogCountByDate(projectIDs, timer.Unix(), common.SuccessLog); err != nil {
-			request.APIError(c, err)
+		if successCount, err = srv.GetLogTotalByDate(projectIDs, timer.Unix(), common.SuccessLog); err != nil {
+			response.APIError(c, err)
 			return
 		}
 
-		if errorCount, err = db.GetLogCountByDate(projectIDs, timer.Unix(), common.ErrorLog); err != nil {
-			request.APIError(c, err)
+		if errorCount, err = srv.GetLogTotalByDate(projectIDs, timer.Unix(), common.ErrorLog); err != nil {
+			response.APIError(c, err)
 			return
 		}
 
@@ -142,5 +119,5 @@ func GetRecentLogCount(c *gin.Context) {
 	}
 
 EMPTY:
-	request.APISuccess(c, utils.TernaryOperation(len(result) != 0, result, []struct{}{}))
+	response.APISuccess(c, utils.TernaryOperation(len(result) != 0, result, []struct{}{}))
 }
