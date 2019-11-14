@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"math/rand"
 	"os/exec"
 	"time"
@@ -16,7 +17,7 @@ func (a *app) ExecuteTask(info *common.TaskExecutingInfo) {
 	go func() {
 		var (
 			cmd      *exec.Cmd
-			output   []byte
+			output   bytes.Buffer
 			err      error
 			result   *common.TaskExecuteResult
 			taskLock *etcd.TaskLock
@@ -38,19 +39,36 @@ func (a *app) ExecuteTask(info *common.TaskExecutingInfo) {
 			//result.Err = err
 			//result.EndTime = time.Now()
 			return
-		} else {
-			result.StartTime = time.Now()
-
-			cmd = exec.CommandContext(info.CancelCtx, config.GetServiceConfig().Etcd.Shell, "-c", info.Task.Command)
-			// 执行并捕获输出
-			output, err = cmd.CombinedOutput()
-
-			result.EndTime = time.Now()
-			result.Output = output
-			result.Err = err
-
-			taskLock.Unlock()
 		}
+
+		result.StartTime = time.Now()
+
+		cmd = exec.CommandContext(info.CancelCtx, config.GetServiceConfig().Etcd.Shell, "-c", info.Task.Command)
+		cmd.Stdout = &output
+
+		// 多命令语句会导致 cmd.CombineOutput()阻塞，无法正常timeout，例如：sleep 20 && echo 123，timeout 设为5则无效
+		// https://github.com/golang/go/issues/23019
+		// output, err = cmd.CombinedOutput()
+
+		//if stdoutPipe, result.Err = cmd.StdoutPipe(); result.Err != nil {
+		//	goto FinishWithError
+		//}
+
+		// 执行命令
+		if result.Err = cmd.Start(); result.Err != nil {
+			goto FinishWithError
+		}
+
+		if result.Err = cmd.Wait(); result.Err != nil {
+			goto FinishWithError
+		}
+
+	FinishWithError:
+		result.EndTime = time.Now()
+		result.Output = output.Bytes()
+
+		taskLock.Unlock()
+
 		// 执行结束后 返回给scheduler
 		a.scheduler.PushTaskResult(result)
 	}()

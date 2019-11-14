@@ -43,7 +43,7 @@ type MysqlConf struct {
 	Service  string `toml:"service"`
 	Username string `toml:"username"`
 	Password string `toml:"password"`
-	Table    string `toml:"table"`
+	Database string `toml:"database"`
 }
 
 // JWTConf 签名方法配置

@@ -137,7 +137,7 @@ func (s *SqlProvider) initConnect(conf *config.MysqlConf) error {
 		Passwd:               conf.Password,
 		Net:                  "tcp",
 		Addr:                 conf.Service,
-		DBName:               conf.Table,
+		DBName:               conf.Database,
 		AllowNativePasswords: true,
 	}
 	if engine, err = gorm.Open("mysql", mc.FormatDSN()); err != nil {

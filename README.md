@@ -40,13 +40,19 @@
 ### 使用方法  
 下载项目到本地并编译，根据cmd文件夹下service和client中包含的conf/config-default.toml进行配置  
 
-#### 配置文件  
+#### service 配置文件  
 ``` toml 
+log_level = "debug"
+
 [deploy]
 # 当前的环境:dev、release
-environment = "dev"
+environment = "release"
 # 对外提供的端口
 host = ["0.0.0.0:6306"]
+# 数据库操作超时时间
+timeout = 5  # 秒为单位
+# 前端文件路径
+view_path = "./view"
 
 # etcd
 [etcd]
@@ -56,17 +62,16 @@ dialtimeout = 5000
 prefix = "/gopher_cron"
 
 [mysql]
-service = "0.0.0.0:3306"
-username = ""
-password = ""
-# 可自行修改数据库表名 新表会自动生成admin账号
-table = ""
+service="0.0.0.0:3306"
+username=""
+password=""
+database=""
 
 # jwt用来做api的身份校验
 [jwt]
 # jwt签名的secret 建议修改
 secret = "fjskfjls2ifeew2mn"
-exp = 12 # token 有效期
+exp = 168  # token 有效期(小时)
 ```
 
 #### service 部署  
@@ -74,6 +79,34 @@ exp = 12 # token 有效期
 $ ./service -conf ./conf/config-default.toml // 配置文件名请随意  
 2019-01-18 00:00:45 listening and serving HTTP on 0.0.0.0:6306
 
+```
+
+#### client 配置文件
+``` toml
+log_level = "debug"
+
+[deploy]
+# 当前的环境:dev、release
+environment = "release"
+# 数据库操作超时时间
+timeout = 5  # 秒为单位
+
+# etcd
+[etcd]
+service = ["0.0.0.0:2379"]
+dialtimeout = 5000
+# etcd kv存储的key前缀 用来与其他业务做区分
+prefix = "/gopher_cron"
+# 当前节点需要处理的项目ID
+projects = [1,2]
+# 命令调用脚本 /bin/sh  /bin/bash 根据自己系统情况决定
+shell = "/bin/bash"
+
+[mysql]
+service="0.0.0.0:3306"
+username=""
+password=""
+database=""
 ```
 #### client 部署  
  

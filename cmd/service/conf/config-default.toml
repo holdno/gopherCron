@@ -21,7 +21,7 @@ prefix = "/gopher_cron"
 service="0.0.0.0:3306"
 username=""
 password=""
-table=""
+database=""
 
 # jwt用来做api的身份校验
 [jwt]

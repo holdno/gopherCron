@@ -1,4 +1,4 @@
-log_levle = "debug"
+log_level = "debug"
 
 [deploy]
 # 当前的环境:dev、release
@@ -13,7 +13,7 @@ dialtimeout = 5000
 # etcd kv存储的key前缀 用来与其他业务做区分
 prefix = "/gopher_cron"
 # 当前节点需要处理的项目ID
-projects = ["project_a", "project_b"]
+projects = [1,2]
 # 命令调用脚本 /bin/sh  /bin/bash 根据自己系统情况决定
 shell = "/bin/bash"
 
@@ -21,4 +21,4 @@ shell = "/bin/bash"
 service="0.0.0.0:3306"
 username=""
 password=""
-table=""
+database=""

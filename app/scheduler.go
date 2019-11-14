@@ -212,15 +212,16 @@ func (a *app) handleTaskResult(result *common.TaskExecuteResult) {
 		Result: string(result.Output),
 	}
 
+	if err != nil {
+		taskResult.Error = err.Error()
+		getError = 1
+	}
+
 	if result.Err != nil {
 		taskResult.CommandError = result.Err.Error()
 		getError = 1
 	}
 
-	if err != nil {
-		taskResult.Error = err.Error()
-		getError = 1
-	}
 	if resultBytes, jsonMarshalErr = json.Marshal(taskResult); jsonMarshalErr != nil {
 		resultBytes = []byte("result log json marshal error:" + jsonMarshalErr.Error())
 	}
