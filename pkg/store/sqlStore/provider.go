@@ -62,7 +62,7 @@ type SqlProviderStores struct {
 	TaskLog          store.TaskLogStore
 }
 
-func MustSetup(conf *config.ServiceConfig, logger *logrus.Logger) SqlStore {
+func MustSetup(conf *config.ServiceConfig, logger *logrus.Logger, install bool) SqlStore {
 	provider := new(SqlProvider)
 
 	provider.logger = logger
@@ -76,9 +76,11 @@ func MustSetup(conf *config.ServiceConfig, logger *logrus.Logger) SqlStore {
 	provider.stores.ProjectRelevance = NewProjectRelevanceStore(provider)
 	provider.CheckStores()
 
-	provider.logger.Info("start install database ...")
-	provider.Install()
-	provider.logger.Info("finish install")
+	if install {
+		provider.logger.Info("start install database ...")
+		provider.Install()
+		provider.logger.Info("finish")
+	}
 
 	// 检测是否需要创建管理员
 	admin, err := provider.stores.User.GetAdminUser()

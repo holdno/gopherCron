@@ -25,7 +25,7 @@ func Run(opt *SetupOptions) error {
 
 	client := app.NewClient(conf)
 	go client.Loop()
-	fmt.Println("client runing")
+
 	waitingShutdown()
 	return nil
 }

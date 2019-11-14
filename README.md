@@ -113,12 +113,7 @@ database=""
 ``` shell
 $ ./client -conf ./conf/config-default.toml
 // 等待如下输入即启动成功 
-InitExecuter
-InitScheduler
-TaskWatcher
-TaskKiller
-Register
-client runing
+register key /gopher_cron/register/12/xxx.xxx.xxx.xxx
 ```  
 
 ### Admin 管理页面  

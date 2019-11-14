@@ -84,7 +84,7 @@ func NewApp(conf *config.ServiceConfig) App {
 	app := new(app)
 
 	app.logger = logger.MustSetup(conf)
-	app.store = sqlStore.MustSetup(conf, app.logger)
+	app.store = sqlStore.MustSetup(conf, app.logger, true)
 
 	jwt.InitJWT(conf.JWT)
 
@@ -123,7 +123,7 @@ func NewClient(conf *config.ServiceConfig) Client {
 	client := new(app)
 
 	client.logger = logger.MustSetup(conf)
-	client.store = sqlStore.MustSetup(conf, client.logger)
+	client.store = sqlStore.MustSetup(conf, client.logger, false)
 
 	if client.etcd, err = etcd.Connect(conf.Etcd); err != nil {
 		panic(err)

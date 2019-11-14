@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/md5"
 	"encoding/hex"
-	"fmt"
 	"math/rand"
 	"net"
 	"strconv"
@@ -29,7 +28,6 @@ func InitIDWorker(cluster int64) {
 	var (
 		err error
 	)
-	fmt.Println("id worker", cluster)
 	globalIDWorker, err = snowFlakeByGo.NewWorker(cluster)
 	if err != nil {
 		panic(err)
