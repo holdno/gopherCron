@@ -24,6 +24,8 @@ type DeployConf struct {
 // EtcdConf etcd配置
 type EtcdConf struct {
 	Service     []string `toml:"service"`
+	Username    string   `toml:"username"`
+	Password    string   `toml:"password"`
 	DialTimeout int      `toml:"dialtimeout"`
 	Prefix      string   `toml:"prefix"`
 	Projects    []int64  `toml:"projects,omitempty"`

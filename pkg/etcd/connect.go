@@ -48,6 +48,8 @@ func Connect(config *config.EtcdConf) (*TaskManager, error) {
 	// client config
 	etcdConf = clientv3.Config{
 		Endpoints:   config.Service, // cluster list
+		Username:    config.Username,
+		Password:    config.Password,
 		DialTimeout: time.Duration(config.DialTimeout) * time.Millisecond,
 	}
 

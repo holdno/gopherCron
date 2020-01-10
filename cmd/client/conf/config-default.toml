@@ -9,6 +9,8 @@ timeout = 5  # 秒为单位
 # etcd
 [etcd]
 service = ["0.0.0.0:2379"]
+username = ""
+password = ""
 dialtimeout = 5000
 # etcd kv存储的key前缀 用来与其他业务做区分
 prefix = "/gopher_cron"
