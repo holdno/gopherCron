@@ -18,10 +18,11 @@ func fatal(format string, args ...interface{}) {
 }
 
 func TestApp_ExecuteTask(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*1)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "sh", "-c", "sleep 20 && echo hello world")
+	// var output bytes.Buffer
+	cmd := exec.CommandContext(ctx, "/bin/bash", "-c", "sleep 20 && echo hello world")
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
 		fatal("no pipe: %v", err)
@@ -31,20 +32,21 @@ func TestApp_ExecuteTask(t *testing.T) {
 	if err = cmd.Start(); err != nil {
 		fatal("start failed: %v", err)
 	}
-
+	var stdout strings.Builder
 	go func() {
-		var stdout string
 		buf := bufio.NewReader(stdoutPipe)
 		for {
 			line, err := buf.ReadString('\n')
-			if len(line) > 0 {
-				stdout = stdout + line + "\n"
-			}
 			if err != nil {
-				if !strings.HasPrefix(stdout, "hello world") {
-					fatal("wrong output: %q", stdout)
+				fmt.Println(err)
+				if !strings.HasPrefix(stdout.String(), "hello world") {
+					fatal("wrong output: %s", stdout.String())
 				}
 				return
+			}
+			if len(line) > 0 {
+				stdout.WriteString(line)
+				stdout.WriteString("\n")
 			}
 		}
 	}()
@@ -53,9 +55,10 @@ func TestApp_ExecuteTask(t *testing.T) {
 	d := time.Since(start)
 
 	if err != nil {
+		fmt.Println("wait err", err)
 		exiterr := err.(*exec.ExitError)
 		status := exiterr.Sys().(syscall.WaitStatus)
-		if status.ExitStatus() == 0 {
+		if status.ExitStatus() != 0 {
 			fatal("wrong exit status: %v", status.ExitStatus())
 		}
 	}
@@ -63,5 +66,5 @@ func TestApp_ExecuteTask(t *testing.T) {
 	if d.Seconds() >= 3 {
 		fatal("Cancelation took too long: %v", d)
 	}
-	fmt.Println("Success!")
+	fmt.Println("Success!", stdout.String())
 }

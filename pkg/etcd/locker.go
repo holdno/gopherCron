@@ -107,6 +107,7 @@ FAIL:
 // Unlock 释放锁
 func (tl *TaskLock) Unlock() {
 	if tl.isLocked {
+		tl.isLocked = false
 		tl.cancelFunc() // 取消锁协成自动续租
 		tl.lease.Revoke(context.TODO(), tl.leaseID)
 	}

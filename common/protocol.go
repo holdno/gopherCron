@@ -22,6 +22,8 @@ type TaskInfo struct {
 	Timeout    int    `json:"timeout"` // 任务超时时间 单位 秒(s)
 	CreateTime int64  `json:"create_time"`
 	Status     int    `json:"status"`
+	IsRunning  int    `json:"is_running"`
+	ClientIP   string `json:"client_ip"`
 }
 
 // TaskSchedulePlan 任务调度计划
@@ -44,7 +46,7 @@ type TaskExecutingInfo struct {
 // TaskExecuteResult 任务执行结果
 type TaskExecuteResult struct {
 	ExecuteInfo *TaskExecutingInfo
-	Output      []byte    // 程序输出
+	Output      string    // 程序输出
 	Err         error     // 是否发生错误
 	StartTime   time.Time // 开始时间
 	EndTime     time.Time // 结束时间
@@ -60,7 +62,7 @@ type TaskResultLog struct {
 // ETCD_PREFIX topic prefix  default: /cron
 var (
 	ETCD_PREFIX = "/cron"
-	TEMPORARY   = "/t_scheduler"
+	TEMPORARY   = "t_scheduler"
 )
 
 // BuildKey etcd 保存任务的key
@@ -70,12 +72,12 @@ func BuildKey(projectID int64, taskID string) string {
 
 // BuildSchedulerKey 临时调度的key
 func BuildSchedulerKey(projectID int64, taskID string) string {
-	return fmt.Sprintf("%s/%d%s/%s", ETCD_PREFIX, projectID, TEMPORARY, taskID)
+	return fmt.Sprintf("%s/%d/%s/%s", ETCD_PREFIX, projectID, TEMPORARY, taskID)
 }
 
 // IsTemporaryKey 检测是否为临时调度key
 func IsTemporaryKey(key string) bool {
-	return strings.Contains(key, TEMPORARY+"/")
+	return strings.Contains(key, "/"+TEMPORARY+"/")
 }
 
 // BuildLockKey etcd 分布式锁key
@@ -167,9 +169,9 @@ func BuildTaskExecuteInfo(plan *TaskSchedulePlan) *TaskExecutingInfo {
 	}
 
 	if plan.Task.Timeout != 0 {
-		info.CancelCtx, info.CancelFunc = context.WithTimeout(context.TODO(), time.Duration(plan.Task.Timeout)*time.Second)
+		info.CancelCtx, info.CancelFunc = context.WithTimeout(context.Background(), time.Duration(plan.Task.Timeout)*time.Second)
 	} else {
-		info.CancelCtx, info.CancelFunc = context.WithCancel(context.TODO())
+		info.CancelCtx, info.CancelFunc = context.WithCancel(context.Background())
 	}
 
 	return info

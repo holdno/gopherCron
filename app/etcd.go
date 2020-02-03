@@ -12,6 +12,20 @@ import (
 	"ojbk.io/gopherCron/utils"
 )
 
+func (a *app) SetTaskRunning(task *common.TaskInfo) error {
+	task.IsRunning = common.TASK_STATUS_RUNNING
+	task.ClientIP = a.localip
+	_, err := a.SaveTask(task)
+	return err
+}
+
+func (a *app) SetTaskNotRunning(task *common.TaskInfo) error {
+	task.IsRunning = common.TASK_STATUS_NOT_RUNNING
+	task.ClientIP = ""
+	_, err := a.SaveTask(task)
+	return err
+}
+
 // SaveTask save task to etcd
 // return oldtask & error
 func (a *app) SaveTask(task *common.TaskInfo) (*common.TaskInfo, error) {
@@ -24,6 +38,24 @@ func (a *app) SaveTask(task *common.TaskInfo) (*common.TaskInfo, error) {
 		errObj   errors.Error
 		err      error
 	)
+
+	if oldTask, err = a.GetTask(task.ProjectID, task.TaskID); err != nil {
+		errObj = errors.ErrInternalError
+		errObj.Log = "[Etcd - SaveTask] get old task info error:" + err.Error()
+		return nil, errObj
+	}
+
+	if oldTask.IsRunning == common.TASK_STATUS_RUNNING {
+		lk := a.etcd.Lock(task)
+		if err = lk.TryLock(); err != nil {
+			errObj = errors.ErrLockAlreadyRequired
+			errObj.Log = "[Etcd - SaveTask] the task is locked"
+			return nil, errObj
+		}
+		defer lk.Unlock()
+		// 任务状态是running 但是没有锁 证明任务已经执行完毕 但是状态同步失败
+		task.IsRunning = common.TASK_STATUS_NOT_RUNNING
+	}
 
 	// build etcd save key
 	saveKey = common.BuildKey(task.ProjectID, task.TaskID)
@@ -191,6 +223,9 @@ func (a *app) GetTaskList(projectID int64) ([]*common.TaskInfo, error) {
 
 	// range list to unmarshal
 	for _, kvPair = range getResp.Kvs {
+		if common.IsTemporaryKey(string(kvPair.Key)) {
+			continue
+		}
 		task = &common.TaskInfo{}
 		if err = json.Unmarshal(kvPair.Value, task); err != nil {
 			continue

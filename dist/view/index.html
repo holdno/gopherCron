@@ -201,7 +201,7 @@
 									{{item.create_time | parseTime('{y}-{m}-{d} {h}:{i}')}}
 								</div>
 								<div class="task__bottom-button" @click.stop="shutdown($event,item)">
-									结束进程
+									{{item.is_running == 1 ? '结束进程' : '等待执行'}}
 								</div>
 							</div>
 						</div>
@@ -1057,7 +1057,7 @@ var vue = new Vue({
 				return
 			} else {
 				if (!project && this.detail.project.title) {
-					var project = this.detail.project
+					project = this.detail.project
 				}
 				this.getWorkerList(project.project_id)
 			}
@@ -1103,7 +1103,7 @@ var vue = new Vue({
 			}, 200)
 		},
 		shutdown (e, task) {
-			if (task && e.toElement.innerText != '正在关闭') {
+			if (task && e.toElement.innerText != '正在关闭' && e.toElement.innerText != '等待执行') {
 				var content = e.toElement.innerText
 			 	this.$confirm('此操作将立即终止该任务并停止定时执行, 是否继续?', '提示', {
 	        confirmButtonText: '确定',
@@ -1118,14 +1118,16 @@ var vue = new Vue({
 						res = res.data
 						if (res.meta.code == 0) {
 							this.$message('任务"' + task.name + '"已结束进程并暂停定时计划')
+							this.getTasks()
 						} else {
 							this.$message({
 								message: res.meta.msg,
 								type: 'warning'
 							})
+							e.toElement.innerHTML = content
 						}
 					}).finally(res => {
-						e.toElement.innerHTML = content
+						e.toElement.innerHTML = '等待执行'
 					})
 				}).catch(res => {
 
@@ -1453,6 +1455,7 @@ var vue = new Vue({
     					message: "调度成功,请稍后观察任务日志查看结果",
     					type: 'success'
     				})
+					this.getTasks()
     			} else {
     				this.$message({
     					message: res.meta.msg,

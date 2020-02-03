@@ -150,3 +150,21 @@ func StrArrExist(arr []string, check string) bool {
 func GetUserID(c *gin.Context) int64 {
 	return c.GetInt64(common.USER_ID)
 }
+
+// RetryFunc 带重试的func
+func RetryFunc(times int, f func() error) error {
+	var (
+		reTimes int
+		err     error
+	)
+RETRY:
+	if err = f(); err != nil {
+		if reTimes == times {
+			return err
+		}
+		time.Sleep(time.Duration(1) * time.Second)
+		reTimes++
+		goto RETRY
+	}
+	return nil
+}

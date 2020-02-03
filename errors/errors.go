@@ -84,6 +84,7 @@ const (
 	CodeUserExist
 	CodeDontRemoveProjectAdmin
 	CodeNoWorkingNode
+	CodeTaskIsRunning
 )
 
 var (
@@ -123,4 +124,5 @@ var (
 	ErrDontRemoveProjectAdmin = Error{Code: CodeDontRemoveProjectAdmin, Msg: "无法将项目管理员移出项目", MsgEn: "Don't remove the administrator from the project", Log: "无法将项目管理员移出项目"}
 	// ErrNoWorkingNode 没有工作节点
 	ErrNoWorkingNode = Error{Code: CodeNoWorkingNode, Msg: "没有工作节点", MsgEn: "No working node", Log: "当前项目没有工作节点"}
+	ErrTaskIsRunning = Error{Code: CodeTaskIsRunning, Msg: "任务正在执行中", MsgEn: "task is running", Log: "任务正在执行中"}
 )

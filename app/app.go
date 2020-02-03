@@ -31,6 +31,8 @@ type App interface {
 	DeleteProject(tx *gorm.DB, pid, uid int64) error
 	SaveTask(task *common.TaskInfo) (*common.TaskInfo, error)
 	DeleteTask(pid int64, tid string) (*common.TaskInfo, error)
+	SetTaskRunning(task *common.TaskInfo) error
+	SetTaskNotRunning(task *common.TaskInfo) error
 	KillTask(pid int64, tid string) error
 	GetWorkerList(projectID int64) ([]string, error)
 	GetProjectTaskCount(projectID int64) (int64, error)
@@ -76,6 +78,7 @@ type app struct {
 	scheduler *TaskScheduler
 	closeCh   chan struct{}
 	isClose   bool
+	localip   string
 }
 
 func NewApp(conf *config.ServiceConfig) App {

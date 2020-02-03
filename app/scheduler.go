@@ -2,8 +2,11 @@ package app
 
 import (
 	"encoding/json"
+	"math/rand"
 	"sync"
 	"time"
+
+	"ojbk.io/gopherCron/utils"
 
 	"github.com/sirupsen/logrus"
 	"ojbk.io/gopherCron/common"
@@ -174,22 +177,56 @@ func (a *app) TrySchedule() time.Duration {
 func (a *app) TryStartTask(plan *common.TaskSchedulePlan) {
 	// 执行的任务可能会执行很久
 	// 需要防止并发
-	var (
-		taskExecuteInfo *common.TaskExecutingInfo
-		taskExecuting   bool
-	)
+	go func() {
+		var (
+			taskExecuteInfo *common.TaskExecutingInfo
+			taskExecuting   bool
+			err             error
+		)
 
-	if taskExecuteInfo, taskExecuting = a.scheduler.TaskExecutingTable[plan.Task.SchedulerKey()]; taskExecuting {
-		return
-	}
+		if taskExecuteInfo, taskExecuting = a.scheduler.TaskExecutingTable[plan.Task.SchedulerKey()]; taskExecuting {
+			return
+		}
 
-	// 构建执行状态信息
-	taskExecuteInfo = common.BuildTaskExecuteInfo(plan)
+		// 构建执行状态信息
+		taskExecuteInfo = common.BuildTaskExecuteInfo(plan)
 
-	// 保存执行状态
-	a.scheduler.TaskExecutingTable[plan.Task.SchedulerKey()] = taskExecuteInfo
+		lk := a.etcd.Lock(plan.Task)
+		// 保存执行状态
+		// 避免分布式集群上锁偏斜 (每台机器的时钟可能不是特别的准确 导致某一台机器总能抢到锁)
+		time.Sleep(time.Duration(rand.Intn(1000)) * time.Millisecond)
+		if err := lk.TryLock(); err != nil {
+			return
+		}
+		defer lk.Unlock()
 
-	a.ExecuteTask(taskExecuteInfo)
+		a.scheduler.TaskExecutingTable[plan.Task.SchedulerKey()] = taskExecuteInfo
+		if err = a.SetTaskRunning(plan.Task); err != nil {
+			lk.Unlock()
+			a.logger.Warnf("task: %s, id: %s, change running status error, %v", err)
+			// retry
+			if err = utils.RetryFunc(5, func() error {
+				return a.TemporarySchedulerTask(plan.Task)
+			}); err != nil {
+				a.logger.Errorf(
+					"task: %s, id: %s, save task running status error and rescheduler error: %v",
+					plan.Task.Name, plan.Task.TaskID, err)
+			}
+			return
+		}
+
+		result := a.ExecuteTask(taskExecuteInfo)
+		lk.Unlock()
+		// 执行结束后 返回给scheduler
+		a.scheduler.PushTaskResult(result)
+
+		if err = utils.RetryFunc(5, func() error {
+			return a.SetTaskNotRunning(plan.Task)
+		}); err != nil {
+			a.logger.Errorf("task: %s, id: %s, failed to change running status, the task is finished, error: %v",
+				plan.Task.Name, plan.Task.TaskID, err)
+		}
+	}()
 }
 
 // 处理任务结果
@@ -209,7 +246,7 @@ func (a *app) handleTaskResult(result *common.TaskExecuteResult) {
 	projectInfo, err = a.GetProject(result.ExecuteInfo.Task.ProjectID)
 
 	taskResult = &common.TaskResultLog{
-		Result: string(result.Output),
+		Result: result.Output,
 	}
 
 	if err != nil {
@@ -233,7 +270,7 @@ func (a *app) handleTaskResult(result *common.TaskExecuteResult) {
 		EndTime:   result.EndTime.Unix(),
 		Command:   result.ExecuteInfo.Task.Command,
 		WithError: getError,
-		ClientIP:  common.LocalIP,
+		ClientIP:  a.localip,
 	}
 
 	if projectInfo != nil {

@@ -8,6 +8,9 @@ const (
 
 	TASK_STATUS_START = 1
 
+	TASK_STATUS_RUNNING     = 1
+	TASK_STATUS_NOT_RUNNING = 0
+
 	APP_KEY = "app_impl"
 	USER_ID = "user_id"
 

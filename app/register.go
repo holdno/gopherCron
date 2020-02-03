@@ -19,10 +19,10 @@ func (a *app) Register(config *config.EtcdConf) {
 		cancelFunc context.CancelFunc
 	)
 
-	common.LocalIP, _ = utils.GetLocalIP()
+	a.localip, _ = utils.GetLocalIP()
 
-	if common.LocalIP == "" {
-		common.LocalIP = "未知IP节点"
+	if a.localip == "" {
+		a.localip = "未知IP节点"
 	}
 
 	for _, v := range config.Projects {
@@ -34,7 +34,7 @@ func (a *app) Register(config *config.EtcdConf) {
 				leaseKeepAliveResp *clientv3.LeaseKeepAliveResponse
 				ctx                context.Context
 			)
-			regKey = common.BuildRegisterKey(projectID, common.LocalIP)
+			regKey = common.BuildRegisterKey(projectID, a.localip)
 			fmt.Println("register key", regKey)
 			for {
 				ctx, _ = utils.GetContextWithTimeout()

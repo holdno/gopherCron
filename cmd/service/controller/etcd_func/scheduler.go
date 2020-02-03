@@ -47,6 +47,11 @@ func ExecuteTask(c *gin.Context) {
 		return
 	}
 
+	if task.IsRunning == common.TASK_STATUS_RUNNING {
+		response.APIError(c, errors.ErrTaskIsRunning)
+		return
+	}
+
 	// 调用etcd的put方法以出发watcher从而调度该任务
 	if err = srv.TemporarySchedulerTask(task); err != nil {
 		response.APIError(c, err)
