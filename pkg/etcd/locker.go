@@ -28,6 +28,16 @@ func InitTaskLock(taskInfo *common.TaskInfo, kv clientv3.KV, lease clientv3.Leas
 	}
 }
 
+var (
+	clientlockers = make(map[clientv3.LeaseID]*TaskLock)
+)
+
+func (tl *TaskLock) CloseAll() {
+	for _, v := range clientlockers {
+		v.Unlock()
+	}
+}
+
 // 尝试上锁
 func (tl *TaskLock) TryLock() error {
 	var (
@@ -97,6 +107,7 @@ func (tl *TaskLock) TryLock() error {
 	tl.leaseID = leaseGrantResp.ID
 	tl.cancelFunc = cancelFunc
 	tl.isLocked = true
+	clientlockers[tl.leaseID] = tl
 	return nil
 FAIL:
 	cancelFunc()                                       // 取消context
@@ -110,5 +121,6 @@ func (tl *TaskLock) Unlock() {
 		tl.isLocked = false
 		tl.cancelFunc() // 取消锁协成自动续租
 		tl.lease.Revoke(context.TODO(), tl.leaseID)
+		delete(clientlockers, tl.leaseID)
 	}
 }

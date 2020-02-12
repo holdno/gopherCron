@@ -1,10 +1,13 @@
 package etcd_func
 
 import (
+	"time"
+
 	"ojbk.io/gopherCron/app"
 	"ojbk.io/gopherCron/cmd/service/response"
 	"ojbk.io/gopherCron/common"
 	"ojbk.io/gopherCron/errors"
+	"ojbk.io/gopherCron/pkg/etcd"
 	"ojbk.io/gopherCron/utils"
 
 	"github.com/gin-gonic/gin"
@@ -26,6 +29,7 @@ func KillTask(c *gin.Context) {
 		errObj errors.Error
 		uid    = utils.GetUserID(c)
 		srv    = app.GetApp(c)
+		lk     *etcd.TaskLock
 	)
 
 	if err = utils.BindArgsWithGin(c, &req); err != nil {
@@ -51,8 +55,18 @@ func KillTask(c *gin.Context) {
 		goto ChangeStatusError
 	}
 
-	task.Status = 0
+	lk = srv.GetLocker(task)
+	// 锁释放则证明任务结束
+	for {
+		if err = lk.TryLock(); err != nil {
+			time.Sleep(time.Second)
+			continue
+		}
+		lk.Unlock()
+		break
+	}
 
+	task.Status = 0
 	if err = srv.SetTaskNotRunning(task); err != nil {
 		goto ChangeStatusError
 	}

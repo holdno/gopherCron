@@ -54,8 +54,10 @@ type App interface {
 	GetUsersByIDs(uids []int64) ([]*common.User, error)
 	CreateUser(u common.User) error
 	ChangePassword(uid int64, password, salt string) error
+	GetLocker(task *common.TaskInfo) *etcd.TaskLock
 
 	BeginTx() *gorm.DB
+	Close()
 }
 
 type EtcdManager interface {
@@ -108,12 +110,17 @@ func NewApp(conf *config.ServiceConfig) App {
 				app.AutoCleanLogs()
 			case <-app.closeCh:
 				t.Stop()
+				app.etcd.Lock(nil).CloseAll()
 				return
 			}
 		}
 	}()
 
 	return app
+}
+
+func (a *app) GetLocker(task *common.TaskInfo) *etcd.TaskLock {
+	return a.etcd.Lock(task)
 }
 
 type Client interface {

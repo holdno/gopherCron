@@ -190,12 +190,13 @@ func (a *app) TryStartTask(plan *common.TaskSchedulePlan) {
 
 		// 构建执行状态信息
 		taskExecuteInfo = common.BuildTaskExecuteInfo(plan)
-
 		lk := a.etcd.Lock(plan.Task)
 		// 保存执行状态
 		// 避免分布式集群上锁偏斜 (每台机器的时钟可能不是特别的准确 导致某一台机器总能抢到锁)
 		time.Sleep(time.Duration(rand.Intn(1000)) * time.Millisecond)
 		if err := lk.TryLock(); err != nil {
+			a.logger.Warnf("task: %s, id: %s, lock error, %v", plan.Task.Name,
+				plan.Task.TaskID, err)
 			return
 		}
 		defer lk.Unlock()
@@ -203,7 +204,8 @@ func (a *app) TryStartTask(plan *common.TaskSchedulePlan) {
 		a.scheduler.TaskExecutingTable[plan.Task.SchedulerKey()] = taskExecuteInfo
 		if err = a.SetTaskRunning(plan.Task); err != nil {
 			lk.Unlock()
-			a.logger.Warnf("task: %s, id: %s, change running status error, %v", err)
+			a.logger.Warnf("task: %s, id: %s, change running status error, %v", plan.Task.Name,
+				plan.Task.TaskID, err)
 			// retry
 			if err = utils.RetryFunc(5, func() error {
 				return a.TemporarySchedulerTask(plan.Task)
@@ -216,16 +218,15 @@ func (a *app) TryStartTask(plan *common.TaskSchedulePlan) {
 		}
 
 		result := a.ExecuteTask(taskExecuteInfo)
-		lk.Unlock()
-		// 执行结束后 返回给scheduler
-		a.scheduler.PushTaskResult(result)
-
 		if err = utils.RetryFunc(5, func() error {
 			return a.SetTaskNotRunning(plan.Task)
 		}); err != nil {
 			a.logger.Errorf("task: %s, id: %s, failed to change running status, the task is finished, error: %v",
 				plan.Task.Name, plan.Task.TaskID, err)
 		}
+		lk.Unlock()
+		// 执行结束后 返回给scheduler
+		a.scheduler.PushTaskResult(result)
 	}()
 }
 

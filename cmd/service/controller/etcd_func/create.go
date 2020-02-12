@@ -21,7 +21,7 @@ type TaskSaveRequest struct {
 	Cron      string `form:"cron" binding:"required"`
 	Remark    string `form:"remark"`
 	Timeout   int    `form:"timeout"`
-	Status    int    `form:"status"` // 执行状态 1立即加入执行队列 0存入etcd但是不执行
+	Status    int    `form:"gitstatus"` // 执行状态 1立即加入执行队列 0存入etcd但是不执行
 }
 
 // TaskSave save tast to etcd
@@ -68,6 +68,7 @@ func SaveTask(c *gin.Context) {
 		Timeout:    req.Timeout,
 		Status:     req.Status,
 		CreateTime: time.Now().Unix(),
+		IsRunning:  common.TASK_STATUS_UNDEFINED,
 	}); err != nil {
 		response.APIError(c, err)
 		return

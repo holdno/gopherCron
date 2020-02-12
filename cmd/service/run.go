@@ -92,11 +92,11 @@ func Run(opt *SetupOptions) error {
 	apiServer(srv, conf.Deploy)
 
 	os.Setenv("GOPHERENV", conf.Deploy.Environment)
-	waitingShutdown()
+	waitingShutdown(srv)
 	return nil
 }
 
-func waitingShutdown() {
+func waitingShutdown(srv app.App) {
 	stopSignalChan := make(chan os.Signal, 1)
 	signal.Notify(stopSignalChan, os.Interrupt, os.Kill, syscall.SIGTERM, syscall.SIGINT)
 
@@ -107,7 +107,7 @@ func waitingShutdown() {
 		if os.Getenv("GOPHERENV") == "release" {
 			time.Sleep(time.Second * 10)
 		}
-
+		srv.Close()
 		// 关闭http服务
 		err := shutdownHTTPServer()
 		if err != nil {

@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/coreos/etcd/mvcc/mvccpb"
 
@@ -15,6 +16,7 @@ import (
 func (a *app) SetTaskRunning(task *common.TaskInfo) error {
 	task.IsRunning = common.TASK_STATUS_RUNNING
 	task.ClientIP = a.localip
+	fmt.Println("save running")
 	_, err := a.SaveTask(task)
 	return err
 }
@@ -39,23 +41,28 @@ func (a *app) SaveTask(task *common.TaskInfo) (*common.TaskInfo, error) {
 		err      error
 	)
 
-	if oldTask, err = a.GetTask(task.ProjectID, task.TaskID); err != nil {
+	if oldTask, err = a.GetTask(task.ProjectID, task.TaskID); err != nil && err != errors.ErrDataNotFound {
 		errObj = errors.ErrInternalError
 		errObj.Log = "[Etcd - SaveTask] get old task info error:" + err.Error()
 		return nil, errObj
 	}
 
-	if oldTask.IsRunning == common.TASK_STATUS_RUNNING {
-		lk := a.etcd.Lock(task)
-		if err = lk.TryLock(); err != nil {
-			errObj = errors.ErrLockAlreadyRequired
-			errObj.Log = "[Etcd - SaveTask] the task is locked"
-			return nil, errObj
-		}
-		defer lk.Unlock()
-		// 任务状态是running 但是没有锁 证明任务已经执行完毕 但是状态同步失败
-		task.IsRunning = common.TASK_STATUS_NOT_RUNNING
+	if oldTask != nil && task.IsRunning == common.TASK_STATUS_UNDEFINED {
+		task.IsRunning = oldTask.IsRunning
+		task.ClientIP = oldTask.ClientIP
 	}
+
+	//if oldTask != nil && oldTask.IsRunning == common.TASK_STATUS_RUNNING {
+	//	lk := a.etcd.Lock(task)
+	//	if err = lk.TryLock(); err != nil {
+	//		errObj = errors.ErrLockAlreadyRequired
+	//		errObj.Log = "[Etcd - SaveTask] the task is locked"
+	//		return nil, errObj
+	//	}
+	//	defer lk.Unlock()
+	//	// 任务状态是running 但是没有锁 证明任务已经执行完毕 但是状态同步失败
+	//	task.IsRunning = common.TASK_STATUS_NOT_RUNNING
+	//}
 
 	// build etcd save key
 	saveKey = common.BuildKey(task.ProjectID, task.TaskID)
