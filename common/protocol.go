@@ -82,7 +82,7 @@ func IsTemporaryKey(key string) bool {
 
 // BuildLockKey etcd 分布式锁key
 func BuildLockKey(projectID int64, taskID string) string {
-	return fmt.Sprintf("%s/lock/%d/%s", ETCD_PREFIX)
+	return fmt.Sprintf("%s/lock/%d/%s", ETCD_PREFIX, projectID, taskID)
 }
 
 // BuildLockKey etcd 分布式锁key
