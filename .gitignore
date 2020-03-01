@@ -6,3 +6,4 @@ gopherCron
 gopherCronClient
 .idea
 _build
+.DS_Store
