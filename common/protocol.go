@@ -23,6 +23,7 @@ type TaskInfo struct {
 	CreateTime int64  `json:"create_time"`
 	Status     int    `json:"status"`
 	IsRunning  int    `json:"is_running"`
+	Noseize    int    `json:"noseize"`
 	ClientIP   string `json:"client_ip"`
 }
 

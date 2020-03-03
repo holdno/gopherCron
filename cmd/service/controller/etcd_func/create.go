@@ -22,10 +22,11 @@ type TaskSaveRequest struct {
 	Remark    string `form:"remark"`
 	Timeout   int    `form:"timeout"`
 	Status    int    `form:"gitstatus"` // 执行状态 1立即加入执行队列 0存入etcd但是不执行
+	Noseize   int    `form:"noseize"`
 }
 
 // TaskSave save tast to etcd
-// post a json value like {"project_id": "xxxx", "task_id": "xxxxx", "name":"task_name", "command": "go run ...", "cron": "*/1 * * * * *", "remark": "write something"}
+// post a json value like {"project_id": "xxxx", "task_id": "xxxxx", "name":"task_name", "command": "go run ...", "cron": "*/1 * * * * *", "remark": "write something", "seize": 1}
 func SaveTask(c *gin.Context) {
 	var (
 		req         TaskSaveRequest
@@ -67,6 +68,7 @@ func SaveTask(c *gin.Context) {
 		Remark:     req.Remark,
 		Timeout:    req.Timeout,
 		Status:     req.Status,
+		Noseize:    req.Noseize,
 		CreateTime: time.Now().Unix(),
 		IsRunning:  common.TASK_STATUS_UNDEFINED,
 	}); err != nil {
