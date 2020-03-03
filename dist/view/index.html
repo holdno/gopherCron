@@ -1152,6 +1152,11 @@ var vue = new Vue({
 			} else {
 				task.status = false
 			}
+			if (task.unseize == 1) {
+				task.unseize = true
+			} else {
+				task.unseize = false
+			}
 			this.detail.currentTask = task.task_id
 			this.detail.task = JSON.parse(JSON.stringify(task))
 			if (this.detail.currentTab == 1) {
