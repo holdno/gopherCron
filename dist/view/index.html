@@ -502,9 +502,6 @@ request.interceptors.response.use(function (response) {
     		type: 'warning'
     	})
     }
-    console.log(error.response.data)
-    console.log(error.response.status)
-    console.log(error.response.headers)
   } else {
     // Something happened in setting up the request that triggered an Error
     console.log('Error', error.message)
@@ -770,7 +767,6 @@ var vue = new Vue({
 	},
 	created () {
 		var accessToken = Cookies.get('access-token')
-		console.log(accessToken)
 		if (accessToken) {
 			this.isLogin = true
 			request.defaults.headers.common['access-token'] = accessToken
@@ -991,7 +987,6 @@ var vue = new Vue({
     	request.get('/log/recent').then(res => {
     		res = res.data
     		if (res.meta.code == 0) {
-    			console.log(res.response)
     			var xAxis = []
     			var series = [
     				{
