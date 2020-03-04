@@ -318,7 +318,17 @@ func (a *app) GetWorkerList(projectID int64) ([]string, error) {
 	}
 
 	for _, kv = range getResp.Kvs {
-		res = append(res, common.ExtractWorkerIP(projectID, string(kv.Key)))
+		var (
+			ip         = common.ExtractWorkerIP(projectID, string(kv.Key))
+			clientinfo ClientInfo
+		)
+
+		_ = json.Unmarshal(kv.Value, &clientinfo)
+		if clientinfo.Version == "" {
+			clientinfo.Version = "unknow"
+		}
+
+		res = append(res, fmt.Sprintf("%s:%s", ip, clientinfo.Version))
 	}
 
 	return res, nil

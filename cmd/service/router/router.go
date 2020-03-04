@@ -3,6 +3,8 @@ package router
 import (
 	"net/http"
 
+	"ojbk.io/gopherCron/cmd/service/controller/system"
+
 	"ojbk.io/gopherCron/config"
 
 	"github.com/gin-gonic/gin"
@@ -20,6 +22,7 @@ func SetupRoute(r *gin.Engine, conf *config.DeployConf) {
 
 	api := r.Group("/api/v1")
 	{
+		api.GET("/version", system.GetVersion)
 		user := api.Group("/user")
 		{
 			user.POST("/login", user_func.Login)

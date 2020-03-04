@@ -2,7 +2,7 @@ package app
 
 import (
 	"context"
-	"fmt"
+	"encoding/json"
 	"time"
 
 	"github.com/coreos/etcd/clientv3"
@@ -10,6 +10,11 @@ import (
 	"ojbk.io/gopherCron/config"
 	"ojbk.io/gopherCron/utils"
 )
+
+type ClientInfo struct {
+	ClientIP string `json:"client_ip"`
+	Version  string `json:"version"`
+}
 
 // Register 注册agent
 func (a *app) Register(config *config.EtcdConf) {
@@ -25,6 +30,11 @@ func (a *app) Register(config *config.EtcdConf) {
 		a.localip = "未知IP节点"
 	}
 
+	clientinfo, _ := json.Marshal(&ClientInfo{
+		ClientIP: a.localip,
+		Version:  a.GetVersion(),
+	})
+
 	for _, v := range config.Projects {
 		go func(projectID int64) {
 			var (
@@ -35,7 +45,6 @@ func (a *app) Register(config *config.EtcdConf) {
 				ctx                context.Context
 			)
 			regKey = common.BuildRegisterKey(projectID, a.localip)
-			fmt.Println("register key", regKey)
 			for {
 				ctx, _ = utils.GetContextWithTimeout()
 
@@ -51,7 +60,7 @@ func (a *app) Register(config *config.EtcdConf) {
 
 				cancelCtx, cancelFunc = utils.GetContextWithTimeout()
 				// 注册到etcd
-				if _, err = a.etcd.KV().Put(cancelCtx, regKey, "", clientv3.WithLease(leaseGrantResp.ID)); err != nil {
+				if _, err = a.etcd.KV().Put(cancelCtx, regKey, string(clientinfo), clientv3.WithLease(leaseGrantResp.ID)); err != nil {
 					goto RETRY
 				}
 

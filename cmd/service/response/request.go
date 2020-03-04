@@ -2,7 +2,6 @@ package response
 
 import (
 	"net/http"
-	"reflect"
 	"time"
 
 	"ojbk.io/gopherCron/utils"
@@ -109,7 +108,7 @@ func printSuccessLog(c *gin.Context, meta *Meta) {
 func APISuccess(c *gin.Context, response interface{}) {
 	res := c.MustGet(ResponseKey).(*Response)
 
-	if response != nil && !reflect.ValueOf(response).IsNil() {
+	if response != nil {
 		res.Body = response
 	}
 

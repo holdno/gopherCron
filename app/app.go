@@ -58,6 +58,7 @@ type App interface {
 
 	BeginTx() *gorm.DB
 	Close()
+	GetVersion() string
 }
 
 type EtcdManager interface {
