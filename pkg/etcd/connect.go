@@ -2,6 +2,7 @@ package etcd
 
 import (
 	"context"
+	"net/http"
 	"time"
 
 	"ojbk.io/gopherCron/errors"
@@ -54,7 +55,8 @@ func Connect(config *config.EtcdConf) (*TaskManager, error) {
 	}
 
 	if client, err = clientv3.New(etcdConf); err != nil {
-		errObj = errors.NewError(500, "[api_context - InitAPIContext] etcd.Connect get error:"+err.Error(), "")
+		errObj = errors.NewError(http.StatusInternalServerError,
+			"[api_context - InitAPIContext] etcd.Connect get error:"+err.Error(), "")
 		return nil, errObj
 	}
 

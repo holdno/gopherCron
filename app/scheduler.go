@@ -18,16 +18,32 @@ type TaskScheduler struct {
 	PlanTable             sync.Map
 	TaskExecuteResultChan chan *common.TaskExecuteResult
 	// PlanTable             map[string]*common.TaskSchedulePlan  // 任务调度计划表
-	TaskExecutingTable map[string]*common.TaskExecutingInfo // 任务执行中的记录表
+	TaskExecutingTable sync.Map // 任务执行中的记录表
 }
 
 func initScheduler() *TaskScheduler {
 	scheduler := &TaskScheduler{
 		TaskEventChan:         make(chan *common.TaskEvent, 3000),
 		TaskExecuteResultChan: make(chan *common.TaskExecuteResult, 3000),
-		TaskExecutingTable:    make(map[string]*common.TaskExecutingInfo),
 	}
 	return scheduler
+}
+
+func (ts *TaskScheduler) SetExecutingTask(key string, task *common.TaskExecutingInfo) {
+	ts.TaskExecutingTable.Store(key, task)
+}
+
+func (ts *TaskScheduler) CheckTaskExecuting(key string) (*common.TaskExecutingInfo, bool) {
+	res, exist := ts.TaskExecutingTable.Load(key)
+	if !exist {
+		return nil, false
+	}
+
+	return res.(*common.TaskExecutingInfo), true
+}
+
+func (ts *TaskScheduler) DeleteExecutingTask(key string) {
+	ts.TaskExecutingTable.Delete(key)
 }
 
 func (ts *TaskScheduler) PushTaskResult(result *common.TaskExecuteResult) {
@@ -132,7 +148,7 @@ func (a *app) handleTaskEvent(event *common.TaskEvent) {
 		a.RemovePlan(event.Task.SchedulerKey())
 	case common.TASK_EVENT_KILL:
 		// 先判断任务是否在执行中
-		if taskExecuteinfo, taskExecuting = a.scheduler.TaskExecutingTable[event.Task.SchedulerKey()]; taskExecuting {
+		if taskExecuteinfo, taskExecuting = a.scheduler.CheckTaskExecuting(event.Task.SchedulerKey()); taskExecuting {
 			taskExecuteinfo.CancelFunc()
 		}
 	}
@@ -177,17 +193,17 @@ func (a *app) TrySchedule() time.Duration {
 func (a *app) TryStartTask(plan *common.TaskSchedulePlan) {
 	// 执行的任务可能会执行很久
 	// 需要防止并发
+	var (
+		taskExecuteInfo *common.TaskExecutingInfo
+		taskExecuting   bool
+		err             error
+	)
+
+	if taskExecuteInfo, taskExecuting = a.scheduler.CheckTaskExecuting(plan.Task.SchedulerKey()); taskExecuting {
+		return
+	}
+
 	go func() {
-		var (
-			taskExecuteInfo *common.TaskExecutingInfo
-			taskExecuting   bool
-			err             error
-		)
-
-		if taskExecuteInfo, taskExecuting = a.scheduler.TaskExecutingTable[plan.Task.SchedulerKey()]; taskExecuting {
-			return
-		}
-
 		// 构建执行状态信息
 		taskExecuteInfo = common.BuildTaskExecuteInfo(plan)
 		if plan.Task.Noseize == 0 {
@@ -203,7 +219,7 @@ func (a *app) TryStartTask(plan *common.TaskSchedulePlan) {
 			defer lk.Unlock()
 		}
 
-		a.scheduler.TaskExecutingTable[plan.Task.SchedulerKey()] = taskExecuteInfo
+		a.scheduler.SetExecutingTask(plan.Task.SchedulerKey(), taskExecuteInfo)
 		if err = a.SetTaskRunning(plan.Task); err != nil {
 			a.logger.Warnf("task: %s, id: %s, change running status error, %v", plan.Task.Name,
 				plan.Task.TaskID, err)
@@ -233,7 +249,7 @@ func (a *app) TryStartTask(plan *common.TaskSchedulePlan) {
 // 处理任务结果
 func (a *app) handleTaskResult(result *common.TaskExecuteResult) {
 	// 删除任务的正在执行状态
-	delete(a.scheduler.TaskExecutingTable, result.ExecuteInfo.Task.SchedulerKey())
+	a.scheduler.DeleteExecutingTask(result.ExecuteInfo.Task.SchedulerKey())
 	var (
 		resultBytes    []byte
 		projectInfo    *common.Project

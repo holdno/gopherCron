@@ -111,7 +111,7 @@ func NewApp(conf *config.ServiceConfig) App {
 				app.AutoCleanLogs()
 			case <-app.closeCh:
 				t.Stop()
-				app.etcd.Lock(nil).CloseAll()
+				// app.etcd.Lock(nil).CloseAll()
 				return
 			}
 		}
