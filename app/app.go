@@ -140,7 +140,7 @@ func NewClient(conf *config.ServiceConfig) Client {
 		panic(err)
 	}
 
-	clusterID, err := client.etcd.Inc(common.CLUSTER_AUTO_INDEX)
+	clusterID, err := client.etcd.Inc(conf.Etcd.Prefix + common.CLUSTER_AUTO_INDEX)
 	if err != nil {
 		panic(err)
 	}

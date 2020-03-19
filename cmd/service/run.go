@@ -54,6 +54,7 @@ func apiServer(srv app.App, conf *config.DeployConf) {
 			Handler:     engine,
 			ReadTimeout: time.Duration(5) * time.Second,
 		}
+		// TODO log
 		fmt.Println(utils.GetCurrentTimeText(), "listening and serving HTTP on "+serverAddress)
 		err := httpServer.ListenAndServe()
 		if err != nil {
@@ -111,7 +112,7 @@ func waitingShutdown(srv app.App) {
 		// 关闭http服务
 		err := shutdownHTTPServer()
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "http server graceful shutdown failed", err)
+			fmt.Println(os.Stderr, "http server graceful shutdown failed", err)
 		} else {
 			fmt.Println(utils.GetCurrentTimeText(), "http server graceful shutdown successfully.")
 		}

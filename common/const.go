@@ -15,7 +15,7 @@ const (
 	APP_KEY = "app_impl"
 	USER_ID = "user_id"
 
-	CLUSTER_AUTO_INDEX = "gopherCron_cluster_key"
+	CLUSTER_AUTO_INDEX = "/gopherCron_cluster_key"
 
 	MonitorFrequency = 5
 

@@ -21,7 +21,7 @@ type TaskSaveRequest struct {
 	Cron      string `form:"cron" binding:"required"`
 	Remark    string `form:"remark"`
 	Timeout   int    `form:"timeout"`
-	Status    int    `form:"gitstatus"` // 执行状态 1立即加入执行队列 0存入etcd但是不执行
+	Status    int    `form:"status"` // 执行状态 1立即加入执行队列 0存入etcd但是不执行
 	Noseize   int    `form:"noseize"`
 }
 
