@@ -9,9 +9,9 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/holdno/gocommons/selection"
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/config"
-	"github.com/holdno/gopherCron/pkg/selection"
 	"github.com/holdno/gopherCron/pkg/store"
 	"github.com/holdno/gopherCron/pkg/store/sqlStore"
 
