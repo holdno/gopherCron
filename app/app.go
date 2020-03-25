@@ -158,7 +158,7 @@ type client struct {
 
 type Client interface {
 	Loop()
-	ResultReport(result *common.TaskExecuteResult)
+	ResultReport(result *common.TaskExecuteResult) error
 	Warner
 }
 

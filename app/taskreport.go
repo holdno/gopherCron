@@ -1,7 +1,12 @@
 package app
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io/ioutil"
+	"net/http"
 	"time"
 
 	"ojbk.io/gopherCron/common"
@@ -13,8 +18,46 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+type HttpTaskResultReporter struct {
+	hc            *http.Client
+	reportAddress string
+}
+
+func NewHttpTaskResultReporter(address string) *HttpTaskResultReporter {
+	return &HttpTaskResultReporter{
+		hc: &http.Client{
+			Timeout: 5 * time.Second,
+		},
+		reportAddress: address,
+	}
+}
+
+func (r *HttpTaskResultReporter) ResultReport(result *common.TaskExecuteResult) error {
+	if result == nil {
+		return nil
+	}
+	b, _ := json.Marshal(result)
+	req, _ := http.NewRequest(http.MethodPost, r.reportAddress, bytes.NewReader(b))
+	req.Header.Add("content-type", "application/json")
+
+	resp, err := r.hc.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to post task result, %w", err)
+	}
+
+	defer resp.Body.Close()
+	body, _ := ioutil.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("task result report failed, log service status error, response status: %d, content: %s",
+			resp.StatusCode, string(body))
+	}
+
+	return nil
+}
+
 type ClientTaskReporter interface {
-	ResultReport(result *common.TaskExecuteResult)
+	ResultReport(result *common.TaskExecuteResult) error
 }
 
 type TaskResultReporter struct {
@@ -32,7 +75,11 @@ func NewDefaultTaskReporter(logger *logrus.Logger, mysqlConf *config.MysqlConf) 
 	}
 }
 
-func (r *TaskResultReporter) ResultReport(result *common.TaskExecuteResult) {
+func (r *TaskResultReporter) ResultReport(result *common.TaskExecuteResult) error {
+	if result == nil {
+		return errors.New("failed to report task result, empty result")
+	}
+
 	var (
 		resultBytes    []byte
 		projects       []*common.Project
@@ -45,22 +92,19 @@ func (r *TaskResultReporter) ResultReport(result *common.TaskExecuteResult) {
 	)
 
 	opts := selection.NewSelector(selection.NewRequirement("id", selection.Equals, result.ExecuteInfo.Task.ProjectID))
-	projects, err = r.projectStore.GetProject(opts)
+	if projects, err = r.projectStore.GetProject(opts); err != nil {
+		return fmt.Errorf("failed to report task result, the task project not found, %w", err)
+	}
 
 	if len(projects) > 0 {
 		projectInfo = projects[0]
 	} else {
 		r.logger.WithField("project_id", result.ExecuteInfo.Task.ProjectID).Errorf("task result report error, project not exist!")
-		return
+		return errors.New("task result report error, project not exist!")
 	}
 
 	taskResult = &common.TaskResultLog{
 		Result: result.Output,
-	}
-
-	if err != nil {
-		taskResult.Error = err.Error()
-		getError = 1
 	}
 
 	if result.Err != nil {
@@ -97,5 +141,8 @@ func (r *TaskResultReporter) ResultReport(result *common.TaskExecuteResult) {
 			"start_time": time.Unix(logInfo.StartTime, 0).Format("2006-01-02 15:05:05"),
 			"end_time":   time.Unix(logInfo.StartTime, 0).Format("2006-01-02 15:05:05"),
 		}).Error("任务日志入库失败")
+
+		return fmt.Errorf("failed to save task result, %w", err)
 	}
+	return nil
 }

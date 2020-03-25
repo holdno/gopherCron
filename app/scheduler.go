@@ -264,7 +264,9 @@ func (a *client) handleTaskResult(result *common.TaskExecuteResult) {
 		a.Warningf("%s", result.Err.Error())
 	}
 
-	a.ResultReport(result)
+	if err := a.ResultReport(result); err != nil {
+		a.logger.WithField("desc", err).Error("task result report error")
+	}
 }
 
 // 接收任务事件

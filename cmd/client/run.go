@@ -6,6 +6,8 @@ import (
 	"os/signal"
 	"syscall"
 
+	"ojbk.io/gopherCron/common"
+
 	"ojbk.io/gopherCron/app"
 	"ojbk.io/gopherCron/config"
 	"ojbk.io/gopherCron/utils"
@@ -17,11 +19,20 @@ func initConf(filePath string) *config.ServiceConfig {
 	return workerConf
 }
 
-func Run(opt *SetupOptions) error {
-	// 加载配置
-	conf := initConf(opt.ConfigPath)
+type reporter struct{}
 
-	client := app.NewClient(conf)
+func (r *reporter) ResultReport(result *common.TaskExecuteResult) {
+
+}
+
+func Run(opts *SetupOptions) error {
+	// 加载配置
+	conf := initConf(opts.ConfigPath)
+	var copts []app.ClientOptions
+	if opts.ReportAddress != "" {
+		copts = append(copts, app.ClientWithTaskReporter(app.NewHttpTaskResultReporter(opts.ReportAddress)))
+	}
+	client := app.NewClient(conf, copts...)
 
 	restart := func() {
 		defer func() {
