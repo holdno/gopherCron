@@ -5,12 +5,10 @@ import (
 	"fmt"
 	"time"
 
-	"ojbk.io/gopherCron/pkg/etcd"
-
-	"ojbk.io/gopherCron/common"
+	"github.com/holdno/gopherCron/common"
+	"github.com/holdno/gopherCron/pkg/etcd"
 
 	"github.com/shirou/gopsutil/cpu"
-
 	"github.com/shirou/gopsutil/mem"
 )
 

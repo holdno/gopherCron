@@ -3,10 +3,10 @@ package etcd
 import (
 	"context"
 
-	"ojbk.io/gopherCron/common"
+	"github.com/holdno/gopherCron/common"
+	"github.com/holdno/gopherCron/errors"
 
 	"github.com/coreos/etcd/clientv3"
-	"ojbk.io/gopherCron/errors"
 )
 
 // TaskLock 任务锁(分布式锁)

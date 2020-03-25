@@ -5,7 +5,7 @@ import (
 
 	"github.com/coreos/etcd/clientv3"
 	"github.com/coreos/etcd/mvcc/mvccpb"
-	"ojbk.io/gopherCron/common"
+	"github.com/holdno/gopherCron/common"
 )
 
 func (a *client) TaskKiller(projects []int64) {

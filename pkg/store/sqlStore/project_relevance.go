@@ -3,12 +3,12 @@ package sqlStore
 import (
 	"fmt"
 
-	"ojbk.io/gopherCron/pkg/selection"
+	"github.com/holdno/gopherCron/pkg/selection"
 
 	"github.com/jinzhu/gorm"
 
-	"ojbk.io/gopherCron/common"
-	"ojbk.io/gopherCron/pkg/store"
+	"github.com/holdno/gopherCron/common"
+	"github.com/holdno/gopherCron/pkg/store"
 )
 
 type projectRelevanceStore struct {

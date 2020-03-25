@@ -3,16 +3,16 @@ package router
 import (
 	"net/http"
 
-	"ojbk.io/gopherCron/cmd/service/controller/system"
+	"github.com/holdno/gopherCron/cmd/service/controller/system"
 
-	"ojbk.io/gopherCron/config"
+	"github.com/holdno/gopherCron/config"
 
 	"github.com/gin-gonic/gin"
-	"ojbk.io/gopherCron/cmd/service/controller/etcd_func"
-	"ojbk.io/gopherCron/cmd/service/controller/log_func"
-	"ojbk.io/gopherCron/cmd/service/controller/project_func"
-	"ojbk.io/gopherCron/cmd/service/controller/user_func"
-	"ojbk.io/gopherCron/cmd/service/middleware"
+	"github.com/holdno/gopherCron/cmd/service/controller/etcd_func"
+	"github.com/holdno/gopherCron/cmd/service/controller/log_func"
+	"github.com/holdno/gopherCron/cmd/service/controller/project_func"
+	"github.com/holdno/gopherCron/cmd/service/controller/user_func"
+	"github.com/holdno/gopherCron/cmd/service/middleware"
 )
 
 func SetupRoute(r *gin.Engine, conf *config.DeployConf) {

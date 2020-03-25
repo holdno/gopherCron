@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"ojbk.io/gopherCron/common"
-	"ojbk.io/gopherCron/config"
+	"github.com/holdno/gopherCron/common"
+	"github.com/holdno/gopherCron/config"
 
 	"github.com/mongodb/mongo-go-driver/mongo"
 	"github.com/mongodb/mongo-go-driver/mongo/options"

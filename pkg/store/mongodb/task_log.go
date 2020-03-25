@@ -5,7 +5,7 @@ import (
 
 	"github.com/mongodb/mongo-go-driver/bson/primitive"
 
-	"ojbk.io/gopherCron/utils"
+	"github.com/holdno/gopherCron/utils"
 
 	"github.com/sirupsen/logrus"
 
@@ -15,9 +15,9 @@ import (
 
 	"github.com/mongodb/mongo-go-driver/bson"
 
-	"ojbk.io/gopherCron/errors"
+	"github.com/holdno/gopherCron/errors"
 
-	"ojbk.io/gopherCron/common"
+	"github.com/holdno/gopherCron/common"
 )
 
 const (

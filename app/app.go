@@ -3,21 +3,20 @@ package app
 import (
 	"time"
 
+	"github.com/holdno/gocommons/selection"
+	"github.com/holdno/gopherCron/common"
+	"github.com/holdno/gopherCron/config"
+	"github.com/holdno/gopherCron/errors"
+	"github.com/holdno/gopherCron/jwt"
+	"github.com/holdno/gopherCron/pkg/etcd"
+	"github.com/holdno/gopherCron/pkg/logger"
+	"github.com/holdno/gopherCron/pkg/store/sqlStore"
+	"github.com/holdno/gopherCron/utils"
+
 	"github.com/coreos/etcd/clientv3"
-	"github.com/jinzhu/gorm"
-
-	"ojbk.io/gopherCron/errors"
-
 	"github.com/gin-gonic/gin"
+	"github.com/jinzhu/gorm"
 	"github.com/sirupsen/logrus"
-	"ojbk.io/gopherCron/common"
-	"ojbk.io/gopherCron/config"
-	"ojbk.io/gopherCron/jwt"
-	"ojbk.io/gopherCron/pkg/etcd"
-	"ojbk.io/gopherCron/pkg/logger"
-	"ojbk.io/gopherCron/pkg/selection"
-	"ojbk.io/gopherCron/pkg/store/sqlStore"
-	"ojbk.io/gopherCron/utils"
 )
 
 type App interface {

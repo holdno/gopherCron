@@ -9,11 +9,11 @@ import (
 	"strconv"
 	"time"
 
-	"ojbk.io/gopherCron/common"
+	"github.com/holdno/gopherCron/common"
 
-	"ojbk.io/gopherCron/errors"
+	"github.com/holdno/gopherCron/errors"
 
-	"ojbk.io/gopherCron/config"
+	"github.com/holdno/gopherCron/config"
 
 	"github.com/holdno/snowFlakeByGo"
 

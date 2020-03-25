@@ -9,11 +9,11 @@ import (
 	"syscall"
 	"time"
 
-	"ojbk.io/gopherCron/app"
-	"ojbk.io/gopherCron/cmd/service/router"
-	"ojbk.io/gopherCron/common"
-	"ojbk.io/gopherCron/config"
-	"ojbk.io/gopherCron/utils"
+	"github.com/holdno/gopherCron/app"
+	"github.com/holdno/gopherCron/cmd/service/router"
+	"github.com/holdno/gopherCron/common"
+	"github.com/holdno/gopherCron/config"
+	"github.com/holdno/gopherCron/utils"
 
 	"github.com/gin-gonic/gin"
 )

@@ -5,12 +5,11 @@ import (
 	"net/http"
 	"time"
 
-	"ojbk.io/gopherCron/errors"
-
-	"ojbk.io/gopherCron/common"
+	"github.com/holdno/gopherCron/common"
+	"github.com/holdno/gopherCron/config"
+	"github.com/holdno/gopherCron/errors"
 
 	"github.com/coreos/etcd/clientv3"
-	"ojbk.io/gopherCron/config"
 )
 
 type TaskManager struct {

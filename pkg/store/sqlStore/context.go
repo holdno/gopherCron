@@ -1,9 +1,10 @@
 package sqlStore
 
 import (
+	"github.com/holdno/gopherCron/pkg/selection"
+
 	"github.com/jinzhu/gorm"
 	"github.com/sirupsen/logrus"
-	"ojbk.io/gopherCron/pkg/selection"
 )
 
 type commonFields struct {

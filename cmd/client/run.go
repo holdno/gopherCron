@@ -6,11 +6,11 @@ import (
 	"os/signal"
 	"syscall"
 
-	"ojbk.io/gopherCron/common"
+	"github.com/holdno/gopherCron/common"
 
-	"ojbk.io/gopherCron/app"
-	"ojbk.io/gopherCron/config"
-	"ojbk.io/gopherCron/utils"
+	"github.com/holdno/gopherCron/app"
+	"github.com/holdno/gopherCron/config"
+	"github.com/holdno/gopherCron/utils"
 )
 
 // 配置文件初始化

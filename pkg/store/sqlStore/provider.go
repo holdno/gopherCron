@@ -4,14 +4,14 @@ import (
 	"fmt"
 	"reflect"
 
-	"ojbk.io/gopherCron/common"
+	"github.com/holdno/gopherCron/common"
 
 	"github.com/go-sql-driver/mysql"
+	"github.com/holdno/gopherCron/config"
+	"github.com/holdno/gopherCron/pkg/store"
+	"github.com/holdno/gopherCron/utils"
 	"github.com/jinzhu/gorm"
 	"github.com/sirupsen/logrus"
-	"ojbk.io/gopherCron/config"
-	"ojbk.io/gopherCron/pkg/store"
-	"ojbk.io/gopherCron/utils"
 )
 
 type SqlProvider struct {

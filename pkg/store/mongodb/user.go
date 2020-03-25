@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"ojbk.io/gopherCron/errors"
+	"github.com/holdno/gopherCron/errors"
 
 	"github.com/mongodb/mongo-go-driver/bson"
 	"github.com/mongodb/mongo-go-driver/mongo"
@@ -13,8 +13,8 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"ojbk.io/gopherCron/common"
-	"ojbk.io/gopherCron/utils"
+	"github.com/holdno/gopherCron/common"
+	"github.com/holdno/gopherCron/utils"
 )
 
 const (

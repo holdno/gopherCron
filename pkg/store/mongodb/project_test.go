@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"ojbk.io/gopherCron/config"
+	"github.com/holdno/gopherCron/config"
 
 	"github.com/mongodb/mongo-go-driver/bson"
 	"github.com/mongodb/mongo-go-driver/bson/primitive"
