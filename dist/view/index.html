@@ -51,6 +51,9 @@
 					<div class="menu__item iconfont" @click="changeMenu('admin')" :class="position == 'admin' && 'active'">
 						&#xebb8;
 					</div>
+					<div class="menu__item iconfont" v-if="user.permission.indexOf('admin') != -1" @click="changeMenu('user')" :class="position == 'user' && 'active'">
+						&#xebb8;
+					</div>
 				</div>
 
 				<div class="menu__version">
@@ -140,6 +143,54 @@
 					</div>
 				</div>
 			</div>
+
+			<template v-if="position == 'user'">
+				<div class="user__box home__box detail__task" v-loading="userbox.loading">
+					<el-table :data="userlist.list" border fit style="width: 100%">
+						<el-table-column width="110px" label="ID">
+							<template slot-scope="scope">
+								<span>{{scope.row.id}}</span>
+							</template>
+						</el-table-column>
+
+						<el-table-column class-name="status-col" label="姓名" width="200px">
+							<template slot-scope="scope">
+								<span>{{scope.row.name}}</span>
+							</template>
+						</el-table-column>
+
+						<el-table-column class-name="status-col" label="账号" width="300px">
+							<template slot-scope="scope">
+								<span>{{scope.row.account}}</span>
+							</template>
+						</el-table-column>
+
+						<el-table-column class-name="status-col" label="创建时间">
+							<template slot-scope="scope">
+								<span>{{scope.row.create_time | parseTime('{y}-{m}-{d} {h}:{i}:{s}')}}</span>
+							</template>
+						</el-table-column>
+
+						<el-table-column align="center" label="操作" width="180">
+                          <template slot-scope="scope">
+                            <el-row>
+                              <el-button v-if="scope.row.id != 1" @click='deleteUser(scope.row.id)' size="mini" style="background-color: #f56c6c; border: none; color: #fff;" icon="el-icon-delete">删除</el-button>
+                            </el-row>
+                          </template>
+                        </el-table-column>
+					</el-table>
+
+					<div class="detail__page-box" v-if="userlist.total">
+						<el-pagination
+								@current-change="gotoUserPage"
+								:current-page="userquery.page"
+								:page-size="userquery.pagesize"
+								layout="total, prev, pager, next, jumper"
+								:total="userlist.total">
+						</el-pagination>
+					</div>
+				</div>
+			</template>
 			
 			<template v-if="position == 'project'">
 				<div class="project__box" v-loading="project.loading">
@@ -172,12 +223,12 @@
 					</div>
 					<el-input
 						class="task__search-input"
-				    size="mini"
-				    placeholder="请输入任务名称"
-				    suffix-icon="el-icon-search"
-				    clearable
-				    v-model="task.search"
-				   	@input="taskSearch">
+				    	size="mini"
+				    	placeholder="请输入任务名称"
+				    	suffix-icon="el-icon-search"
+				    	clearable
+				    	v-model="task.search"
+				   		@input="taskSearch">
 				  </el-input>
 					<div class="task__no-data iconfont" v-show="!task.currentList[0]">
 						&#xe635;
@@ -242,7 +293,7 @@
 					<div class="detail__task" v-show="detail.task.task_id">
 						<el-tabs tab-position="right" @tab-click="tabClick">
 					    <el-tab-pane label="任务详情" v-loading="detail.loading">
-					    	<el-button class="detail__execute-task" @click="executeTask" type="primary" size="mini" round @click="cleanLog">立即执行</el-button>
+					    	<el-button class="detail__execute-task" @click="executeTask" type="primary" size="mini" round>立即执行</el-button>
 					      <el-form :model="detail.task">
 					      	<el-form-item label="任务ID">
 					          <el-input :value="detail.task.task_id" :readonly="true"></el-input>
@@ -681,6 +732,9 @@ var vue = new Vue({
 	    },
 	    passwordType: 'password'
 		},
+		userbox: {
+			loading: false,
+		},
 		user: {
 			accessToken: '',
 			name: '',
@@ -763,6 +817,16 @@ var vue = new Vue({
 		monitor: {
 			list: [],
 			interval: {}
+		},
+		userquery: {
+			name: '',
+			account: '',
+			page: 1,
+			pagesize: 20
+		},
+		userlist: {
+			list: [],
+			total: 0
 		}
 	},
 	created () {
@@ -934,6 +998,53 @@ var vue = new Vue({
     		this.admin.createLoading = false
     	})
     },
+		getuserlist(){
+			this.userbox.loading = true
+			request.get('/user/list', {
+				params: this.userquery
+			}).then(res => {
+				res = res.data
+				if (res.meta.code == 0) {
+					console.log(res)
+					this.userlist.list = res.response.list
+					this.userlist.total = res.response.total
+					console.log(this.userlist.list)
+				} else {
+					this.$message({
+						message: res.meta.msg,
+						type: 'warning'
+					})
+				}
+			}).finally(res => {
+				this.userbox.loading = false
+			})
+		},
+		deleteUser (uid) {
+			if (!confirm('确认删除该用户?')) {
+				return
+			}
+
+			this.userbox.loading = true
+			request.post('/user/delete', {
+				id: uid,
+			}).then(res => {
+				res = res.data
+				if (res.meta.code == 0) {
+					this.$message({
+						message: '删除成功',
+						type: 'success'
+					})
+					this.getuserlist()
+				} else {
+					this.$message({
+						message: res.meta.msg,
+						type: 'warning'
+					})
+				}
+			}).finally(res => {
+				this.userbox.loading = false
+			})
+		},
     changePassword () {
     	if (this.password.password == '') {
     		this.$message('请输入旧密码')
@@ -980,7 +1091,9 @@ var vue = new Vue({
     	if (position == 'homepage') {
     		this.getProjects()
     		this.getProjectRecent()
-    	}
+    	} else if (position == 'user') {
+    		this.getuserlist()
+		}
     	this.position = position
     },
     getProjectRecent () {

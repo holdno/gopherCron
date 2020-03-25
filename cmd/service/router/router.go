@@ -30,6 +30,7 @@ func SetupRoute(r *gin.Engine, conf *config.DeployConf) {
 			user.GET("/info", user_func.GetUserInfo)
 			user.POST("/change_password", user_func.ChangePassword)
 			user.POST("/create", user_func.CreateUser)
+			user.GET("/list", user_func.GetUserList)
 		}
 
 		cron := api.Group("/crontab")

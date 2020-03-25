@@ -2,8 +2,10 @@ package app
 
 import (
 	"bufio"
+	"errors"
 	"os/exec"
 	"strings"
+	"syscall"
 	"time"
 
 	"ojbk.io/gopherCron/common"
@@ -11,7 +13,7 @@ import (
 )
 
 // ExecuteTask 执行任务
-func (a *app) ExecuteTask(info *common.TaskExecutingInfo) *common.TaskExecuteResult {
+func (a *client) ExecuteTask(info *common.TaskExecutingInfo) *common.TaskExecuteResult {
 	// 启动一个协成来执行shell命令
 	var (
 		cmd    *exec.Cmd
@@ -65,6 +67,26 @@ func (a *app) ExecuteTask(info *common.TaskExecutingInfo) *common.TaskExecuteRes
 	}
 
 	if result.Err = cmd.Wait(); result.Err != nil {
+		if strings.Contains(cmd.ProcessState.String(), syscall.SIGKILL.String()) {
+			result.Err = errors.New("timeout")
+		} else {
+			switch cmd.ProcessState.ExitCode() {
+			case 1:
+				result.Err = errors.New("unknow error, exit code 1")
+			case 2:
+				result.Err = errors.New("error shell command")
+			case 126:
+				result.Err = errors.New("unexecutable command")
+			case 127:
+				result.Err = errors.New("command not found")
+			case 128:
+				result.Err = errors.New("invalid exit parameter")
+			case 130:
+				result.Err = errors.New("sig exit")
+			case 255:
+				result.Err = errors.New("error exit code")
+			}
+		}
 		goto FinishWithError
 	}
 

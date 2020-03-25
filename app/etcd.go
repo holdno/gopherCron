@@ -13,24 +13,39 @@ import (
 	"ojbk.io/gopherCron/utils"
 )
 
-func (a *app) SetTaskRunning(task *common.TaskInfo) error {
+type comm struct {
+	etcd EtcdManager
+}
+
+type CommonInterface interface {
+	SetTaskRunning(task common.TaskInfo) error
+	SetTaskNotRunning(task common.TaskInfo) error
+	SaveTask(task *common.TaskInfo) (*common.TaskInfo, error)
+	GetTask(projectID int64, nameID string) (*common.TaskInfo, error)
+	TemporarySchedulerTask(task *common.TaskInfo) error
+	GetVersion() string
+}
+
+func NewComm(etcd EtcdManager) CommonInterface {
+	return &comm{etcd: etcd}
+}
+
+func (a *comm) SetTaskRunning(task common.TaskInfo) error {
 	task.IsRunning = common.TASK_STATUS_RUNNING
-	task.ClientIP = a.localip
-	fmt.Println("save running")
-	_, err := a.SaveTask(task)
+	_, err := a.SaveTask(&task)
 	return err
 }
 
-func (a *app) SetTaskNotRunning(task *common.TaskInfo) error {
+func (a *comm) SetTaskNotRunning(task common.TaskInfo) error {
 	task.IsRunning = common.TASK_STATUS_NOT_RUNNING
 	task.ClientIP = ""
-	_, err := a.SaveTask(task)
+	_, err := a.SaveTask(&task)
 	return err
 }
 
 // SaveTask save task to etcd
 // return oldtask & error
-func (a *app) SaveTask(task *common.TaskInfo) (*common.TaskInfo, error) {
+func (a *comm) SaveTask(task *common.TaskInfo) (*common.TaskInfo, error) {
 	var (
 		saveKey  string
 		saveByte []byte
@@ -86,14 +101,14 @@ func (a *app) SaveTask(task *common.TaskInfo) (*common.TaskInfo, error) {
 	if putResp.PrevKv != nil {
 		// if oldtask unmarshal error
 		// don't care because this err doesn't affect result
-		json.Unmarshal([]byte(putResp.PrevKv.Value), &oldTask)
+		_ = json.Unmarshal([]byte(putResp.PrevKv.Value), &oldTask)
 	}
 
 	return oldTask, nil
 }
 
 // TemporarySchedulerTask 临时调度任务
-func (a *app) TemporarySchedulerTask(task *common.TaskInfo) error {
+func (a *comm) TemporarySchedulerTask(task *common.TaskInfo) error {
 	var (
 		schedulerKey   string
 		saveByte       []byte
@@ -162,7 +177,7 @@ func (a *app) DeleteTask(projectID int64, taskID string) (*common.TaskInfo, erro
 }
 
 // GetTask 获取任务
-func (a *app) GetTask(projectID int64, nameID string) (*common.TaskInfo, error) {
+func (a *comm) GetTask(projectID int64, nameID string) (*common.TaskInfo, error) {
 	var (
 		saveKey string
 		getResp *clientv3.GetResponse

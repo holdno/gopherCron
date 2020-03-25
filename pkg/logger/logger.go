@@ -3,19 +3,17 @@ package logger
 import (
 	"os"
 
-	"ojbk.io/gopherCron/config"
-
 	"github.com/sirupsen/logrus"
 )
 
 // MustSetup the func to build log instance
-func MustSetup(conf *config.ServiceConfig) *logrus.Logger {
+func MustSetup(logLevel string) *logrus.Logger {
 	var (
 		level logrus.Level
 		err   error
 	)
 
-	if level, err = logrus.ParseLevel(conf.LogLevel); err != nil {
+	if level, err = logrus.ParseLevel(logLevel); err != nil {
 		panic(err)
 	}
 

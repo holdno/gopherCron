@@ -8,7 +8,7 @@ import (
 	"ojbk.io/gopherCron/common"
 )
 
-func (a *app) TaskKiller(projects []int64) {
+func (a *client) TaskKiller(projects []int64) {
 	for _, v := range projects {
 		go func() {
 			var (

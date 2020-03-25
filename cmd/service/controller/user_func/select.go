@@ -1,6 +1,7 @@
 package user_func
 
 import (
+	"github.com/gin-gonic/gin/binding"
 	"ojbk.io/gopherCron/app"
 	"ojbk.io/gopherCron/cmd/service/response"
 	"ojbk.io/gopherCron/common"
@@ -9,6 +10,56 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+type GetUserListRequest struct {
+	ID        int64  `json:"id" form:"id"`
+	Name      string `json:"name" form:"name"`
+	Account   string `json:"account" form:"account"`
+	ProjectID int64  `json:"project_id" form:"project_id"`
+	Page      int    `json:"page" form:"page" binding:"required"`
+	Pagesize  int    `json:"pagesize" form:"pagesize" binding:"required"`
+}
+
+func GetUserList(c *gin.Context) {
+	var (
+		err error
+		req GetUserListRequest
+	)
+
+	if err = c.ShouldBindWith(&req, binding.Default(c.Request.Method, c.ContentType())); err != nil {
+		errObj := errors.ErrInvalidArgument
+		errObj.Msg = "请求参数错误"
+		errObj.Log = err.Error()
+		response.APIError(c, errObj)
+		return
+	}
+
+	srv := app.GetApp(c)
+
+	args := app.GetUserListArgs{
+		ID:       req.ID,
+		Account:  req.Account,
+		Name:     req.Name,
+		Page:     req.Page,
+		Pagesize: req.Pagesize,
+	}
+	list, err := srv.GetUserList(args)
+	if err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	total, err := srv.GetUserListTotal(args)
+	if err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	response.APISuccess(c, &gin.H{
+		"total": total,
+		"list":  list,
+	})
+}
 
 func GetUserInfo(c *gin.Context) {
 	var (
