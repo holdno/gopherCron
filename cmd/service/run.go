@@ -90,6 +90,12 @@ func Run(opt *SetupOptions) error {
 	conf := initConf(opt.ConfigPath)
 	srv := app.NewApp(conf)
 
+	defer func() {
+		if r := recover(); r != nil {
+			srv.Warningf("%v", r)
+		}
+	}()
+
 	apiServer(srv, conf.Deploy)
 
 	os.Setenv("GOPHERENV", conf.Deploy.Environment)

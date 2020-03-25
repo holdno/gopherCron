@@ -7,10 +7,8 @@ import (
 	"syscall"
 
 	"ojbk.io/gopherCron/app"
-
-	"ojbk.io/gopherCron/utils"
-
 	"ojbk.io/gopherCron/config"
+	"ojbk.io/gopherCron/utils"
 )
 
 // 配置文件初始化
@@ -24,7 +22,22 @@ func Run(opt *SetupOptions) error {
 	conf := initConf(opt.ConfigPath)
 
 	client := app.NewClient(conf)
-	go client.Loop()
+
+	restart := func() {
+		defer func() {
+			if r := recover(); r != nil {
+				client.Warningf("%v", r)
+			}
+
+		}()
+		client.Loop()
+	}
+
+	go func() {
+		for {
+			restart()
+		}
+	}()
 
 	waitingShutdown()
 	return nil

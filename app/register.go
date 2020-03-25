@@ -17,7 +17,7 @@ type ClientInfo struct {
 }
 
 // Register 注册agent
-func (a *app) Register(config *config.EtcdConf) {
+func (a *client) Register(config *config.EtcdConf) {
 	var (
 		err        error
 		cancelCtx  context.Context

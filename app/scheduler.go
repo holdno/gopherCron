@@ -1,7 +1,7 @@
 package app
 
 import (
-	"encoding/json"
+	"fmt"
 	"math/rand"
 	"sync"
 	"time"
@@ -50,7 +50,7 @@ func (ts *TaskScheduler) PushTaskResult(result *common.TaskExecuteResult) {
 	ts.TaskExecuteResultChan <- result
 }
 
-func (a *app) GetPlan(key string) (*common.TaskSchedulePlan, bool) {
+func (a *client) GetPlan(key string) (*common.TaskSchedulePlan, bool) {
 	var (
 		value interface{}
 		ok    bool
@@ -82,11 +82,11 @@ func (ts *TaskScheduler) PlanCount() int {
 	return count
 }
 
-func (a *app) RemovePlan(schedulerKey string) {
+func (a *client) RemovePlan(schedulerKey string) {
 	a.scheduler.PlanTable.Delete(schedulerKey)
 }
 
-func (a *app) Loop() {
+func (a *client) Loop() {
 	var (
 		taskEvent     *common.TaskEvent
 		scheduleAfter time.Duration
@@ -116,7 +116,7 @@ func (a *app) Loop() {
 }
 
 // handleTaskEvent 处理事件
-func (a *app) handleTaskEvent(event *common.TaskEvent) {
+func (a *client) handleTaskEvent(event *common.TaskEvent) {
 	var (
 		taskSchedulePlan *common.TaskSchedulePlan
 		taskExecuteinfo  *common.TaskExecutingInfo
@@ -155,7 +155,7 @@ func (a *app) handleTaskEvent(event *common.TaskEvent) {
 }
 
 // 重新计算任务调度状态
-func (a *app) TrySchedule() time.Duration {
+func (a *client) TrySchedule() time.Duration {
 	var (
 		now      time.Time
 		nearTime *time.Time
@@ -190,7 +190,7 @@ func (a *app) TrySchedule() time.Duration {
 }
 
 // TryStartTask 开始执行任务
-func (a *app) TryStartTask(plan *common.TaskSchedulePlan) {
+func (a *client) TryStartTask(plan *common.TaskSchedulePlan) {
 	// 执行的任务可能会执行很久
 	// 需要防止并发
 	var (
@@ -200,8 +200,17 @@ func (a *app) TryStartTask(plan *common.TaskSchedulePlan) {
 	)
 
 	if taskExecuteInfo, taskExecuting = a.scheduler.CheckTaskExecuting(plan.Task.SchedulerKey()); taskExecuting {
+		a.scheduler.PushTaskResult(&common.TaskExecuteResult{
+			ExecuteInfo: common.BuildTaskExecuteInfo(plan),
+			Output:      "last task was not completed",
+			Err:         fmt.Errorf("task %s execute error: last task was not completed", plan.Task.Name),
+			StartTime:   time.Now(),
+			EndTime:     time.Now(),
+		})
 		return
 	}
+
+	plan.Task.ClientIP = a.localip
 
 	go func() {
 		// 构建执行状态信息
@@ -220,7 +229,7 @@ func (a *app) TryStartTask(plan *common.TaskSchedulePlan) {
 		}
 
 		a.scheduler.SetExecutingTask(plan.Task.SchedulerKey(), taskExecuteInfo)
-		if err = a.SetTaskRunning(plan.Task); err != nil {
+		if err = a.SetTaskRunning(*plan.Task); err != nil {
 			a.logger.Warnf("task: %s, id: %s, change running status error, %v", plan.Task.Name,
 				plan.Task.TaskID, err)
 			// retry
@@ -236,76 +245,26 @@ func (a *app) TryStartTask(plan *common.TaskSchedulePlan) {
 
 		result := a.ExecuteTask(taskExecuteInfo)
 		if err = utils.RetryFunc(5, func() error {
-			return a.SetTaskNotRunning(plan.Task)
+			return a.SetTaskNotRunning(*plan.Task)
 		}); err != nil {
 			a.logger.Errorf("task: %s, id: %s, failed to change running status, the task is finished, error: %v",
 				plan.Task.Name, plan.Task.TaskID, err)
 		}
+
+		// 删除任务的正在执行状态
+		a.scheduler.DeleteExecutingTask(result.ExecuteInfo.Task.SchedulerKey())
 		// 执行结束后 返回给scheduler
 		a.scheduler.PushTaskResult(result)
 	}()
 }
 
 // 处理任务结果
-func (a *app) handleTaskResult(result *common.TaskExecuteResult) {
-	// 删除任务的正在执行状态
-	a.scheduler.DeleteExecutingTask(result.ExecuteInfo.Task.SchedulerKey())
-	var (
-		resultBytes    []byte
-		projectInfo    *common.Project
-		err            error
-		getError       int
-		logInfo        common.TaskLog
-		taskResult     *common.TaskResultLog
-		jsonMarshalErr error
-	)
-
-	projectInfo, err = a.GetProject(result.ExecuteInfo.Task.ProjectID)
-
-	taskResult = &common.TaskResultLog{
-		Result: result.Output,
-	}
-
-	if err != nil {
-		taskResult.Error = err.Error()
-		getError = 1
-	}
-
+func (a *client) handleTaskResult(result *common.TaskExecuteResult) {
 	if result.Err != nil {
-		taskResult.CommandError = result.Err.Error()
-		getError = 1
+		a.Warningf("%s", result.Err.Error())
 	}
 
-	if resultBytes, jsonMarshalErr = json.Marshal(taskResult); jsonMarshalErr != nil {
-		resultBytes = []byte("result log json marshal error:" + jsonMarshalErr.Error())
-	}
-
-	logInfo = common.TaskLog{
-		Name:      result.ExecuteInfo.Task.Name,
-		Result:    string(resultBytes),
-		StartTime: result.StartTime.Unix(),
-		EndTime:   result.EndTime.Unix(),
-		Command:   result.ExecuteInfo.Task.Command,
-		WithError: getError,
-		ClientIP:  a.localip,
-	}
-
-	if projectInfo != nil {
-		logInfo.Project = projectInfo.Title
-	}
-
-	logInfo.ProjectID = result.ExecuteInfo.Task.ProjectID
-	logInfo.TaskID = result.ExecuteInfo.Task.TaskID
-
-	if err = a.store.TaskLog().CreateTaskLog(logInfo); err != nil {
-		a.logger.WithFields(logrus.Fields{
-			"task_name":  logInfo.Name,
-			"result":     logInfo.Result,
-			"error":      err.Error(),
-			"start_time": time.Unix(logInfo.StartTime, 0).Format("2006-01-02 15:05:05"),
-			"end_time":   time.Unix(logInfo.StartTime, 0).Format("2006-01-02 15:05:05"),
-		}).Error("任务日志入库失败")
-	}
+	a.ResultReport(result)
 }
 
 // 接收任务事件

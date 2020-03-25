@@ -1,5 +1,9 @@
 package app
 
-func (a *app) GetVersion() string {
-	return "v2.3.0"
+const (
+	version = "v2.4.0"
+)
+
+func (a *comm) GetVersion() string {
+	return version
 }

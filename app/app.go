@@ -31,8 +31,8 @@ type App interface {
 	DeleteProject(tx *gorm.DB, pid, uid int64) error
 	SaveTask(task *common.TaskInfo) (*common.TaskInfo, error)
 	DeleteTask(pid int64, tid string) (*common.TaskInfo, error)
-	SetTaskRunning(task *common.TaskInfo) error
-	SetTaskNotRunning(task *common.TaskInfo) error
+	SetTaskRunning(task common.TaskInfo) error
+	SetTaskNotRunning(task common.TaskInfo) error
 	KillTask(pid int64, tid string) error
 	GetWorkerList(projectID int64) ([]string, error)
 	GetProjectTaskCount(projectID int64) (int64, error)
@@ -53,12 +53,15 @@ type App interface {
 	GetUserInfo(uid int64) (*common.User, error)
 	GetUsersByIDs(uids []int64) ([]*common.User, error)
 	CreateUser(u common.User) error
+	GetUserList(args GetUserListArgs) ([]*common.User, error)
+	GetUserListTotal(args GetUserListArgs) (int, error)
 	ChangePassword(uid int64, password, salt string) error
 	GetLocker(task *common.TaskInfo) *etcd.TaskLock
 
 	BeginTx() *gorm.DB
 	Close()
 	GetVersion() string
+	Warner
 }
 
 type EtcdManager interface {
@@ -75,22 +78,39 @@ func GetApp(c *gin.Context) App {
 }
 
 type app struct {
-	logger    *logrus.Logger
-	store     sqlStore.SqlStore
-	etcd      EtcdManager
-	scheduler *TaskScheduler
-	closeCh   chan struct{}
-	isClose   bool
-	localip   string
+	store   sqlStore.SqlStore
+	logger  *logrus.Logger
+	etcd    EtcdManager
+	closeCh chan struct{}
+	isClose bool
+	localip string
+
+	CommonInterface
+	Warner
 }
 
-func NewApp(conf *config.ServiceConfig) App {
+type AppOptions func(a *app)
+
+func WithWarning(w Warner) AppOptions {
+	return func(a *app) {
+		a.Warner = w
+	}
+}
+
+func NewApp(conf *config.ServiceConfig, opts ...AppOptions) App {
 	var err error
 
 	app := new(app)
+	app.logger = logger.MustSetup(conf.LogLevel)
+	app.store = sqlStore.MustSetup(conf.Mysql, app.logger, true)
 
-	app.logger = logger.MustSetup(conf)
-	app.store = sqlStore.MustSetup(conf, app.logger, true)
+	for _, opt := range opts {
+		opt(app)
+	}
+
+	if app.Warner == nil {
+		app.Warner = NewDefaultWarner(app.logger)
+	}
 
 	jwt.InitJWT(conf.JWT)
 
@@ -99,6 +119,7 @@ func NewApp(conf *config.ServiceConfig) App {
 		panic(err)
 	}
 	app.logger.Info("connected to etcd")
+	app.CommonInterface = NewComm(app.etcd)
 
 	utils.InitIDWorker(1)
 
@@ -124,23 +145,66 @@ func (a *app) GetLocker(task *common.TaskInfo) *etcd.TaskLock {
 	return a.etcd.Lock(task)
 }
 
-type Client interface {
-	Loop()
+type client struct {
+	localip   string
+	logger    *logrus.Logger
+	etcd      EtcdManager
+	scheduler *TaskScheduler
+
+	ClientTaskReporter
+	CommonInterface
+	Warner
 }
 
-func NewClient(conf *config.ServiceConfig) Client {
+type Client interface {
+	Loop()
+	ResultReport(result *common.TaskExecuteResult)
+	Warner
+}
+
+type ClientOptions func(a *client)
+
+func ClientWithTaskReporter(reporter ClientTaskReporter) ClientOptions {
+	return func(agent *client) {
+		agent.ClientTaskReporter = reporter
+	}
+}
+
+func ClientWithWarning(w Warner) ClientOptions {
+	return func(a *client) {
+		a.Warner = w
+	}
+}
+
+func NewClient(conf *config.ServiceConfig, opts ...ClientOptions) Client {
 	var err error
 
-	client := new(app)
+	agent := new(client)
+	agent.logger = logger.MustSetup(conf.LogLevel)
+	if agent.localip, err = utils.GetLocalIP(); err != nil {
+		agent.logger.Error("failed to get local ip")
+	}
 
-	client.logger = logger.MustSetup(conf)
-	client.store = sqlStore.MustSetup(conf, client.logger, false)
+	for _, opt := range opts {
+		opt(agent)
+	}
 
-	if client.etcd, err = etcd.Connect(conf.Etcd); err != nil {
+	if agent.Warner == nil {
+		agent.Warner = NewDefaultWarner(agent.logger)
+	}
+
+	if agent.ClientTaskReporter == nil {
+		agent.logger.Info("init default task log reporter, it must be used mysql config")
+		agent.ClientTaskReporter = NewDefaultTaskReporter(agent.logger, conf.Mysql)
+	}
+
+	if agent.etcd, err = etcd.Connect(conf.Etcd); err != nil {
 		panic(err)
 	}
 
-	clusterID, err := client.etcd.Inc(conf.Etcd.Prefix + common.CLUSTER_AUTO_INDEX)
+	agent.CommonInterface = NewComm(agent.etcd)
+
+	clusterID, err := agent.etcd.Inc(conf.Etcd.Prefix + common.CLUSTER_AUTO_INDEX)
 	if err != nil {
 		panic(err)
 	}
@@ -148,15 +212,15 @@ func NewClient(conf *config.ServiceConfig) Client {
 	// why 1024. view https://github.com/holdno/snowFlakeByGo
 	utils.InitIDWorker(clusterID % 1024)
 
-	client.scheduler = initScheduler()
-	if err := client.TaskWatcher(conf.Etcd.Projects); err != nil {
+	agent.scheduler = initScheduler()
+	if err := agent.TaskWatcher(conf.Etcd.Projects); err != nil {
 		panic(err)
 	}
 
-	client.TaskKiller(conf.Etcd.Projects)
-	client.Register(conf.Etcd)
+	agent.TaskKiller(conf.Etcd.Projects)
+	agent.Register(conf.Etcd)
 
-	return client
+	return agent
 }
 
 func (a *app) Close() {
@@ -474,6 +538,84 @@ func (a *app) GetUsersByIDs(uids []int64) ([]*common.User, error) {
 	}
 
 	return res, nil
+}
+
+type GetUserListArgs struct {
+	ID        int64
+	Account   string
+	Name      string
+	ProjectID int64
+	Page      int
+	Pagesize  int
+}
+
+func (a *app) parseUserSearchArgs(args GetUserListArgs) (selection.Selector, error) {
+	opts := selection.NewSelector()
+
+	if args.ProjectID != 0 {
+		re, err := a.GetProjectRelevanceUsers(args.ProjectID)
+		if err != nil {
+			return selection.Selector{}, err
+		}
+
+		var ids []int64
+		for _, v := range re {
+			ids = append(ids, v.UID)
+		}
+
+		opts.AddQuery(selection.NewRequirement("id", selection.In, ids))
+	} else if args.ID != 0 {
+		opts.AddQuery(selection.NewRequirement("id", selection.Equals, args.ID))
+	}
+
+	if args.Account != "" {
+		opts.AddQuery(selection.NewRequirement("account", selection.Equals, args.Account))
+	}
+
+	if args.Name != "" {
+		opts.AddQuery(selection.NewRequirement("name", selection.Like, args.Name))
+	}
+
+	opts.Page = args.Page
+	opts.Pagesize = args.Pagesize
+	return opts, nil
+}
+
+func (a *app) GetUserList(args GetUserListArgs) ([]*common.User, error) {
+	opts, err := a.parseUserSearchArgs(args)
+	if err != nil {
+		return nil, err
+	}
+
+	list, err := a.store.User().GetUsers(opts)
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		errObj := errors.ErrInternalError
+		errObj.Msg = "获取用户列表失败"
+		errObj.Log = err.Error()
+		return nil, errObj
+	}
+
+	return list, nil
+}
+
+func (a *app) GetUserListTotal(args GetUserListArgs) (int, error) {
+	opts, err := a.parseUserSearchArgs(args)
+	if err != nil {
+		return 0, err
+	}
+
+	total, err := a.store.User().GetTotal(opts)
+	if err != nil {
+		errObj := errors.ErrInternalError
+		errObj.Msg = "获取用户数量失败"
+		errObj.Log = err.Error()
+		return 0, errObj
+	}
+
+	return total, nil
 }
 
 func (a *app) ChangePassword(uid int64, password, salt string) error {

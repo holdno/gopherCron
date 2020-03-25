@@ -62,11 +62,11 @@ type SqlProviderStores struct {
 	TaskLog          store.TaskLogStore
 }
 
-func MustSetup(conf *config.ServiceConfig, logger *logrus.Logger, install bool) SqlStore {
+func MustSetup(conf *config.MysqlConf, logger *logrus.Logger, install bool) SqlStore {
 	provider := new(SqlProvider)
 
 	provider.logger = logger
-	if err := provider.initConnect(conf.Mysql); err != nil {
+	if err := provider.initConnect(conf); err != nil {
 		panic(err)
 	}
 

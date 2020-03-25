@@ -36,28 +36,28 @@ type TaskSchedulePlan struct {
 
 // TaskExecutingInfo 任务执行状态
 type TaskExecutingInfo struct {
-	Task     *TaskInfo
-	PlanTime time.Time // 理论上的调度时间
-	RealTime time.Time // 实际调度时间
+	Task     *TaskInfo `json:"task"`
+	PlanTime time.Time `json:"plan_time"` // 理论上的调度时间
+	RealTime time.Time `json:"real_time"` // 实际调度时间
 
-	CancelCtx  context.Context
-	CancelFunc context.CancelFunc // 用来取消Command执行的cancel函数
+	CancelCtx  context.Context    `json:"-"`
+	CancelFunc context.CancelFunc `json:"-"` // 用来取消Command执行的cancel函数
 }
 
 // TaskExecuteResult 任务执行结果
 type TaskExecuteResult struct {
-	ExecuteInfo *TaskExecutingInfo
-	Output      string    // 程序输出
-	Err         error     // 是否发生错误
-	StartTime   time.Time // 开始时间
-	EndTime     time.Time // 结束时间
+	ExecuteInfo *TaskExecutingInfo `json:"execute_info"`
+	Output      string             `json:"output"`     // 程序输出
+	Err         error              `json:"error"`      // 是否发生错误
+	StartTime   time.Time          `json:"start_time"` // 开始时间
+	EndTime     time.Time          `json:"end_time"`   // 结束时间
 }
 
 // TaskResultLog 任务执行结果日志
 type TaskResultLog struct {
-	Result       string `json:"result"`
-	CommandError string `json:"command_error"`
-	Error        string `json:"error"`
+	Result      string `json:"result"`
+	SystemError string `json:"system_error"`
+	Error       string `json:"error"`
 }
 
 // ETCD_PREFIX topic prefix  default: /cron

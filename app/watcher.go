@@ -10,7 +10,7 @@ import (
 	"github.com/coreos/etcd/mvcc/mvccpb"
 )
 
-func (a *app) TaskWatcher(projects []int64) error {
+func (a *client) TaskWatcher(projects []int64) error {
 	for _, v := range projects {
 		var (
 			getResp            *clientv3.GetResponse
