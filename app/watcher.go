@@ -3,8 +3,8 @@ package app
 import (
 	"context"
 
-	"ojbk.io/gopherCron/common"
-	"ojbk.io/gopherCron/errors"
+	"github.com/holdno/gopherCron/common"
+	"github.com/holdno/gopherCron/errors"
 
 	"github.com/coreos/etcd/clientv3"
 	"github.com/coreos/etcd/mvcc/mvccpb"

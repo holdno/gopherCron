@@ -3,8 +3,8 @@ package sqlStore
 import (
 	"database/sql"
 
+	"github.com/holdno/gopherCron/pkg/selection"
 	"github.com/jinzhu/gorm"
-	"ojbk.io/gopherCron/pkg/selection"
 )
 
 func parseSelector(db *gorm.DB, selector selection.Selector, toSelecter bool) *gorm.DB {

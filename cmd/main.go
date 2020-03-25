@@ -3,9 +3,9 @@ package main
 import (
 	"os"
 
+	"github.com/holdno/gopherCron/cmd/client"
+	"github.com/holdno/gopherCron/cmd/service"
 	"github.com/spf13/cobra"
-	"ojbk.io/gopherCron/cmd/client"
-	"ojbk.io/gopherCron/cmd/service"
 )
 
 func main() {

@@ -6,9 +6,9 @@ import (
 	"time"
 
 	"github.com/coreos/etcd/clientv3"
-	"ojbk.io/gopherCron/common"
-	"ojbk.io/gopherCron/config"
-	"ojbk.io/gopherCron/utils"
+	"github.com/holdno/gopherCron/common"
+	"github.com/holdno/gopherCron/config"
+	"github.com/holdno/gopherCron/utils"
 )
 
 type ClientInfo struct {

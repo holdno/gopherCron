@@ -9,11 +9,11 @@ import (
 	"net/http"
 	"time"
 
-	"ojbk.io/gopherCron/common"
-	"ojbk.io/gopherCron/config"
-	"ojbk.io/gopherCron/pkg/selection"
-	"ojbk.io/gopherCron/pkg/store"
-	"ojbk.io/gopherCron/pkg/store/sqlStore"
+	"github.com/holdno/gopherCron/common"
+	"github.com/holdno/gopherCron/config"
+	"github.com/holdno/gopherCron/pkg/selection"
+	"github.com/holdno/gopherCron/pkg/store"
+	"github.com/holdno/gopherCron/pkg/store/sqlStore"
 
 	"github.com/sirupsen/logrus"
 )

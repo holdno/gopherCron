@@ -1,4 +1,4 @@
-module ojbk.io/gopherCron
+module github.com/holdno/gopherCron
 
 require (
 	github.com/BurntSushi/toml v0.3.1
@@ -20,17 +20,16 @@ require (
 	github.com/grpc-ecosystem/go-grpc-middleware v1.0.0 // indirect
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway v1.6.3 // indirect
+	github.com/holdno/gocommons v1.2.6 // indirect
 	github.com/holdno/snowFlakeByGo v0.0.0-20180510033652-d23f8a8cadd7
 	github.com/jinzhu/gorm v1.9.11
-	github.com/jonboulle/clockwork v0.1.0 // indirect
-	github.com/json-iterator/go v1.1.5 // indirect
 	github.com/kr/pretty v0.1.0 // indirect
 	github.com/mattn/go-isatty v0.0.4 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.1 // indirect
 	github.com/mongodb/mongo-go-driver v0.1.0
 	github.com/shirou/gopsutil v2.18.12+incompatible
-	github.com/sirupsen/logrus v1.2.0
+	github.com/sirupsen/logrus v1.3.0
 	github.com/soheilhy/cmux v0.1.4 // indirect
 	github.com/spf13/cobra v0.0.5
 	github.com/spf13/pflag v1.0.5

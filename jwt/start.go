@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"ojbk.io/gopherCron/config"
+	"github.com/holdno/gopherCron/config"
 )
 
 var (

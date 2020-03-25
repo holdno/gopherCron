@@ -8,8 +8,8 @@ import (
 	"syscall"
 	"time"
 
-	"ojbk.io/gopherCron/common"
-	"ojbk.io/gopherCron/config"
+	"github.com/holdno/gopherCron/common"
+	"github.com/holdno/gopherCron/config"
 )
 
 // ExecuteTask 执行任务

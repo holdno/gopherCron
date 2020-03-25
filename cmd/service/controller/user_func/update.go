@@ -1,11 +1,11 @@
 package user_func
 
 import (
-	"ojbk.io/gopherCron/app"
-	"ojbk.io/gopherCron/cmd/service/response"
-	"ojbk.io/gopherCron/common"
-	"ojbk.io/gopherCron/errors"
-	"ojbk.io/gopherCron/utils"
+	"github.com/holdno/gopherCron/app"
+	"github.com/holdno/gopherCron/cmd/service/response"
+	"github.com/holdno/gopherCron/common"
+	"github.com/holdno/gopherCron/errors"
+	"github.com/holdno/gopherCron/utils"
 
 	"github.com/gin-gonic/gin"
 )

@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"time"
 
-	"ojbk.io/gopherCron/common"
-	"ojbk.io/gopherCron/pkg/selection"
-	"ojbk.io/gopherCron/pkg/store"
-	"ojbk.io/gopherCron/utils"
+	"github.com/holdno/gopherCron/common"
+	"github.com/holdno/gopherCron/pkg/selection"
+	"github.com/holdno/gopherCron/pkg/store"
+	"github.com/holdno/gopherCron/utils"
 )
 
 type userStore struct {

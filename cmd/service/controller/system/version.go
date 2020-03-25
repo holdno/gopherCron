@@ -2,8 +2,8 @@ package system
 
 import (
 	"github.com/gin-gonic/gin"
-	"ojbk.io/gopherCron/app"
-	"ojbk.io/gopherCron/cmd/service/response"
+	"github.com/holdno/gopherCron/app"
+	"github.com/holdno/gopherCron/cmd/service/response"
 )
 
 func GetVersion(c *gin.Context) {

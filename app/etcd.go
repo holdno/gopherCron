@@ -8,9 +8,9 @@ import (
 	"github.com/coreos/etcd/mvcc/mvccpb"
 
 	"github.com/coreos/etcd/clientv3"
-	"ojbk.io/gopherCron/common"
-	"ojbk.io/gopherCron/errors"
-	"ojbk.io/gopherCron/utils"
+	"github.com/holdno/gopherCron/common"
+	"github.com/holdno/gopherCron/errors"
+	"github.com/holdno/gopherCron/utils"
 )
 
 type comm struct {
