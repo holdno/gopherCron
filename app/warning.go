@@ -7,8 +7,8 @@ import (
 )
 
 type Warner interface {
-	Warning(info string)
-	Warningf(f string, args ...interface{})
+	Warning(info string) error
+	Warningf(f string, args ...interface{}) error
 }
 
 type warning struct {
@@ -19,10 +19,12 @@ func NewDefaultWarner(logger *logrus.Logger) *warning {
 	return &warning{logger: logger}
 }
 
-func (a *warning) Warning(info string) {
+func (a *warning) Warning(info string) error {
 	a.logger.Error(info)
+	return nil
 }
 
-func (a *warning) Warningf(f string, args ...interface{}) {
+func (a *warning) Warningf(f string, args ...interface{}) error {
 	a.Warning(fmt.Sprintf(f, args...))
+	return nil
 }

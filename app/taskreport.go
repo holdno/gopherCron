@@ -18,13 +18,19 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-type HttpTaskResultReporter struct {
+const (
+	ReportHeaderKey      = "Report-Type"
+	ReportTypeWarning    = "report_warning"
+	ReportTypeTaskResult = "report_task_result"
+)
+
+type HttpReporter struct {
 	hc            *http.Client
 	reportAddress string
 }
 
-func NewHttpTaskResultReporter(address string) *HttpTaskResultReporter {
-	return &HttpTaskResultReporter{
+func NewHttpReporter(address string) *HttpReporter {
+	return &HttpReporter{
 		hc: &http.Client{
 			Timeout: 5 * time.Second,
 		},
@@ -32,13 +38,47 @@ func NewHttpTaskResultReporter(address string) *HttpTaskResultReporter {
 	}
 }
 
-func (r *HttpTaskResultReporter) ResultReport(result *common.TaskExecuteResult) error {
+type WarningData struct {
+	Data string `json:"data"`
+}
+
+func (r *HttpReporter) Warningf(f string, args ...interface{}) error {
+	return r.Warning(fmt.Sprintf(f, args...))
+}
+
+func (r *HttpReporter) Warning(info string) error {
+	if info == "" {
+		return errors.New("empty warning info")
+	}
+	b, _ := json.Marshal(WarningData{Data: info})
+	req, _ := http.NewRequest(http.MethodPost, r.reportAddress, bytes.NewReader(b))
+	req.Header.Add("content-type", "application/json")
+	req.Header.Add(ReportHeaderKey, ReportTypeWarning)
+
+	resp, err := r.hc.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to post warning alert, %w", err)
+	}
+
+	defer resp.Body.Close()
+	body, _ := ioutil.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("warning report failed, log service status error, response status: %d, content: %s",
+			resp.StatusCode, string(body))
+	}
+
+	return nil
+}
+
+func (r *HttpReporter) ResultReport(result *common.TaskExecuteResult) error {
 	if result == nil {
 		return nil
 	}
 	b, _ := json.Marshal(result)
 	req, _ := http.NewRequest(http.MethodPost, r.reportAddress, bytes.NewReader(b))
 	req.Header.Add("content-type", "application/json")
+	req.Header.Add(ReportHeaderKey, ReportTypeTaskResult)
 
 	resp, err := r.hc.Do(req)
 	if err != nil {

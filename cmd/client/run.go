@@ -6,8 +6,6 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/holdno/gopherCron/common"
-
 	"github.com/holdno/gopherCron/app"
 	"github.com/holdno/gopherCron/config"
 	"github.com/holdno/gopherCron/utils"
@@ -19,18 +17,13 @@ func initConf(filePath string) *config.ServiceConfig {
 	return workerConf
 }
 
-type reporter struct{}
-
-func (r *reporter) ResultReport(result *common.TaskExecuteResult) {
-
-}
-
 func Run(opts *SetupOptions) error {
 	// 加载配置
 	conf := initConf(opts.ConfigPath)
 	var copts []app.ClientOptions
 	if opts.ReportAddress != "" {
-		copts = append(copts, app.ClientWithTaskReporter(app.NewHttpTaskResultReporter(opts.ReportAddress)))
+		reporter := app.NewHttpReporter(opts.ReportAddress)
+		copts = append(copts, app.ClientWithTaskReporter(reporter), app.ClientWithWarning(reporter))
 	}
 	client := app.NewClient(conf, copts...)
 
@@ -39,7 +32,6 @@ func Run(opts *SetupOptions) error {
 			if r := recover(); r != nil {
 				client.Warningf("%v", r)
 			}
-
 		}()
 		client.Loop()
 	}
