@@ -30,7 +30,11 @@ func Run(opts *SetupOptions) error {
 	restart := func() {
 		defer func() {
 			if r := recover(); r != nil {
-				client.Warningf("%v", r)
+				ip, _ := utils.GetLocalIP()
+				client.Warning(app.WarningData{
+					Data: fmt.Sprintf("agent %s down", ip),
+					Type: app.WarningTypeSystem,
+				})
 			}
 		}()
 		client.Loop()

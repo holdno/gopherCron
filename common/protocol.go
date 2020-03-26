@@ -48,7 +48,7 @@ type TaskExecutingInfo struct {
 type TaskExecuteResult struct {
 	ExecuteInfo *TaskExecutingInfo `json:"execute_info"`
 	Output      string             `json:"output"`     // 程序输出
-	Err         error              `json:"error"`      // 是否发生错误
+	Err         string             `json:"error"`      // 是否发生错误
 	StartTime   time.Time          `json:"start_time"` // 开始时间
 	EndTime     time.Time          `json:"end_time"`   // 结束时间
 }

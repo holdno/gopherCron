@@ -22,6 +22,9 @@ const (
 	ReportHeaderKey      = "Report-Type"
 	ReportTypeWarning    = "report_warning"
 	ReportTypeTaskResult = "report_task_result"
+
+	WarningTypeSystem = "system"
+	WarningTypeTask   = "task"
 )
 
 type HttpReporter struct {
@@ -39,18 +42,14 @@ func NewHttpReporter(address string) *HttpReporter {
 }
 
 type WarningData struct {
-	Data string `json:"data"`
+	Data      string `json:"data"`
+	Type      string `json:"type"`
+	TaskName  string `json:"task_name"`
+	ProjectID int64  `json:"project_id"`
 }
 
-func (r *HttpReporter) Warningf(f string, args ...interface{}) error {
-	return r.Warning(fmt.Sprintf(f, args...))
-}
-
-func (r *HttpReporter) Warning(info string) error {
-	if info == "" {
-		return errors.New("empty warning info")
-	}
-	b, _ := json.Marshal(WarningData{Data: info})
+func (r *HttpReporter) Warning(data WarningData) error {
+	b, _ := json.Marshal(data)
 	req, _ := http.NewRequest(http.MethodPost, r.reportAddress, bytes.NewReader(b))
 	req.Header.Add("content-type", "application/json")
 	req.Header.Add(ReportHeaderKey, ReportTypeWarning)
@@ -147,8 +146,8 @@ func (r *TaskResultReporter) ResultReport(result *common.TaskExecuteResult) erro
 		Result: result.Output,
 	}
 
-	if result.Err != nil {
-		taskResult.SystemError = result.Err.Error()
+	if result.Err != "" {
+		taskResult.SystemError = result.Err
 		getError = 1
 	}
 

@@ -92,7 +92,10 @@ func Run(opt *SetupOptions) error {
 
 	defer func() {
 		if r := recover(); r != nil {
-			srv.Warningf("%v", r)
+			srv.Warning(app.WarningData{
+				Data: fmt.Sprintf("gophercron service panic: %v", r),
+				Type: app.WarningTypeSystem,
+			})
 		}
 	}()
 

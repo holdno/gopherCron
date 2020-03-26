@@ -203,7 +203,7 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) {
 		a.scheduler.PushTaskResult(&common.TaskExecuteResult{
 			ExecuteInfo: common.BuildTaskExecuteInfo(plan),
 			Output:      "last task was not completed",
-			Err:         fmt.Errorf("task %s execute error: last task was not completed", plan.Task.Name),
+			Err:         fmt.Sprintf("task %s execute error: last task was not completed", plan.Task.Name),
 			StartTime:   time.Now(),
 			EndTime:     time.Now(),
 		})
@@ -260,8 +260,13 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) {
 
 // 处理任务结果
 func (a *client) handleTaskResult(result *common.TaskExecuteResult) {
-	if result.Err != nil {
-		a.Warningf("%s", result.Err.Error())
+	if result.Err != "" {
+		a.Warning(WarningData{
+			Data:      result.Err,
+			Type:      WarningTypeTask,
+			TaskName:  result.ExecuteInfo.Task.Name,
+			ProjectID: result.ExecuteInfo.Task.ProjectID,
+		})
 	}
 
 	if err := a.ResultReport(result); err != nil {

@@ -2,7 +2,6 @@ package app
 
 import (
 	"bufio"
-	"errors"
 	"os/exec"
 	"strings"
 	"syscall"
@@ -18,6 +17,7 @@ func (a *client) ExecuteTask(info *common.TaskExecutingInfo) *common.TaskExecute
 	var (
 		cmd    *exec.Cmd
 		result *common.TaskExecuteResult
+		err    error
 	)
 	defer info.CancelFunc()
 
@@ -62,35 +62,38 @@ func (a *client) ExecuteTask(info *common.TaskExecutingInfo) *common.TaskExecute
 	//}
 
 	// 执行命令
-	if result.Err = cmd.Start(); result.Err != nil {
+	if err := cmd.Start(); err != nil {
 		goto FinishWithError
 	}
 
-	if result.Err = cmd.Wait(); result.Err != nil {
+	if err = cmd.Wait(); err != nil {
 		if strings.Contains(cmd.ProcessState.String(), syscall.SIGKILL.String()) {
-			result.Err = errors.New("timeout")
+			result.Err = "timeout"
 		} else {
 			switch cmd.ProcessState.ExitCode() {
 			case 1:
-				result.Err = errors.New("unknow error, exit code 1")
+				result.Err = "unknow error, exit code 1"
 			case 2:
-				result.Err = errors.New("error shell command")
+				result.Err = "error shell command"
 			case 126:
-				result.Err = errors.New("unexecutable command")
+				result.Err = "unexecutable command"
 			case 127:
-				result.Err = errors.New("command not found")
+				result.Err = "command not found"
 			case 128:
-				result.Err = errors.New("invalid exit parameter")
+				result.Err = "invalid exit parameter"
 			case 130:
-				result.Err = errors.New("sig exit")
+				result.Err = "sig exit"
 			case 255:
-				result.Err = errors.New("error exit code")
+				result.Err = "error exit code"
 			}
 		}
 		goto FinishWithError
 	}
 
 FinishWithError:
+	if result.Err == "" {
+		result.Err = err.Error()
+	}
 	close(closeCh)
 	result.EndTime = time.Now()
 	result.Output = output.String()
