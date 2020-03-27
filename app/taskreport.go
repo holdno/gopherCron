@@ -9,12 +9,12 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/holdno/gocommons/selection"
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/config"
 	"github.com/holdno/gopherCron/pkg/store"
 	"github.com/holdno/gopherCron/pkg/store/sqlStore"
 
+	"github.com/holdno/gocommons/selection"
 	"github.com/sirupsen/logrus"
 )
 
@@ -51,7 +51,7 @@ type WarningData struct {
 func (r *HttpReporter) Warning(data WarningData) error {
 	b, _ := json.Marshal(data)
 	req, _ := http.NewRequest(http.MethodPost, r.reportAddress, bytes.NewReader(b))
-	req.Header.Add("content-type", "application/json")
+	req.Header.Add("Content-Type", "application/json")
 	req.Header.Add(ReportHeaderKey, ReportTypeWarning)
 
 	resp, err := r.hc.Do(req)
@@ -76,7 +76,7 @@ func (r *HttpReporter) ResultReport(result *common.TaskExecuteResult) error {
 	}
 	b, _ := json.Marshal(result)
 	req, _ := http.NewRequest(http.MethodPost, r.reportAddress, bytes.NewReader(b))
-	req.Header.Add("content-type", "application/json")
+	req.Header.Add("Content-Type", "application/json")
 	req.Header.Add(ReportHeaderKey, ReportTypeTaskResult)
 
 	resp, err := r.hc.Do(req)

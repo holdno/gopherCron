@@ -3,9 +3,10 @@ package app
 import (
 	"context"
 
+	"github.com/holdno/gopherCron/common"
+
 	"github.com/coreos/etcd/clientv3"
 	"github.com/coreos/etcd/mvcc/mvccpb"
-	"github.com/holdno/gopherCron/common"
 )
 
 func (a *client) TaskKiller(projects []int64) {

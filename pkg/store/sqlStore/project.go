@@ -3,9 +3,10 @@ package sqlStore
 import (
 	"fmt"
 
-	"github.com/holdno/gocommons/selection"
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/pkg/store"
+
+	"github.com/holdno/gocommons/selection"
 	"github.com/jinzhu/gorm"
 )
 

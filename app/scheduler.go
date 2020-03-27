@@ -6,9 +6,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/utils"
 
-	"github.com/holdno/gopherCron/common"
 	"github.com/sirupsen/logrus"
 )
 

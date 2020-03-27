@@ -5,11 +5,11 @@ import (
 	"reflect"
 
 	"github.com/holdno/gopherCron/common"
-
-	"github.com/go-sql-driver/mysql"
 	"github.com/holdno/gopherCron/config"
 	"github.com/holdno/gopherCron/pkg/store"
 	"github.com/holdno/gopherCron/utils"
+
+	"github.com/go-sql-driver/mysql"
 	"github.com/jinzhu/gorm"
 	"github.com/sirupsen/logrus"
 )

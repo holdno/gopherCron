@@ -4,6 +4,7 @@ import (
 	"database/sql"
 
 	"github.com/holdno/gocommons/selection"
+
 	"github.com/jinzhu/gorm"
 )
 

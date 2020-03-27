@@ -5,10 +5,11 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/coreos/etcd/clientv3"
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/config"
 	"github.com/holdno/gopherCron/utils"
+
+	"github.com/coreos/etcd/clientv3"
 )
 
 type ClientInfo struct {

@@ -3,12 +3,11 @@ package sqlStore
 import (
 	"fmt"
 
-	"github.com/holdno/gocommons/selection"
-
-	"github.com/jinzhu/gorm"
-
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/pkg/store"
+
+	"github.com/holdno/gocommons/selection"
+	"github.com/jinzhu/gorm"
 )
 
 type projectRelevanceStore struct {

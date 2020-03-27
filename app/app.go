@@ -3,7 +3,6 @@ package app
 import (
 	"time"
 
-	"github.com/holdno/gocommons/selection"
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/config"
 	"github.com/holdno/gopherCron/errors"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/coreos/etcd/clientv3"
 	"github.com/gin-gonic/gin"
+	"github.com/holdno/gocommons/selection"
 	"github.com/jinzhu/gorm"
 	"github.com/sirupsen/logrus"
 )

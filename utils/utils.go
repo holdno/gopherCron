@@ -10,15 +10,12 @@ import (
 	"time"
 
 	"github.com/holdno/gopherCron/common"
-
-	"github.com/holdno/gopherCron/errors"
-
 	"github.com/holdno/gopherCron/config"
-
-	"github.com/holdno/snowFlakeByGo"
+	"github.com/holdno/gopherCron/errors"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
+	"github.com/holdno/snowFlakeByGo"
 )
 
 var globalIDWorker *snowFlakeByGo.Worker
