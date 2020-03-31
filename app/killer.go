@@ -11,8 +11,9 @@ import (
 
 func (a *client) TaskKiller(projects []int64) {
 	for _, v := range projects {
-		go func() {
+		a.Go(func(args ...interface{}) {
 			var (
+				projectID          = args[0].(int64)
 				key                string
 				watchStartRevision int64
 				watchChan          clientv3.WatchChan
@@ -24,7 +25,7 @@ func (a *client) TaskKiller(projects []int64) {
 				taskID    string
 			)
 
-			key = common.BuildKillKey(v, "")
+			key = common.BuildKillKey(projectID, "")
 			// 开始监听
 			watchChan = a.etcd.Watcher().Watch(context.TODO(), key, clientv3.WithRev(watchStartRevision), clientv3.WithPrefix())
 			// 处理监听结果
@@ -45,6 +46,6 @@ func (a *client) TaskKiller(projects []int64) {
 					a.scheduler.PushEvent(taskEvent)
 				}
 			}
-		}()
+		})(v)
 	}
 }

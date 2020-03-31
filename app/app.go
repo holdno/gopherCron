@@ -3,6 +3,8 @@ package app
 import (
 	"time"
 
+	"github.com/holdno/gopherCron/pkg/panicgroup"
+
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/config"
 	"github.com/holdno/gopherCron/errors"
@@ -56,6 +58,7 @@ type App interface {
 	GetUserListTotal(args GetUserListArgs) (int, error)
 	ChangePassword(uid int64, password, salt string) error
 	GetLocker(task *common.TaskInfo) *etcd.TaskLock
+	GetIP() string
 
 	BeginTx() *gorm.DB
 	Close()
@@ -140,6 +143,10 @@ func NewApp(conf *config.ServiceConfig, opts ...AppOptions) App {
 	return app
 }
 
+func (a *app) GetIP() string {
+	return a.localip
+}
+
 func (a *app) GetLocker(task *common.TaskInfo) *etcd.TaskLock {
 	return a.etcd.Lock(task)
 }
@@ -150,12 +157,15 @@ type client struct {
 	etcd      EtcdManager
 	scheduler *TaskScheduler
 
+	panicgroup.PanicGroup
 	ClientTaskReporter
 	CommonInterface
 	Warner
 }
 
 type Client interface {
+	Go(f func(a ...interface{})) func(a ...interface{})
+	GetIP() string
 	Loop()
 	ResultReport(result *common.TaskExecuteResult) error
 	Warner
@@ -179,6 +189,7 @@ func NewClient(conf *config.ServiceConfig, opts ...ClientOptions) Client {
 	var err error
 
 	agent := new(client)
+
 	agent.logger = logger.MustSetup(conf.LogLevel)
 	if agent.localip, err = utils.GetLocalIP(); err != nil {
 		agent.logger.Error("failed to get local ip")
@@ -188,13 +199,34 @@ func NewClient(conf *config.ServiceConfig, opts ...ClientOptions) Client {
 		opt(agent)
 	}
 
-	if agent.Warner == nil {
-		agent.Warner = NewDefaultWarner(agent.logger)
-	}
+	agent.PanicGroup = panicgroup.NewPanicGroup(func(err error) {
+		reserr := agent.Warning(WarningData{
+			Data:    err.Error(),
+			Type:    WarningTypeSystem,
+			AgentIP: agent.localip,
+		})
+		if reserr != nil {
+			agent.logger.WithFields(logrus.Fields{
+				"desc":         reserr,
+				"source_error": err,
+			}).Error("panicgroup: failed to warning panic error")
+		}
+	})
 
 	if agent.ClientTaskReporter == nil {
-		agent.logger.Info("init default task log reporter, it must be used mysql config")
-		agent.ClientTaskReporter = NewDefaultTaskReporter(agent.logger, conf.Mysql)
+		if conf.ReportAddr != "" {
+			agent.logger.Infof("init http task log reporter, address: %s", conf.ReportAddr)
+			reporter := NewHttpReporter(conf.ReportAddr)
+			agent.ClientTaskReporter = reporter
+			agent.Warner = reporter
+		} else {
+			agent.logger.Info("init default task log reporter, it must be used mysql config")
+			agent.ClientTaskReporter = NewDefaultTaskReporter(agent.logger, conf.Mysql)
+		}
+	}
+
+	if agent.Warner == nil {
+		agent.Warner = NewDefaultWarner(agent.logger)
 	}
 
 	if agent.etcd, err = etcd.Connect(conf.Etcd); err != nil {
@@ -220,6 +252,10 @@ func NewClient(conf *config.ServiceConfig, opts ...ClientOptions) Client {
 	agent.Register(conf.Etcd)
 
 	return agent
+}
+
+func (c *client) GetIP() string {
+	return c.localip
 }
 
 func (a *app) Close() {

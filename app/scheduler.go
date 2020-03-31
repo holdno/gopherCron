@@ -212,7 +212,7 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) {
 
 	plan.Task.ClientIP = a.localip
 
-	go func() {
+	a.Go(func(args ...interface{}) {
 		// 构建执行状态信息
 		taskExecuteInfo = common.BuildTaskExecuteInfo(plan)
 		if plan.Task.Noseize == 0 {
@@ -243,19 +243,22 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) {
 			return
 		}
 
-		result := a.ExecuteTask(taskExecuteInfo)
-		if err = utils.RetryFunc(5, func() error {
-			return a.SetTaskNotRunning(*plan.Task)
-		}); err != nil {
-			a.logger.Errorf("task: %s, id: %s, failed to change running status, the task is finished, error: %v",
-				plan.Task.Name, plan.Task.TaskID, err)
-		}
+		defer func() {
+			if err = utils.RetryFunc(5, func() error {
+				return a.SetTaskNotRunning(*plan.Task)
+			}); err != nil {
+				a.logger.Errorf("task: %s, id: %s, failed to change running status, the task is finished, error: %v",
+					plan.Task.Name, plan.Task.TaskID, err)
+			}
+		}()
 
+		// 执行任务
+		result := a.ExecuteTask(taskExecuteInfo)
 		// 删除任务的正在执行状态
 		a.scheduler.DeleteExecutingTask(result.ExecuteInfo.Task.SchedulerKey())
 		// 执行结束后 返回给scheduler
 		a.scheduler.PushTaskResult(result)
-	}()
+	})()
 }
 
 // 处理任务结果
@@ -266,6 +269,7 @@ func (a *client) handleTaskResult(result *common.TaskExecuteResult) {
 			Type:      WarningTypeTask,
 			TaskName:  result.ExecuteInfo.Task.Name,
 			ProjectID: result.ExecuteInfo.Task.ProjectID,
+			AgentIP:   a.GetIP(),
 		})
 	}
 

@@ -4,13 +4,14 @@ var serviceConf *ServiceConfig
 
 // APIConfig 配置文件Root
 type ServiceConfig struct {
-	Env      string       `toml:"env"`
-	LogLevel string       `toml:"log_level"`
-	Deploy   *DeployConf  `toml:"deploy"` // host配置
-	Etcd     *EtcdConf    `toml:"etcd"`
-	MongoDB  *MongoDBConf `toml:"mongodb"`
-	JWT      *JWTConf     `toml:"jwt"`
-	Mysql    *MysqlConf   `toml:"mysql"`
+	Env        string       `toml:"env"`
+	LogLevel   string       `toml:"log_level"`
+	ReportAddr string       `toml:"report_addr"`
+	Deploy     *DeployConf  `toml:"deploy"` // host配置
+	Etcd       *EtcdConf    `toml:"etcd"`
+	MongoDB    *MongoDBConf `toml:"mongodb"`
+	JWT        *JWTConf     `toml:"jwt"`
+	Mysql      *MysqlConf   `toml:"mysql"`
 }
 
 // DeployConf 部署配置

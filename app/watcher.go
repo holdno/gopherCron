@@ -43,7 +43,8 @@ func (a *client) TaskWatcher(projects []int64) error {
 			}
 		}
 
-		go func() {
+		a.Go(func(args ...interface{}) {
+			projectID := args[0].(int64)
 			// 从GET时刻的后续版本进行监听变化
 			watchStartRevision = getResp.Header.Revision + 1
 			// 开始监听
@@ -69,9 +70,9 @@ func (a *client) TaskWatcher(projects []int64) error {
 						if common.IsTemporaryKey(string(watchEvent.Kv.Key)) {
 							continue
 						}
-						taskID = common.ExtractTaskID(v, string(watchEvent.Kv.Key))
+						taskID = common.ExtractTaskID(projectID, string(watchEvent.Kv.Key))
 						// 构建一个delete event
-						task = &common.TaskInfo{TaskID: taskID, ProjectID: v}
+						task = &common.TaskInfo{TaskID: taskID, ProjectID: projectID}
 						taskEvent = common.BuildTaskEvent(common.TASK_EVENT_DELETE, task)
 						// 推送给 scheduler 把任务终止掉
 					}
@@ -79,7 +80,7 @@ func (a *client) TaskWatcher(projects []int64) error {
 					a.scheduler.PushEvent(taskEvent)
 				}
 			}
-		}()
+		})(v)
 	}
 	return nil
 }

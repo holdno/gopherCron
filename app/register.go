@@ -37,8 +37,9 @@ func (a *client) Register(config *config.EtcdConf) {
 	})
 
 	for _, v := range config.Projects {
-		go func(projectID int64) {
+		a.Go(func(args ...interface{}) {
 			var (
+				projectID          = args[0].(int64)
 				regKey             string
 				leaseGrantResp     *clientv3.LeaseGrantResponse
 				leaseKeepAliveChan <-chan *clientv3.LeaseKeepAliveResponse
@@ -81,6 +82,6 @@ func (a *client) Register(config *config.EtcdConf) {
 					cancelFunc()
 				}
 			}
-		}(v)
+		})(v)
 	}
 }

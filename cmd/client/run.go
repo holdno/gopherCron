@@ -20,20 +20,16 @@ func initConf(filePath string) *config.ServiceConfig {
 func Run(opts *SetupOptions) error {
 	// 加载配置
 	conf := initConf(opts.ConfigPath)
-	var copts []app.ClientOptions
-	if opts.ReportAddress != "" {
-		reporter := app.NewHttpReporter(opts.ReportAddress)
-		copts = append(copts, app.ClientWithTaskReporter(reporter), app.ClientWithWarning(reporter))
-	}
-	client := app.NewClient(conf, copts...)
+	client := app.NewClient(conf)
 
 	restart := func() {
 		defer func() {
 			if r := recover(); r != nil {
 				ip, _ := utils.GetLocalIP()
 				client.Warning(app.WarningData{
-					Data: fmt.Sprintf("agent %s down", ip),
-					Type: app.WarningTypeSystem,
+					Data:    fmt.Sprintf("agent %s down", ip),
+					Type:    app.WarningTypeSystem,
+					AgentIP: client.GetIP(),
 				})
 			}
 		}()

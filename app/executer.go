@@ -63,6 +63,7 @@ func (a *client) ExecuteTask(info *common.TaskExecutingInfo) *common.TaskExecute
 
 	// 执行命令
 	if err := cmd.Start(); err != nil {
+		result.Err = err.Error()
 		goto FinishWithError
 	}
 
@@ -72,9 +73,11 @@ func (a *client) ExecuteTask(info *common.TaskExecutingInfo) *common.TaskExecute
 		} else {
 			switch cmd.ProcessState.ExitCode() {
 			case 1:
-				result.Err = "unknow error, exit code 1"
+				result.Err = err.Error()
 			case 2:
-				result.Err = "error shell command"
+				result.Err = "terminal interrupt"
+			case 9:
+				result.Err = "process terminated"
 			case 126:
 				result.Err = "unexecutable command"
 			case 127:
@@ -91,9 +94,6 @@ func (a *client) ExecuteTask(info *common.TaskExecutingInfo) *common.TaskExecute
 	}
 
 FinishWithError:
-	if result.Err == "" {
-		result.Err = err.Error()
-	}
 	close(closeCh)
 	result.EndTime = time.Now()
 	result.Output = output.String()
