@@ -39,7 +39,7 @@ type TaskExecuteResult struct {
 	EndTime     time.Time          `json:"end_time"`   // 结束时间
 }
 ```   
-日志上报相关代码参考 app/taskreporter.go  
+日志上报相关代码参考 app/taskreport.go  
 
 ### cronexpr 秒级cron表达式介绍(引用)  
 
