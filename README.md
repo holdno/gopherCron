@@ -7,14 +7,14 @@
   <img src="https://img.shields.io/badge/golang-1.11.0-%23ff69b4.svg" alt="Version">
   <img src="https://img.shields.io/badge/license-MIT-brightgreen.svg" alt="license">
 </p>
-<h1 align="center">GopherCron</h2>
+<h1 align="center">GopherCron</h1>
 开箱即用的分布式可视化crontab  
 
 可以通过配置文件指定某个节点所受理的业务线，从而做到业务统一管理但隔离调度
 ### 依赖  
 - Etcd   # 服务注册与发现
 - Gin # webapi 提供可视化操作
-- MongoDB  # 任务日志存储
+- Mysql  # 任务日志存储
 - cronexpr # github.com/gorhill/cronexpr cron表达式解析器  
   
 ### 实现功能  
@@ -22,7 +22,24 @@
 - 任务日志查看  
 - 随时结束任务进程  
 - 分布式扩展  
-- 健康节点检测 (分项目显示对应的健康节点IP及节点数)  
+- 健康节点检测 (分项目显示对应的健康节点IP及节点数)    
+
+### 任务日志集中上报  
+1.10.x版本中client配置增加了report_addr项，该配置接收一个http接口  
+配置后，任务日志将通过http发送到该地址进行集中处理  
+可通过请求中的Head参数 Report-Type 来判断是告警还是日志来做对应的处理  
+日志结构(参考：common/protocol.go 下的 TaskExecuteResult)：  
+``` golang
+// TaskExecuteResult 任务执行结果
+type TaskExecuteResult struct {
+	ExecuteInfo *TaskExecutingInfo `json:"execute_info"`
+	Output      string             `json:"output"`     // 程序输出
+	Err         string             `json:"error"`      // 是否发生错误
+	StartTime   time.Time          `json:"start_time"` // 开始时间
+	EndTime     time.Time          `json:"end_time"`   // 结束时间
+}
+```   
+日志上报相关代码参考 app/taskreporter.go  
 
 ### cronexpr 秒级cron表达式介绍(引用)  
 
@@ -86,6 +103,8 @@ $ ./service -conf ./conf/config-default.toml // 配置文件名请随意
 #### client 配置文件
 ``` toml
 log_level = "debug"
+# 日志统一上报接口(http协议)，如配置此接口可忽略mysql的配置
+report_addr = "" 
 
 [deploy]
 # 当前的环境:dev、release
@@ -101,7 +120,7 @@ password = ""
 dialtimeout = 5000
 # etcd kv存储的key前缀 用来与其他业务做区分
 prefix = "/gopher_cron"
-# 当前节点需要处理的项目ID
+# 当前节点需要处理的项目ID（先通过service创建项目并获取项目ID）
 projects = [1,2]
 # 命令调用脚本 /bin/sh  /bin/bash 根据自己系统情况决定
 shell = "/bin/bash"

@@ -26,8 +26,6 @@ func (a *client) ExecuteTask(info *common.TaskExecutingInfo) *common.TaskExecute
 		StartTime:   time.Now(), // 记录任务开始时间
 	}
 
-	result.StartTime = time.Now()
-
 	cmd = exec.CommandContext(info.CancelCtx, config.GetServiceConfig().Etcd.Shell, "-c", info.Task.Command)
 	stdoutPipe, _ := cmd.StdoutPipe()
 
