@@ -101,7 +101,7 @@ func (a *comm) SaveTask(task *common.TaskInfo) (*common.TaskInfo, error) {
 	if putResp.PrevKv != nil {
 		// if oldtask unmarshal error
 		// don't care because this err doesn't affect result
-		_ = json.Unmarshal([]byte(putResp.PrevKv.Value), &oldTask)
+		_ = json.Unmarshal(putResp.PrevKv.Value, &oldTask)
 	}
 
 	return oldTask, nil

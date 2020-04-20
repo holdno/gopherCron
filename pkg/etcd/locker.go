@@ -2,6 +2,7 @@ package etcd
 
 import (
 	"context"
+	"sync"
 
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/errors"
@@ -29,13 +30,40 @@ func InitTaskLock(taskInfo *common.TaskInfo, kv clientv3.KV, lease clientv3.Leas
 }
 
 var (
-	clientlockers = make(map[clientv3.LeaseID]*TaskLock)
+	clientlockers = new(clientlocker)
 )
 
-func (tl *TaskLock) CloseAll() {
-	for _, v := range clientlockers {
-		v.Unlock()
+type clientlocker struct {
+	m sync.Map
+}
+
+func (c *clientlocker) setLease(l clientv3.LeaseID, lock *TaskLock) {
+	c.m.Store(l, lock)
+}
+
+func (c *clientlocker) getLease(l clientv3.LeaseID) (*TaskLock, bool) {
+	data, exist := c.m.Load(l)
+	if exist {
+		return data.(*TaskLock), true
 	}
+	return nil, false
+}
+
+func (c *clientlocker) deleteLease(l clientv3.LeaseID) {
+	c.m.Delete(l)
+}
+
+func (c *clientlocker) rangeLease(f func(l clientv3.LeaseID, tl *TaskLock) bool) {
+	c.m.Range(func(key, value interface{}) bool {
+		return f(key.(clientv3.LeaseID), value.(*TaskLock))
+	})
+}
+
+func (tl *TaskLock) CloseAll() {
+	clientlockers.rangeLease(func(l clientv3.LeaseID, tl *TaskLock) bool {
+		tl.Unlock()
+		return true
+	})
 }
 
 // 尝试上锁
@@ -107,7 +135,7 @@ func (tl *TaskLock) TryLock() error {
 	tl.leaseID = leaseGrantResp.ID
 	tl.cancelFunc = cancelFunc
 	tl.isLocked = true
-	clientlockers[tl.leaseID] = tl
+	clientlockers.setLease(tl.leaseID, tl)
 	return nil
 FAIL:
 	cancelFunc()                                       // 取消context
@@ -121,6 +149,6 @@ func (tl *TaskLock) Unlock() {
 		tl.isLocked = false
 		tl.cancelFunc() // 取消锁协成自动续租
 		tl.lease.Revoke(context.TODO(), tl.leaseID)
-		delete(clientlockers, tl.leaseID)
+		clientlockers.deleteLease(tl.leaseID)
 	}
 }

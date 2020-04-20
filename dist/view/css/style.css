@@ -292,6 +292,7 @@ div::-webkit-scrollbar-thumb
 	line-height: 20px;
 	margin: 10px 15px; 
 	max-height: 60px;
+	overflow: hidden;
 }
 
 .task__bottom-box {

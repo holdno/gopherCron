@@ -1,7 +1,7 @@
 package app
 
 const (
-	version = "v1.10.4"
+	version = "v1.10.5"
 )
 
 func (a *comm) GetVersion() string {
