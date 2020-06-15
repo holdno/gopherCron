@@ -22,7 +22,7 @@ func ExecuteTask(c *gin.Context) {
 		req  ExecuteTaskRequest
 		err  error
 		task *common.TaskInfo
-		res  []string
+		res  []app.ClientInfo
 
 		srv = app.GetApp(c)
 	)

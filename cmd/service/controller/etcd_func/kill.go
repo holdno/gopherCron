@@ -29,7 +29,7 @@ func KillTask(c *gin.Context) {
 		errObj errors.Error
 		uid    = utils.GetUserID(c)
 		srv    = app.GetApp(c)
-		lk     *etcd.TaskLock
+		lk     *etcd.Locker
 	)
 
 	if err = utils.BindArgsWithGin(c, &req); err != nil {
@@ -55,18 +55,21 @@ func KillTask(c *gin.Context) {
 		goto ChangeStatusError
 	}
 
-	lk = srv.GetLocker(task)
+	lk = srv.GetTaskLocker(task)
 	// 锁释放则证明任务结束
 	for {
 		if err = lk.TryLock(); err != nil {
 			time.Sleep(time.Second)
 			continue
 		}
-		lk.Unlock()
 		break
 	}
+	defer lk.Unlock()
 
 	task.Status = 0
+	if _, err = srv.SaveTask(task); err != nil {
+		goto ChangeStatusError
+	}
 	if err = srv.SetTaskNotRunning(*task); err != nil {
 		goto ChangeStatusError
 	}

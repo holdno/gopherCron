@@ -79,16 +79,9 @@ func resolveServerAddress(addr []string) string {
 	}
 }
 
-// 配置文件初始化
-func initConf(filePath string) *config.ServiceConfig {
-	apiConf := config.InitServiceConfig(filePath)
-	return apiConf
-}
-
-func Run(opt *SetupOptions) error {
+func Run(opts *SetupOptions) error {
 	// 加载配置
-	conf := initConf(opt.ConfigPath)
-	srv := app.NewApp(conf)
+	srv := app.NewApp(opts.ConfigPath)
 
 	defer func() {
 		if r := recover(); r != nil {
@@ -100,9 +93,9 @@ func Run(opt *SetupOptions) error {
 		}
 	}()
 
-	apiServer(srv, conf.Deploy)
+	apiServer(srv, srv.GetConfig().Deploy)
 
-	os.Setenv("GOPHERENV", conf.Deploy.Environment)
+	os.Setenv("GOPHERENV", srv.GetConfig().Deploy.Environment)
 	waitingShutdown(srv)
 	return nil
 }
@@ -114,11 +107,11 @@ func waitingShutdown(srv app.App) {
 	sig := <-stopSignalChan
 	if sig != nil {
 		fmt.Println(utils.GetCurrentTimeText(), "got system signal:"+sig.String()+", going to shutdown.")
+		srv.Close()
 		// wait resource remove from nginx upstreams
 		if os.Getenv("GOPHERENV") == "release" {
-			time.Sleep(time.Second * 10)
+			time.Sleep(time.Second * 5)
 		}
-		srv.Close()
 		// 关闭http服务
 		err := shutdownHTTPServer()
 		if err != nil {

@@ -10,22 +10,30 @@ import (
 	"github.com/coreos/etcd/clientv3"
 )
 
-// TaskLock 任务锁(分布式锁)
-type TaskLock struct {
+// Locker 分布式锁
+type Locker struct {
 	kv    clientv3.KV
 	lease clientv3.Lease
 
-	taskInfo   *common.TaskInfo
+	key        string
 	cancelFunc context.CancelFunc
 	leaseID    clientv3.LeaseID
 	isLocked   bool // 是否上锁成功
 }
 
-func InitTaskLock(taskInfo *common.TaskInfo, kv clientv3.KV, lease clientv3.Lease) *TaskLock {
-	return &TaskLock{
-		kv:       kv,
-		lease:    lease,
-		taskInfo: taskInfo,
+func initTaskLocker(taskInfo *common.TaskInfo, kv clientv3.KV, lease clientv3.Lease) *Locker {
+	return &Locker{
+		kv:    kv,
+		lease: lease,
+		key:   common.BuildLockKey(taskInfo.ProjectID, taskInfo.TaskID),
+	}
+}
+
+func initLocker(lockkey string, kv clientv3.KV, lease clientv3.Lease) *Locker {
+	return &Locker{
+		kv:    kv,
+		lease: lease,
+		key:   lockkey,
 	}
 }
 
@@ -37,14 +45,14 @@ type clientlocker struct {
 	m sync.Map
 }
 
-func (c *clientlocker) setLease(l clientv3.LeaseID, lock *TaskLock) {
+func (c *clientlocker) setLease(l clientv3.LeaseID, lock *Locker) {
 	c.m.Store(l, lock)
 }
 
-func (c *clientlocker) getLease(l clientv3.LeaseID) (*TaskLock, bool) {
+func (c *clientlocker) getLease(l clientv3.LeaseID) (*Locker, bool) {
 	data, exist := c.m.Load(l)
 	if exist {
-		return data.(*TaskLock), true
+		return data.(*Locker), true
 	}
 	return nil, false
 }
@@ -53,21 +61,21 @@ func (c *clientlocker) deleteLease(l clientv3.LeaseID) {
 	c.m.Delete(l)
 }
 
-func (c *clientlocker) rangeLease(f func(l clientv3.LeaseID, tl *TaskLock) bool) {
+func (c *clientlocker) rangeLease(f func(l clientv3.LeaseID, tl *Locker) bool) {
 	c.m.Range(func(key, value interface{}) bool {
-		return f(key.(clientv3.LeaseID), value.(*TaskLock))
+		return f(key.(clientv3.LeaseID), value.(*Locker))
 	})
 }
 
-func (tl *TaskLock) CloseAll() {
-	clientlockers.rangeLease(func(l clientv3.LeaseID, tl *TaskLock) bool {
+func (tl *Locker) CloseAll() {
+	clientlockers.rangeLease(func(l clientv3.LeaseID, tl *Locker) bool {
 		tl.Unlock()
 		return true
 	})
 }
 
 // 尝试上锁
-func (tl *TaskLock) TryLock() error {
+func (tl *Locker) TryLock() error {
 	var (
 		leaseGrantResp *clientv3.LeaseGrantResponse
 		cancelCtx      context.Context
@@ -75,12 +83,11 @@ func (tl *TaskLock) TryLock() error {
 		errObj         errors.Error
 		err            error
 		keepRespChan   <-chan *clientv3.LeaseKeepAliveResponse
-		lockKey        string
 		txn            clientv3.Txn
 		txnResp        *clientv3.TxnResponse
 	)
-	// 创建一个5s的租约
-	leaseGrantResp, err = tl.lease.Grant(context.TODO(), 5)
+	// 创建一个30s的租约
+	leaseGrantResp, err = tl.lease.Grant(context.TODO(), 30)
 	if err != nil {
 		errObj = errors.ErrInternalError
 		errObj.Log = "[TaskLock - TryLock] lease grand error:" + err.Error()
@@ -111,12 +118,10 @@ func (tl *TaskLock) TryLock() error {
 	// 创建事务 txn
 	txn = tl.kv.Txn(context.TODO())
 
-	// 生成锁的路径
-	lockKey = common.BuildLockKey(tl.taskInfo.ProjectID, tl.taskInfo.TaskID)
 	// 事务抢锁
-	txn.If(clientv3.Compare(clientv3.CreateRevision(lockKey), "=", 0)).
-		Then(clientv3.OpPut(lockKey, "", clientv3.WithLease(leaseGrantResp.ID))).
-		Else(clientv3.OpGet(lockKey))
+	txn.If(clientv3.Compare(clientv3.CreateRevision(tl.key), "=", 0)).
+		Then(clientv3.OpPut(tl.key, "", clientv3.WithLease(leaseGrantResp.ID))).
+		Else(clientv3.OpGet(tl.key))
 
 	// 提交事务
 	if txnResp, err = txn.Commit(); err != nil {
@@ -144,7 +149,7 @@ FAIL:
 }
 
 // Unlock 释放锁
-func (tl *TaskLock) Unlock() {
+func (tl *Locker) Unlock() {
 	if tl.isLocked {
 		tl.isLocked = false
 		tl.cancelFunc() // 取消锁协成自动续租

@@ -41,6 +41,10 @@ func NewHttpReporter(address string) *HttpReporter {
 	}
 }
 
+func (r *HttpReporter) GetReportAddress() string {
+	return r.reportAddress
+}
+
 type WarningData struct {
 	Data      string `json:"data"`
 	Type      string `json:"type"`

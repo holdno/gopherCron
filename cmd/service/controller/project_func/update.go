@@ -78,14 +78,22 @@ func RemoveUser(c *gin.Context) {
 	}
 
 	// 首先确认操作的用户是否为该项目的管理员
-	if project, err = srv.CheckUserProject(req.ProjectID, uid); err != nil {
+	isAdmin, err := srv.IsAdmin(uid)
+	if err != nil {
 		response.APIError(c, err)
 		return
 	}
 
-	if project == nil {
-		response.APIError(c, errors.ErrUnauthorized)
-		return
+	if !isAdmin {
+		if project, err = srv.CheckUserProject(req.ProjectID, uid); err != nil {
+			response.APIError(c, err)
+			return
+		}
+
+		if project == nil {
+			response.APIError(c, errors.ErrUnauthorized)
+			return
+		}
 	}
 
 	// 验证通过后再执行移出操作
@@ -117,14 +125,22 @@ func AddUser(c *gin.Context) {
 		return
 	}
 
-	if project, err = srv.CheckUserProject(req.ProjectID, uid); err != nil {
+	isAdmin, err := srv.IsAdmin(uid)
+	if err != nil {
 		response.APIError(c, err)
 		return
 	}
 
-	if project == nil {
-		response.APIError(c, errors.ErrUnauthorized)
-		return
+	if !isAdmin {
+		if project, err = srv.CheckUserProject(req.ProjectID, uid); err != nil {
+			response.APIError(c, err)
+			return
+		}
+
+		if project == nil {
+			response.APIError(c, errors.ErrUnauthorized)
+			return
+		}
 	}
 
 	if userInfo, err = srv.GetUserByAccount(req.UserAccount); err != nil {

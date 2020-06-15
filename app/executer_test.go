@@ -38,7 +38,6 @@ func TestApp_ExecuteTask(t *testing.T) {
 		for {
 			line, err := buf.ReadString('\n')
 			if err != nil {
-				fmt.Println(err)
 				if !strings.HasPrefix(stdout.String(), "hello world") {
 					fatal("wrong output: %s", stdout.String())
 				}
@@ -55,7 +54,6 @@ func TestApp_ExecuteTask(t *testing.T) {
 	d := time.Since(start)
 
 	if err != nil {
-		fmt.Println("wait err", err)
 		exiterr := err.(*exec.ExitError)
 		status := exiterr.Sys().(syscall.WaitStatus)
 		if status.ExitStatus() != 0 {

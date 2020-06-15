@@ -1,7 +1,12 @@
 package app
 
 import (
+	"context"
+	"fmt"
+	"strings"
 	"time"
+
+	"github.com/holdno/gopherCron/pkg/daemon"
 
 	"github.com/holdno/gopherCron/pkg/panicgroup"
 
@@ -30,12 +35,15 @@ type App interface {
 	CheckUserProject(pid, uid int64) (*common.Project, error) // 确认项目是否属于该用户
 	UpdateProject(pid int64, title, remark string) error
 	DeleteProject(tx *gorm.DB, pid, uid int64) error
-	SaveTask(task *common.TaskInfo) (*common.TaskInfo, error)
+	SaveTask(task *common.TaskInfo, opts ...clientv3.OpOption) (*common.TaskInfo, error)
 	DeleteTask(pid int64, tid string) (*common.TaskInfo, error)
 	SetTaskRunning(task common.TaskInfo) error
 	SetTaskNotRunning(task common.TaskInfo) error
 	KillTask(pid int64, tid string) error
-	GetWorkerList(projectID int64) ([]string, error)
+	IsAdmin(uid int64) (bool, error)
+	GetWorkerList(projectID int64) ([]ClientInfo, error)
+	CheckProjectWorkerExist(projectID int64, host string) (bool, error)
+	ReloadWorkerConfig(host string) error
 	GetProjectTaskCount(projectID int64) (int64, error)
 	GetTaskList(projectID int64) ([]*common.TaskInfo, error)
 	GetTask(projectID int64, nameID string) (*common.TaskInfo, error)
@@ -54,11 +62,13 @@ type App interface {
 	GetUserInfo(uid int64) (*common.User, error)
 	GetUsersByIDs(uids []int64) ([]*common.User, error)
 	CreateUser(u common.User) error
+	DeleteUser(id int64) error
 	GetUserList(args GetUserListArgs) ([]*common.User, error)
 	GetUserListTotal(args GetUserListArgs) (int, error)
 	ChangePassword(uid int64, password, salt string) error
-	GetLocker(task *common.TaskInfo) *etcd.TaskLock
+	GetTaskLocker(task *common.TaskInfo) *etcd.Locker
 	GetIP() string
+	GetConfig() *config.ServiceConfig
 
 	BeginTx() *gorm.DB
 	Close()
@@ -71,7 +81,8 @@ type EtcdManager interface {
 	KV() clientv3.KV
 	Lease() clientv3.Lease
 	Watcher() clientv3.Watcher
-	Lock(task *common.TaskInfo) *etcd.TaskLock
+	GetTaskLocker(task *common.TaskInfo) *etcd.Locker
+	GetLocker(key string) *etcd.Locker
 	Inc(key string) (int64, error)
 }
 
@@ -87,6 +98,8 @@ type app struct {
 	isClose bool
 	localip string
 
+	cfg *config.ServiceConfig
+
 	CommonInterface
 	Warner
 }
@@ -99,10 +112,12 @@ func WithWarning(w Warner) AppOptions {
 	}
 }
 
-func NewApp(conf *config.ServiceConfig, opts ...AppOptions) App {
+func NewApp(configPath string, opts ...AppOptions) App {
 	var err error
 
+	conf := config.InitServiceConfig(configPath)
 	app := new(app)
+	app.cfg = conf
 	app.logger = logger.MustSetup(conf.LogLevel)
 	app.store = sqlStore.MustSetup(conf.Mysql, app.logger, true)
 
@@ -143,19 +158,30 @@ func NewApp(conf *config.ServiceConfig, opts ...AppOptions) App {
 	return app
 }
 
+func (a *app) GetConfig() *config.ServiceConfig {
+	return a.cfg
+}
+
 func (a *app) GetIP() string {
 	return a.localip
 }
 
-func (a *app) GetLocker(task *common.TaskInfo) *etcd.TaskLock {
-	return a.etcd.Lock(task)
+func (a *app) GetTaskLocker(task *common.TaskInfo) *etcd.Locker {
+	return a.etcd.GetTaskLocker(task)
 }
 
 type client struct {
-	localip   string
-	logger    *logrus.Logger
-	etcd      EtcdManager
-	scheduler *TaskScheduler
+	localip    string
+	logger     *logrus.Logger
+	etcd       EtcdManager
+	scheduler  *TaskScheduler
+	configPath string
+	cfg        *config.ServiceConfig
+
+	daemon *daemon.ProjectDaemon
+
+	isClose   bool
+	closeChan chan struct{}
 
 	panicgroup.PanicGroup
 	ClientTaskReporter
@@ -164,10 +190,11 @@ type client struct {
 }
 
 type Client interface {
-	Go(f func(a ...interface{})) func(a ...interface{})
+	Go(f func())
 	GetIP() string
 	Loop()
 	ResultReport(result *common.TaskExecuteResult) error
+	Close()
 	Warner
 }
 
@@ -185,12 +212,78 @@ func ClientWithWarning(w Warner) ClientOptions {
 	}
 }
 
-func NewClient(conf *config.ServiceConfig, opts ...ClientOptions) Client {
+func (agent *client) loadConfigAndSetupAgentFunc() func() {
+	inited := false
+
+	return func() {
+		var err error
+		cfg := config.InitServiceConfig(agent.configPath)
+		if !inited {
+			inited = true
+			agent.cfg = &config.ServiceConfig{}
+			if agent.configPath == "" {
+				panic("empty config path")
+			}
+
+			if agent.etcd, err = etcd.Connect(cfg.Etcd); err != nil {
+				panic(err)
+			}
+
+			agent.CommonInterface = NewComm(agent.etcd)
+
+			clusterID, err := agent.etcd.Inc(cfg.Etcd.Prefix + common.CLUSTER_AUTO_INDEX)
+			if err != nil {
+				panic(err)
+			}
+
+			// why 1024. view https://github.com/holdno/snowFlakeByGo
+			utils.InitIDWorker(clusterID % 1024)
+			agent.logger = logger.MustSetup(cfg.LogLevel)
+			agent.scheduler = initScheduler()
+			agent.daemon = daemon.NewProjectDaemon(nil, agent.logger)
+		} else if agent.configPath == "" {
+			return
+		}
+
+		fmt.Println("--------------load config--------------")
+
+		if cfg.ReportAddr != agent.cfg.ReportAddr {
+			agent.logger.Infof("init http task log reporter, address: %s", cfg.ReportAddr)
+			reporter := NewHttpReporter(cfg.ReportAddr)
+			agent.ClientTaskReporter = reporter
+			agent.Warner = reporter
+		} else if agent.ClientTaskReporter == nil {
+			agent.logger.Info("init default task log reporter, it must be used mysql config")
+			agent.ClientTaskReporter = NewDefaultTaskReporter(agent.logger, cfg.Mysql)
+		}
+
+		if agent.Warner == nil {
+			agent.Warner = NewDefaultWarner(agent.logger)
+		}
+
+		addProjects, _ := agent.daemon.DiffProjects(cfg.Etcd.Projects)
+		agent.logger.WithField("projects", addProjects).Debug("diff projects")
+
+		agent.TaskWatcher(addProjects)
+		agent.TaskKiller(addProjects)
+		agent.Register(addProjects)
+
+		agent.cfg = cfg
+	}
+
+}
+
+func NewClient(configPath string, opts ...ClientOptions) Client {
 	var err error
 
-	agent := new(client)
+	agent := &client{
+		configPath: configPath,
+		isClose:    false,
+		closeChan:  make(chan struct{}),
+	}
+	agent.configPath = configPath
+	setupFunc := agent.loadConfigAndSetupAgentFunc()
 
-	agent.logger = logger.MustSetup(conf.LogLevel)
 	if agent.localip, err = utils.GetLocalIP(); err != nil {
 		agent.logger.Error("failed to get local ip")
 	}
@@ -213,45 +306,26 @@ func NewClient(conf *config.ServiceConfig, opts ...ClientOptions) Client {
 		}
 	})
 
-	if agent.ClientTaskReporter == nil {
-		if conf.ReportAddr != "" {
-			agent.logger.Infof("init http task log reporter, address: %s", conf.ReportAddr)
-			reporter := NewHttpReporter(conf.ReportAddr)
-			agent.ClientTaskReporter = reporter
-			agent.Warner = reporter
-		} else {
-			agent.logger.Info("init default task log reporter, it must be used mysql config")
-			agent.ClientTaskReporter = NewDefaultTaskReporter(agent.logger, conf.Mysql)
+	setupFunc()
+
+	agent.OnCommand(func(command string) {
+		switch command {
+		case common.AGENT_COMMAND_RELOAD_CONFIG:
+			setupFunc()
 		}
-	}
-
-	if agent.Warner == nil {
-		agent.Warner = NewDefaultWarner(agent.logger)
-	}
-
-	if agent.etcd, err = etcd.Connect(conf.Etcd); err != nil {
-		panic(err)
-	}
-
-	agent.CommonInterface = NewComm(agent.etcd)
-
-	clusterID, err := agent.etcd.Inc(conf.Etcd.Prefix + common.CLUSTER_AUTO_INDEX)
-	if err != nil {
-		panic(err)
-	}
-
-	// why 1024. view https://github.com/holdno/snowFlakeByGo
-	utils.InitIDWorker(clusterID % 1024)
-
-	agent.scheduler = initScheduler()
-	if err := agent.TaskWatcher(conf.Etcd.Projects); err != nil {
-		panic(err)
-	}
-
-	agent.TaskKiller(conf.Etcd.Projects)
-	agent.Register(conf.Etcd)
+	})
 
 	return agent
+}
+
+func (c *client) Close() {
+	if !c.isClose {
+		c.isClose = true
+		c.daemon.Close()
+		c.scheduler.Stop()
+		<-c.closeChan
+		fmt.Println("shut down")
+	}
 }
 
 func (c *client) GetIP() string {
@@ -323,7 +397,15 @@ func (a *app) GetProject(pid int64) (*common.Project, error) {
 }
 
 func (a *app) GetUserProjects(uid int64) ([]*common.Project, error) {
-	opt := selection.NewSelector(selection.NewRequirement("uid", selection.FindIn, uid))
+	opt := selection.NewSelector()
+	isAdmin, err := a.IsAdmin(uid)
+	if err != nil {
+		return nil, err
+	}
+	if !isAdmin {
+		opt.AddQuery(selection.NewRequirement("uid", selection.Equals, uid))
+	}
+
 	res, err := a.store.ProjectRelevance().GetList(opt)
 	if err != nil {
 		errObj := errors.ErrInternalError
@@ -521,6 +603,33 @@ func (a *app) GetUserByAccount(account string) (*common.User, error) {
 	return res[0], nil
 }
 
+func (a *app) IsAdmin(uid int64) (bool, error) {
+	isAdmin := false
+
+	info, err := a.GetUserInfo(uid)
+	if err != nil && err != gorm.ErrRecordNotFound {
+		errObj := errors.ErrInternalError
+		errObj.Msg = "获取用户信息失败"
+		errObj.Log = err.Error()
+		return false, errObj
+	}
+
+	if info == nil {
+		return false, errors.ErrDataNotFound
+	}
+
+	// 确认该用户是否为管理员
+	permissions := strings.Split(info.Permission, ",")
+	for _, v := range permissions {
+		if v == "admin" {
+			isAdmin = true
+			break
+		}
+	}
+
+	return isAdmin, nil
+}
+
 func (a *app) GetUserInfo(uid int64) (*common.User, error) {
 	opt := selection.NewSelector(selection.NewRequirement("id", selection.Equals, uid))
 	res, err := a.store.User().GetUsers(opt)
@@ -536,6 +645,16 @@ func (a *app) GetUserInfo(uid int64) (*common.User, error) {
 	}
 
 	return res[0], nil
+}
+
+func (a *app) DeleteUser(id int64) error {
+	if err := a.store.User().DeleteUser(id); err != nil {
+		errObj := errors.ErrInternalError
+		errObj.Msg = "删除用户失败"
+		errObj.Log = err.Error()
+		return errObj
+	}
+	return nil
 }
 
 func (a *app) CreateUser(u common.User) error {
@@ -634,6 +753,38 @@ func (a *app) GetUserList(args GetUserListArgs) ([]*common.User, error) {
 	}
 
 	return list, nil
+}
+
+func (a *app) ReloadWorkerConfig(host string) error {
+	var (
+		schedulerKey   string
+		leaseGrantResp *clientv3.LeaseGrantResponse
+		ctx            context.Context
+		errObj         errors.Error
+		err            error
+	)
+
+	// build etcd save key
+	schedulerKey = common.BuildAgentCommandKey(host, common.AGENT_COMMAND_RELOAD_CONFIG)
+
+	ctx, _ = utils.GetContextWithTimeout()
+	// make lease to notify worker
+	// 创建一个租约 让其稍后过期并自动删除
+	if leaseGrantResp, err = a.etcd.Lease().Grant(ctx, 1); err != nil {
+		errObj = errors.ErrInternalError
+		errObj.Log = "[Etcd - ReloadAgentConfig] lease grant error:" + err.Error()
+		return errObj
+	}
+
+	ctx, _ = utils.GetContextWithTimeout()
+	// save to etcd
+	if _, err = a.etcd.KV().Put(ctx, schedulerKey, "", clientv3.WithLease(leaseGrantResp.ID)); err != nil {
+		errObj = errors.ErrInternalError
+		errObj.Log = "[Etcd - ReloadAgentConfig] etcd client kv put error:" + err.Error()
+		return errObj
+	}
+
+	return nil
 }
 
 func (a *app) GetUserListTotal(args GetUserListArgs) (int, error) {

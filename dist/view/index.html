@@ -54,6 +54,9 @@
 					<div class="menu__item iconfont" v-if="user.permission.indexOf('admin') != -1" @click="changeMenu('user')" :class="position == 'user' && 'active'">
 						&#xebb8;
 					</div>
+					<div class="menu__item iconfont" @click="changeMenu('client')" :class="position == 'client' && 'active'">
+						&#xeb64;
+					</div>
 				</div>
 
 				<div class="menu__version">
@@ -109,6 +112,33 @@
 					</div>
 				</div>
 			</div>
+
+			<div class="all__page" v-show="position == 'client'">
+				<div class="user__box home__box detail__task">
+					<el-table :data="clientList" border fit style="width: 100%">
+						<el-table-column label="Host IP">
+							<template slot-scope="scope">
+								<span>{{scope.row.client_ip}}</span>
+							</template>
+						</el-table-column>
+
+						<el-table-column width="200px" label="Version">
+							<template slot-scope="scope">
+								<span>{{scope.row.version}}</span>
+							</template>
+						</el-table-column>
+
+						<el-table-column align="center" label="操作" width="180">
+							<template slot-scope="scope">
+								<el-row>
+									<el-button @click='reloadConfig(scope.row)' size="mini" style="background-color: #f56c6c; border: none; color: #fff;">重载配置</el-button>
+								</el-row>
+							</template>
+						</el-table-column>
+					</el-table>
+				</div>
+			</div>
+
 
 			<div class="all__page" v-show="position == 'admin'">
 				<div class="home__box">
@@ -182,7 +212,7 @@
 
 					<div class="detail__page-box" v-if="userlist.total">
 						<el-pagination
-								@current-change="gotoUserPage"
+								@current-change="getuserlist"
 								:current-page="userquery.page"
 								:page-size="userquery.pagesize"
 								layout="total, prev, pager, next, jumper"
@@ -265,7 +295,7 @@
 							&#xeb61; {{detail.project.title}} ID:{{detail.project.project_id}}
 						</div>
 						<div class="detail__box-top-buttons">
-							<div class="common__delete-button" @click="deleteProject">
+							<div class="common__delete-button" @click="deleteProject(null)">
 								删除项目
 							</div>
 
@@ -827,7 +857,8 @@ var vue = new Vue({
 		userlist: {
 			list: [],
 			total: 0
-		}
+		},
+		clientList: []
 	},
 	created () {
 		var accessToken = Cookies.get('access-token')
@@ -959,6 +990,20 @@ var vue = new Vue({
     		this.loading = false
     	})
     },
+	reloadConfig (data) {
+		request.post('/client/reload/config', {
+			client_ip: data.client_ip,
+			project_id: data.project_id,
+		}).then(res => {
+			res = res.data
+			if (res.meta.code == 0) {
+				this.$message({
+					message: '命令成功下发',
+					type: 'success'
+				})
+			}
+		})
+	},
     createUser () {
     	if (this.admin.user.account == '') {
     		this.$message('请输入账号')
@@ -1093,6 +1138,8 @@ var vue = new Vue({
     		this.getProjectRecent()
     	} else if (position == 'user') {
     		this.getuserlist()
+		} else if (position == 'client') {
+    		this.getUserAllClientList()
 		}
     	this.position = position
     },
@@ -1195,7 +1242,7 @@ var vue = new Vue({
 				if (!project && this.detail.project.title) {
 					project = this.detail.project
 				}
-				this.getWorkerList(project.project_id)
+				this.getClientList(project.project_id)
 			}
 
 			this.detail.currentProject = project.project_id
@@ -1332,10 +1379,23 @@ var vue = new Vue({
 				this.project.loading = false
 			})
 		},
-		getWorkerList (project) {
+		getUserAllClientList () {
+			request.get('/client/list', {}).then(res=>{
+				res = res.data
+				if (res.meta.code == 0) {
+					this.clientList = res.response
+				} else {
+					this.$message({
+						message: res.meta.msg,
+						type: 'warning'
+					})
+				}
+			})
+		},
+		getClientList (project) {
 			this.worker.loading = true
 			this.worker.list = []
-			request.get('/crontab/worker_list', {
+			request.get('/crontab/client_list', {
 				params: {
 					project_id: project
 				}
@@ -1343,6 +1403,11 @@ var vue = new Vue({
 				res = res.data
 				if (res.meta.code == 0) {
 					this.worker.list = res.response.list
+				} else {
+					this.$message({
+						message: res.meta.msg,
+						type: 'warning'
+					})
 				}
 			}).finally(res => {
 				this.worker.loading = false
@@ -1732,6 +1797,5 @@ var vue = new Vue({
     }
 	}
 })
-
 </script>
 </html>

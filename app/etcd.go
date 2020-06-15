@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
+	"time"
 
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/errors"
@@ -20,7 +22,7 @@ type comm struct {
 type CommonInterface interface {
 	SetTaskRunning(task common.TaskInfo) error
 	SetTaskNotRunning(task common.TaskInfo) error
-	SaveTask(task *common.TaskInfo) (*common.TaskInfo, error)
+	SaveTask(task *common.TaskInfo, opts ...clientv3.OpOption) (*common.TaskInfo, error)
 	GetTask(projectID int64, nameID string) (*common.TaskInfo, error)
 	TemporarySchedulerTask(task *common.TaskInfo) error
 	GetVersion() string
@@ -32,20 +34,37 @@ func NewComm(etcd EtcdManager) CommonInterface {
 
 func (a *comm) SetTaskRunning(task common.TaskInfo) error {
 	task.IsRunning = common.TASK_STATUS_RUNNING
-	_, err := a.SaveTask(&task)
-	return err
+	ctx, _ := utils.GetContextWithTimeout()
+
+	_, err := a.etcd.KV().Put(ctx, common.BuildTaskStatusKey(task.ProjectID, task.TaskID), common.TASK_STATUS_RUNNING_V2)
+	if err != nil {
+		errObj := errors.ErrInternalError
+		errObj.Log = "[Etcd - SetTaskRunning] etcd client kv put error:" + err.Error()
+		return errObj
+	}
+
+	return nil
 }
 
 func (a *comm) SetTaskNotRunning(task common.TaskInfo) error {
 	task.IsRunning = common.TASK_STATUS_NOT_RUNNING
 	task.ClientIP = ""
-	_, err := a.SaveTask(&task)
-	return err
+
+	ctx, _ := utils.GetContextWithTimeout()
+
+	_, err := a.etcd.KV().Put(ctx, common.BuildTaskStatusKey(task.ProjectID, task.TaskID), common.TASK_STATUS_NOT_RUNNING_V2)
+	if err != nil {
+		errObj := errors.ErrInternalError
+		errObj.Log = "[Etcd - SetTaskNotRunning] etcd client kv put error:" + err.Error()
+		return errObj
+	}
+
+	return nil
 }
 
 // SaveTask save task to etcd
 // return oldtask & error
-func (a *comm) SaveTask(task *common.TaskInfo) (*common.TaskInfo, error) {
+func (a *comm) SaveTask(task *common.TaskInfo, opts ...clientv3.OpOption) (*common.TaskInfo, error) {
 	var (
 		saveKey  string
 		saveByte []byte
@@ -54,7 +73,20 @@ func (a *comm) SaveTask(task *common.TaskInfo) (*common.TaskInfo, error) {
 		ctx      context.Context
 		errObj   errors.Error
 		err      error
+		locker   = a.etcd.GetLocker(common.BuildTaskUpdateKey(task.ProjectID, task.TaskID))
 	)
+	err = utils.RetryFunc(10, func() error {
+		if err = locker.TryLock(); err != nil {
+			time.Sleep(time.Duration(utils.Random(200, 600)) * time.Second)
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	defer locker.Unlock()
 
 	if oldTask, err = a.GetTask(task.ProjectID, task.TaskID); err != nil && err != errors.ErrDataNotFound {
 		errObj = errors.ErrInternalError
@@ -66,19 +98,6 @@ func (a *comm) SaveTask(task *common.TaskInfo) (*common.TaskInfo, error) {
 		task.IsRunning = oldTask.IsRunning
 		task.ClientIP = oldTask.ClientIP
 	}
-
-	//if oldTask != nil && oldTask.IsRunning == common.TASK_STATUS_RUNNING {
-	//	lk := a.etcd.Lock(task)
-	//	if err = lk.TryLock(); err != nil {
-	//		errObj = errors.ErrLockAlreadyRequired
-	//		errObj.Log = "[Etcd - SaveTask] the task is locked"
-	//		return nil, errObj
-	//	}
-	//	defer lk.Unlock()
-	//	// 任务状态是running 但是没有锁 证明任务已经执行完毕 但是状态同步失败
-	//	task.IsRunning = common.TASK_STATUS_NOT_RUNNING
-	//}
-
 	// build etcd save key
 	saveKey = common.BuildKey(task.ProjectID, task.TaskID)
 
@@ -88,7 +107,6 @@ func (a *comm) SaveTask(task *common.TaskInfo) (*common.TaskInfo, error) {
 		errObj.Log = "[Etcd - SaveTask] json.mashal task error:" + err.Error()
 		return nil, errObj
 	}
-
 	ctx, _ = utils.GetContextWithTimeout()
 	// save to etcd
 	if putResp, err = a.etcd.KV().Put(ctx, saveKey, string(saveByte), clientv3.WithPrevKV()); err != nil {
@@ -103,7 +121,6 @@ func (a *comm) SaveTask(task *common.TaskInfo) (*common.TaskInfo, error) {
 		// don't care because this err doesn't affect result
 		_ = json.Unmarshal(putResp.PrevKv.Value, &oldTask)
 	}
-
 	return oldTask, nil
 }
 
@@ -242,18 +259,37 @@ func (a *app) GetTaskList(projectID int64) ([]*common.TaskInfo, error) {
 
 	// init array space
 	taskList = make([]*common.TaskInfo, 0)
+	taskStatus := make(map[string]string)
 
 	// range list to unmarshal
 	for _, kvPair = range getResp.Kvs {
 		if common.IsTemporaryKey(string(kvPair.Key)) {
 			continue
 		}
+		if common.IsStatusKey(string(kvPair.Key)) {
+			pid, tid := common.PatchProjectIDTaskIDFromStatusKey(string(kvPair.Key))
+			taskStatus[fmt.Sprintf("%s%s", pid, tid)] = string(kvPair.Value)
+			continue
+		}
+
 		task = &common.TaskInfo{}
 		if err = json.Unmarshal(kvPair.Value, task); err != nil {
 			continue
 		}
 
 		taskList = append(taskList, task)
+	}
+
+	fmt.Println(taskStatus)
+
+	for _, v := range taskList {
+		status := taskStatus[fmt.Sprintf("%d%s", v.ProjectID, v.TaskID)]
+		switch status {
+		case common.TASK_STATUS_RUNNING_V2:
+			v.IsRunning = common.TASK_STATUS_RUNNING
+		default:
+			v.IsRunning = common.TASK_STATUS_NOT_RUNNING
+		}
 	}
 
 	return taskList, nil
@@ -312,8 +348,32 @@ func (a *app) KillTask(projectID int64, name string) error {
 	return nil
 }
 
+func (a *app) CheckProjectWorkerExist(projectID int64, host string) (bool, error) {
+	var (
+		preKey  string
+		err     error
+		errObj  errors.Error
+		getResp *clientv3.GetResponse
+		ctx     context.Context
+	)
+
+	preKey = common.BuildRegisterKey(projectID, host)
+	ctx, _ = utils.GetContextWithTimeout()
+	if getResp, err = a.etcd.KV().Get(ctx, preKey); err != nil {
+		errObj = errors.ErrInternalError
+		errObj.Log = "[Etcd - GetWorkerList] get key error:" + err.Error()
+		return false, errObj
+	}
+
+	if getResp.Count == 0 {
+		return false, nil
+	}
+
+	return true, nil
+}
+
 // GetWorkerList 获取节点列表
-func (a *app) GetWorkerList(projectID int64) ([]string, error) {
+func (a *app) GetWorkerList(projectID int64) ([]ClientInfo, error) {
 	var (
 		preKey  string
 		err     error
@@ -321,7 +381,7 @@ func (a *app) GetWorkerList(projectID int64) ([]string, error) {
 		getResp *clientv3.GetResponse
 		kv      *mvccpb.KeyValue
 		ctx     context.Context
-		res     []string
+		res     []ClientInfo
 	)
 
 	preKey = common.BuildRegisterKey(projectID, "")
@@ -339,12 +399,17 @@ func (a *app) GetWorkerList(projectID int64) ([]string, error) {
 		)
 
 		_ = json.Unmarshal(kv.Value, &clientinfo)
+		clientinfo.ClientIP = ip
 		if clientinfo.Version == "" {
 			clientinfo.Version = "unknow"
 		}
 
-		res = append(res, fmt.Sprintf("%s:%s", ip, clientinfo.Version))
+		res = append(res, clientinfo)
 	}
+
+	sort.Slice(res, func(i, j int) bool {
+		return res[i].ClientIP < res[j].ClientIP
+	})
 
 	return res, nil
 }

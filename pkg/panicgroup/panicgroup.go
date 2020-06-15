@@ -5,24 +5,22 @@ import (
 )
 
 type PanicGroup interface {
-	Go(f func(a ...interface{})) func(a ...interface{})
+	Go(f func())
 }
 
 type panicgroup struct {
 	err chan error
 }
 
-func (p *panicgroup) Go(f func(a ...interface{})) func(a ...interface{}) {
-	return func(a ...interface{}) {
-		go func() {
-			defer func() {
-				if r := recover(); r != nil {
-					p.err <- fmt.Errorf("%+v", r)
-				}
-			}()
-			f(a...)
+func (p *panicgroup) Go(f func()) {
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				p.err <- fmt.Errorf("%+v", r)
+			}
 		}()
-	}
+		f()
+	}()
 }
 
 func NewPanicGroup(errhandle func(err error)) PanicGroup {
@@ -30,7 +28,7 @@ func NewPanicGroup(errhandle func(err error)) PanicGroup {
 		err: make(chan error, 5),
 	}
 
-	pg.Go(func(a ...interface{}) {
+	pg.Go(func() {
 		for {
 			select {
 			case err := <-pg.err:

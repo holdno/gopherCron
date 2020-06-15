@@ -57,9 +57,6 @@ type JWTConf struct {
 
 // InitServiceConfig 获取api相关配置
 func InitServiceConfig(path string) *ServiceConfig {
-	if serviceConf != nil {
-		return serviceConf
-	}
 	if path == "" {
 		return nil
 	}

@@ -69,9 +69,13 @@ func Connect(config *config.EtcdConf) (*TaskManager, error) {
 }
 
 // 创建任务执行锁
-func (m *TaskManager) Lock(task *common.TaskInfo) *TaskLock {
+func (m *TaskManager) GetTaskLocker(task *common.TaskInfo) *Locker {
 	// 返回一把锁
-	return InitTaskLock(task, m.kv, m.lease)
+	return initTaskLocker(task, m.kv, m.lease)
+}
+
+func (m *TaskManager) GetLocker(lockkey string) *Locker {
+	return initLocker(lockkey, m.kv, m.lease)
 }
 
 func (m *TaskManager) Inc(key string) (int64, error) {

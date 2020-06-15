@@ -35,6 +35,7 @@ type ProjectRelevanceStore interface {
 type UserStore interface {
 	Commons
 	CreateAdminUser() error
+	DeleteUser(id int64) error
 	GetAdminUser() (*common.User, error)
 	CreateUser(user common.User) error
 	ChangePassword(uid int64, password, salt string) error

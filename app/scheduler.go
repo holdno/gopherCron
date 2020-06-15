@@ -29,6 +29,28 @@ func initScheduler() *TaskScheduler {
 	return scheduler
 }
 
+func (ts *TaskScheduler) Stop() {
+	fmt.Println("scheduler is about to close")
+	for {
+		count := ts.TaskExecutingCount()
+		fmt.Println("current executing task:", count)
+		if count == 0 {
+			ts.PushTaskResult(nil)
+			return
+		}
+		time.Sleep(time.Second)
+	}
+}
+
+func (ts *TaskScheduler) TaskExecutingCount() int {
+	count := 0
+	ts.TaskExecutingTable.Range(func(key, value interface{}) bool {
+		count++
+		return true
+	})
+	return count
+}
+
 func (ts *TaskScheduler) SetExecutingTask(key string, task *common.TaskExecutingInfo) {
 	ts.TaskExecutingTable.Store(key, task)
 }
@@ -105,10 +127,19 @@ func (a *client) Loop() {
 			// 对内存中的任务进行增删改查
 			a.handleTaskEvent(taskEvent)
 		case executeResult = <-a.scheduler.TaskExecuteResultChan:
+			if executeResult == nil {
+				// close signal
+				close(a.closeChan)
+				return
+			}
 			a.handleTaskResult(executeResult)
 		case <-scheduleTimer.C: // 最近的一个调度任务到期执行
 		}
 
+		if a.isClose {
+			scheduleTimer.Stop()
+			continue
+		}
 		// 每次触发事件后 重新计算下次调度任务时间
 		scheduleAfter = a.TrySchedule()
 		scheduleTimer.Reset(scheduleAfter)
@@ -212,11 +243,11 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) {
 
 	plan.Task.ClientIP = a.localip
 
-	a.Go(func(args ...interface{}) {
+	a.Go(func() {
 		// 构建执行状态信息
 		taskExecuteInfo = common.BuildTaskExecuteInfo(plan)
 		if plan.Task.Noseize == 0 {
-			lk := a.etcd.Lock(plan.Task)
+			lk := a.etcd.GetTaskLocker(plan.Task)
 			// 保存执行状态
 			// 避免分布式集群上锁偏斜 (每台机器的时钟可能不是特别的准确 导致某一台机器总能抢到锁)
 			time.Sleep(time.Duration(rand.Intn(1000)) * time.Millisecond)
@@ -251,31 +282,45 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) {
 					plan.Task.Name, plan.Task.TaskID, err)
 			}
 		}()
-
 		// 执行任务
 		result := a.ExecuteTask(taskExecuteInfo)
 		// 删除任务的正在执行状态
 		a.scheduler.DeleteExecutingTask(result.ExecuteInfo.Task.SchedulerKey())
 		// 执行结束后 返回给scheduler
 		a.scheduler.PushTaskResult(result)
-	})()
+	})
 }
 
 // 处理任务结果
 func (a *client) handleTaskResult(result *common.TaskExecuteResult) {
-	if result.Err != "" {
-		a.Warning(WarningData{
-			Data:      result.Err,
-			Type:      WarningTypeTask,
-			TaskName:  result.ExecuteInfo.Task.Name,
-			ProjectID: result.ExecuteInfo.Task.ProjectID,
-			AgentIP:   a.GetIP(),
-		})
+	err := utils.RetryFunc(10, func() error {
+		if result.Err != "" {
+			err := a.Warning(WarningData{
+				Data:      result.Err,
+				Type:      WarningTypeTask,
+				TaskName:  result.ExecuteInfo.Task.Name,
+				ProjectID: result.ExecuteInfo.Task.ProjectID,
+				AgentIP:   a.GetIP(),
+			})
+
+			return err
+		}
+		return nil
+	})
+
+	if err != nil {
+		a.logger.WithField("desc", err).Error("task warning report error")
 	}
 
-	if err := a.ResultReport(result); err != nil {
+	err = utils.RetryFunc(10, func() error {
+		err := a.ResultReport(result)
+		return err
+	})
+
+	if err != nil {
 		a.logger.WithField("desc", err).Error("task result report error")
 	}
+
 }
 
 // 接收任务事件

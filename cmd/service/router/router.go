@@ -30,6 +30,7 @@ func SetupRoute(r *gin.Engine, conf *config.DeployConf) {
 			user.GET("/info", user_func.GetUserInfo)
 			user.POST("/change_password", user_func.ChangePassword)
 			user.POST("/create", user_func.CreateUser)
+			user.POST("/delete", user_func.DeleteUser)
 			user.GET("/list", user_func.GetUserList)
 		}
 
@@ -41,8 +42,15 @@ func SetupRoute(r *gin.Engine, conf *config.DeployConf) {
 			cron.GET("/list", etcd_func.GetTaskList)
 			cron.POST("/kill", etcd_func.KillTask)
 			cron.POST("/execute", etcd_func.ExecuteTask)
-			cron.GET("/worker_list", etcd_func.GetWorkerList)
+			cron.GET("/client_list", etcd_func.GetClientList)
 			cron.POST("/monitor", etcd_func.GetWorkerListInfo)
+		}
+
+		worker := api.Group("/client")
+		{
+			worker.Use(middleware.TokenVerify())
+			worker.GET("/list", etcd_func.GetWorkerListInfo)
+			worker.POST("/reload/config", etcd_func.ReloadConfig)
 		}
 
 		project := api.Group("/project")

@@ -24,6 +24,7 @@ type TaskInfo struct {
 	Status     int    `json:"status"`
 	IsRunning  int    `json:"is_running"`
 	Noseize    int    `json:"noseize"`
+	Exclusion  int    `json:"exclusion"` // 互斥规则
 	ClientIP   string `json:"client_ip"`
 }
 
@@ -64,11 +65,21 @@ type TaskResultLog struct {
 var (
 	ETCD_PREFIX = "/cron"
 	TEMPORARY   = "t_scheduler"
+	STATUS      = "t_status"
 )
+
+// BuildTaskUpdateKey 任务更新锁的key
+func BuildTaskUpdateKey(projectID int64, taskID string) string {
+	return fmt.Sprintf("%s/update/%d/%s", ETCD_PREFIX, projectID, taskID)
+}
 
 // BuildKey etcd 保存任务的key
 func BuildKey(projectID int64, taskID string) string {
 	return fmt.Sprintf("%s/%d/%s", ETCD_PREFIX, projectID, taskID)
+}
+
+func BuildTaskStatusKey(projectID int64, taskID string) string {
+	return fmt.Sprintf("%s/%d/%s/%s", ETCD_PREFIX, projectID, taskID, STATUS)
 }
 
 // BuildSchedulerKey 临时调度的key
@@ -79,6 +90,18 @@ func BuildSchedulerKey(projectID int64, taskID string) string {
 // IsTemporaryKey 检测是否为临时调度key
 func IsTemporaryKey(key string) bool {
 	return strings.Contains(key, "/"+TEMPORARY+"/")
+}
+
+func IsStatusKey(key string) bool {
+	return strings.Contains(key, "/"+STATUS)
+}
+
+func PatchProjectIDTaskIDFromStatusKey(key string) (string, string) {
+	sp := strings.Split(key, "/")
+	if len(sp) != 5 {
+		return "", ""
+	}
+	return sp[2], sp[3]
 }
 
 // BuildLockKey etcd 分布式锁key
@@ -94,6 +117,15 @@ func BuildKillKey(projectID int64, taskID string) string {
 // BuildRegisterKey etcd 服务发现key
 func BuildRegisterKey(projectID int64, ip string) string {
 	return fmt.Sprintf("%s/register/%d/%s", ETCD_PREFIX, projectID, ip)
+}
+
+func BuildAgentCommandKey(host, command string) string {
+	return BuildAgentRegisteKey(host) + command
+}
+
+// BuildAgentRegisteKey agent 注册
+func BuildAgentRegisteKey(ip string) string {
+	return fmt.Sprintf("%s/agent/%s/", ETCD_PREFIX, ip)
 }
 
 // BuildMonitorKey 构建监控信息存储的key
@@ -129,6 +161,11 @@ func ExtractWorkerIP(project int64, key string) string {
 // 从etcd的key中提取任务名称
 func ExtractKillID(project int64, key string) string {
 	return strings.TrimPrefix(key, BuildKillKey(project, ""))
+}
+
+func ExtractAgentCommand(key string) string {
+	keys := strings.Split(key, "/")
+	return keys[len(keys)-1]
 }
 
 type TaskEvent struct {

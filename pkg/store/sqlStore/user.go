@@ -31,6 +31,13 @@ func (s *userStore) AutoMigrate() {
 	s.provider.Logger().Infof("%s, complete initialization", s.GetTable())
 }
 
+func (s *userStore) DeleteUser(id int64) error {
+	if err := s.GetMaster().Table(s.GetTable()).Where("id = ?", id).Delete(nil).Error; err != nil {
+		return err
+	}
+	return nil
+}
+
 func (s *userStore) CreateAdminUser() error {
 	var (
 		salt string

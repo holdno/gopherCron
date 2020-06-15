@@ -86,6 +86,8 @@ func (a *client) ExecuteTask(info *common.TaskExecutingInfo) *common.TaskExecute
 				result.Err = "sig exit"
 			case 255:
 				result.Err = "error exit code"
+			default:
+				result.Err = err.Error()
 			}
 		}
 		goto FinishWithError

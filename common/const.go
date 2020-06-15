@@ -12,12 +12,17 @@ const (
 	TASK_STATUS_RUNNING     = 1
 	TASK_STATUS_NOT_RUNNING = 0
 
+	TASK_STATUS_RUNNING_V2     = "running"
+	TASK_STATUS_NOT_RUNNING_V2 = ""
+
 	APP_KEY = "app_impl"
 	USER_ID = "user_id"
 
 	CLUSTER_AUTO_INDEX = "/gopherCron_cluster_key"
 
 	MonitorFrequency = 5
+
+	AGENT_COMMAND_RELOAD_CONFIG = "reload_config"
 
 	// Database
 	ADMIN_USER_ACCOUNT    = "admin"
