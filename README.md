@@ -134,9 +134,13 @@ database=""
 #### client 部署  
  
 ``` shell
-$ ./client -conf ./conf/config-default.toml
+$ ./client -c ./conf/client-config-default.toml
 // 等待如下输入即启动成功 
-register key /gopher_cron/register/12/xxx.xxx.xxx.xxx
+{"level":"info","msg":"task watcher start","project_id":14,"time":"2020-06-17T18:16:10+08:00"}
+{"level":"info","msg":"[agent - TaskKiller] new task killer, project_id: 14","time":"2020-06-17T18:16:10+08:00"}
+{"level":"info","msg":"[agent - TaskWatcher] new task watcher, project_id: 14","time":"2020-06-17T18:16:10+08:00"}
+{"level":"info","msg":"[agent - Register] new project agent register, project_id: 14","time":"2020-06-17T18:16:10+08:00"}
+...
 ```  
 
 ### Admin 管理页面  
