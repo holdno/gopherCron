@@ -95,7 +95,7 @@ exp = 168  # token 有效期(小时)
 
 #### service 部署  
 ``` shell
-$ ./service -conf ./conf/config-default.toml // 配置文件名请随意  
+$ ./service -c ./config/service-config-default.toml // 配置文件名请随意  
 2019-01-18 00:00:45 listening and serving HTTP on 0.0.0.0:6306
 
 ```
