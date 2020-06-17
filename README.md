@@ -95,7 +95,7 @@ exp = 168  # token 有效期(小时)
 
 #### service 部署  
 ``` shell
-$ ./service -c ./config/service-config-default.toml // 配置文件名请随意  
+$ ./gophercron service -c ./config/service-config-default.toml // 配置文件名请随意  
 2019-01-18 00:00:45 listening and serving HTTP on 0.0.0.0:6306
 
 ```
@@ -134,7 +134,7 @@ database=""
 #### client 部署  
  
 ``` shell
-$ ./client -c ./config/client-config-default.toml
+$ ./gophercron client -c ./config/client-config-default.toml
 // 等待如下输入即启动成功 
 {"level":"info","msg":"task watcher start","project_id":14,"time":"2020-06-17T18:16:10+08:00"}
 {"level":"info","msg":"[agent - TaskKiller] new task killer, project_id: 14","time":"2020-06-17T18:16:10+08:00"}
