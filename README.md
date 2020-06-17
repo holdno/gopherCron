@@ -134,7 +134,7 @@ database=""
 #### client 部署  
  
 ``` shell
-$ ./client -c ./conf/client-config-default.toml
+$ ./client -c ./config/client-config-default.toml
 // 等待如下输入即启动成功 
 {"level":"info","msg":"task watcher start","project_id":14,"time":"2020-06-17T18:16:10+08:00"}
 {"level":"info","msg":"[agent - TaskKiller] new task killer, project_id: 14","time":"2020-06-17T18:16:10+08:00"}
