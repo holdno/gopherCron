@@ -99,7 +99,12 @@ func (tl *Locker) TryLock() error {
 	if keepRespChan, err = tl.lease.KeepAlive(cancelCtx, leaseGrantResp.ID); err != nil {
 		errObj = errors.ErrInternalError
 		errObj.Log = "[TaskLock - TryLock] lease keepalive error:" + err.Error()
-		goto FAIL
+		return errObj
+	}
+
+	failFunc := func() {
+		cancelFunc()
+		_, _ = tl.lease.Revoke(context.TODO(), leaseGrantResp.ID) // 释放租约 key会立即被删掉
 	}
 	// 处理续租应答的协程
 	go func() {
@@ -127,13 +132,15 @@ func (tl *Locker) TryLock() error {
 	if txnResp, err = txn.Commit(); err != nil {
 		// 有可能是抢锁失败 也有可能是网络失败
 		// 都进行回滚
+		failFunc()
 		errObj = errors.ErrInternalError
 		errObj.Log = "[TaskLock - TryLock] txn commit error:" + err.Error()
-		goto FAIL
+		return errObj
 	}
 	// 成功返回 失败的话释放租约
 	if !txnResp.Succeeded {
-		// 事务没有执行成功 进入到else中 即没有抢到锁
+		// 事务没有执行成功
+		failFunc()
 		return errors.ErrLockAlreadyRequired
 	}
 
@@ -142,10 +149,6 @@ func (tl *Locker) TryLock() error {
 	tl.isLocked = true
 	clientlockers.setLease(tl.leaseID, tl)
 	return nil
-FAIL:
-	cancelFunc()                                       // 取消context
-	tl.lease.Revoke(context.TODO(), leaseGrantResp.ID) // 释放租约 key会立即被删掉
-	return errObj
 }
 
 // Unlock 释放锁
@@ -153,7 +156,7 @@ func (tl *Locker) Unlock() {
 	if tl.isLocked {
 		tl.isLocked = false
 		tl.cancelFunc() // 取消锁协成自动续租
-		tl.lease.Revoke(context.TODO(), tl.leaseID)
+		_, _ = tl.lease.Revoke(context.TODO(), tl.leaseID)
 		clientlockers.deleteLease(tl.leaseID)
 	}
 }

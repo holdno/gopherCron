@@ -165,11 +165,12 @@ func (a *client) handleTaskEvent(event *common.TaskEvent) {
 		a.TryStartTask(taskSchedulePlan)
 	case common.TASK_EVENT_SAVE:
 		// 构建执行计划
-		if taskSchedulePlan, err = common.BuildTaskSchedulerPlan(event.Task); err != nil {
-			logrus.WithField("Error", err.Error()).Error("build task schedule plan error")
-			return
-		}
-		if event.Task.Status == 1 {
+		if event.Task.Status == common.TASK_STATUS_START {
+			if taskSchedulePlan, err = common.BuildTaskSchedulerPlan(event.Task); err != nil {
+				logrus.WithField("Error", err.Error()).Error("build task schedule plan error")
+				return
+			}
+
 			a.scheduler.SetPlan(event.Task.SchedulerKey(), taskSchedulePlan)
 			return
 		}
@@ -246,20 +247,38 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) {
 	a.Go(func() {
 		// 构建执行状态信息
 		taskExecuteInfo = common.BuildTaskExecuteInfo(plan)
-		if plan.Task.Noseize == 0 {
+		if plan.Task.Noseize != common.TASK_EXECUTE_NOSEIZE {
 			lk := a.etcd.GetTaskLocker(plan.Task)
 			// 保存执行状态
 			// 避免分布式集群上锁偏斜 (每台机器的时钟可能不是特别的准确 导致某一台机器总能抢到锁)
-			time.Sleep(time.Duration(rand.Intn(1000)) * time.Millisecond)
+			time.Sleep(time.Duration(rand.Intn(300)) * time.Millisecond)
 			if err := lk.TryLock(); err != nil {
 				a.logger.Warnf("task: %s, id: %s, lock error, %v", plan.Task.Name,
 					plan.Task.TaskID, err)
 				return
 			}
-			defer lk.Unlock()
+			defer func() {
+				// 任务执行后锁最少保持5s
+				// 防止分布式部署下多台机器共同执行
+				if time.Since(taskExecuteInfo.RealTime).Seconds() < 5 {
+					time.Sleep(5*time.Second - time.Duration(time.Now().Sub(taskExecuteInfo.RealTime).Milliseconds()))
+				}
+				lk.Unlock()
+			}()
 		}
 
 		a.scheduler.SetExecutingTask(plan.Task.SchedulerKey(), taskExecuteInfo)
+		defer func() {
+			// 删除任务的正在执行状态
+			a.scheduler.DeleteExecutingTask(plan.Task.SchedulerKey())
+			if err = utils.RetryFunc(5, func() error {
+				return a.SetTaskNotRunning(*plan.Task)
+			}); err != nil {
+				a.logger.Errorf("task: %s, id: %s, failed to change running status, the task is finished, error: %v",
+					plan.Task.Name, plan.Task.TaskID, err)
+			}
+		}()
+
 		if err = a.SetTaskRunning(*plan.Task); err != nil {
 			a.logger.Warnf("task: %s, id: %s, change running status error, %v", plan.Task.Name,
 				plan.Task.TaskID, err)
@@ -274,18 +293,8 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) {
 			return
 		}
 
-		defer func() {
-			if err = utils.RetryFunc(5, func() error {
-				return a.SetTaskNotRunning(*plan.Task)
-			}); err != nil {
-				a.logger.Errorf("task: %s, id: %s, failed to change running status, the task is finished, error: %v",
-					plan.Task.Name, plan.Task.TaskID, err)
-			}
-		}()
 		// 执行任务
 		result := a.ExecuteTask(taskExecuteInfo)
-		// 删除任务的正在执行状态
-		a.scheduler.DeleteExecutingTask(result.ExecuteInfo.Task.SchedulerKey())
 		// 执行结束后 返回给scheduler
 		a.scheduler.PushTaskResult(result)
 	})

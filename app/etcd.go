@@ -120,6 +120,8 @@ func (a *comm) SaveTask(task *common.TaskInfo, opts ...clientv3.OpOption) (*comm
 		// if oldtask unmarshal error
 		// don't care because this err doesn't affect result
 		_ = json.Unmarshal(putResp.PrevKv.Value, &oldTask)
+	} else {
+		oldTask = task
 	}
 	return oldTask, nil
 }
