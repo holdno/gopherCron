@@ -2,6 +2,7 @@ package app
 
 import (
 	"bufio"
+	"fmt"
 	"os/exec"
 	"strings"
 	"syscall"
@@ -87,7 +88,11 @@ func (a *client) ExecuteTask(info *common.TaskExecutingInfo) *common.TaskExecute
 			case 255:
 				result.Err = "error exit code"
 			default:
-				result.Err = err.Error()
+				result.Err = fmt.Sprintf("exit code: %d", cmd.ProcessState.ExitCode())
+			}
+
+			if err.Error() != "" {
+				result.Err += ", " + err.Error()
 			}
 		}
 		goto FinishWithError

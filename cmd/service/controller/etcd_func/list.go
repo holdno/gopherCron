@@ -29,23 +29,13 @@ func GetTaskList(c *gin.Context) {
 	)
 
 	if err = utils.BindArgsWithGin(c, &req); err != nil {
-		errObj = errors.ErrInvalidArgument
-		errObj.Log = "[Controller - GetList] GetListRequest args error:" + err.Error()
-		response.APIError(c, errObj)
-		return
-	}
-
-	isAdmin, err := srv.IsAdmin(uid)
-	if err != nil {
 		response.APIError(c, err)
 		return
 	}
 
-	if !isAdmin {
-		if _, err = srv.CheckUserIsInProject(req.ProjectID, uid); err != nil {
-			response.APIError(c, err)
-			return
-		}
+	if err = srv.CheckPermissions(req.ProjectID, uid); err != nil {
+		response.APIError(c, err)
+		return
 	}
 
 	if taskList, err = srv.GetTaskList(req.ProjectID); err != nil {

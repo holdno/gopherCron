@@ -34,6 +34,9 @@ const (
 	ADMIN_USER_NAME       = "administrator"
 	ADMIN_PROJECT         = "admin_project"
 
+	WEBHOOK_TYPE_TASK_START    = "task_start"
+	WEBHOOK_TYPE_TASK_FINISHED = "task_finished"
+
 	// Log
 	ErrorLog   = 1
 	SuccessLog = 0

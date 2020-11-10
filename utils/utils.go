@@ -38,10 +38,16 @@ func GetCurrentTimeText() string {
 
 // BindArgsWithGin 绑定请求参数
 func BindArgsWithGin(c *gin.Context, req interface{}) error {
-	return c.ShouldBindWith(req, binding.Default(c.Request.Method, c.ContentType()))
+	err := c.ShouldBindWith(req, binding.Default(c.Request.Method, c.ContentType()))
+	if err != nil {
+		errObj := errors.ErrInvalidArgument
+		errObj.Log = err.Error()
+		return errObj
+	}
+	return nil
 }
 
-// MakeOrderID 生成订单
+// GetStrID 生成任务id编号
 func GetStrID() string {
 	return strconv.FormatInt(globalIDWorker.GetId(), 10)
 }

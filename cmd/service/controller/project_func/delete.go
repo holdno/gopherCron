@@ -3,7 +3,6 @@ package project_func
 import (
 	"github.com/holdno/gopherCron/app"
 	"github.com/holdno/gopherCron/cmd/service/response"
-	"github.com/holdno/gopherCron/errors"
 	"github.com/holdno/gopherCron/utils"
 
 	"github.com/gin-gonic/gin"
@@ -22,7 +21,7 @@ func DeleteOne(c *gin.Context) {
 	)
 
 	if err = utils.BindArgsWithGin(c, &req); err != nil {
-		response.APIError(c, errors.ErrInvalidArgument)
+		response.APIError(c, err)
 		return
 	}
 
@@ -35,12 +34,22 @@ func DeleteOne(c *gin.Context) {
 		}
 	}()
 
+	if err = srv.CheckPermissions(req.ProjectID, uid); err != nil {
+		response.APIError(c, err)
+		return
+	}
+
 	if err = srv.DeleteProject(tx, req.ProjectID, uid); err != nil {
 		response.APIError(c, err)
 		return
 	}
 
 	if err = srv.CleanProjectLog(tx, req.ProjectID); err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	if err = srv.DeleteAllWebHook(tx, req.ProjectID); err != nil {
 		response.APIError(c, err)
 		return
 	}

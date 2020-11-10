@@ -13,6 +13,56 @@ import (
 	"github.com/coreos/etcd/mvcc/mvccpb"
 )
 
+func (a *app) WebHookWorker() error {
+	var (
+		err     error
+		getResp *clientv3.GetResponse
+	)
+	watchKey := common.GetTaskStatusPrefixKey()
+	if err = utils.RetryFunc(5, func() error {
+		if getResp, err = a.etcd.KV().Get(context.TODO(), watchKey, clientv3.WithPrefix()); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		warningErr := a.Warning(WarningData{
+			Data: fmt.Sprintf("[agent - WebHookWorker] etcd kv get error: %s", err.Error()),
+			Type: WarningTypeSystem,
+		})
+		if warningErr != nil {
+			a.logger.Errorf("[agent - WebHookWorker] failed to push warning, %s", err.Error())
+		}
+		return err
+	}
+
+	cancelCtx, cancelWatchFunc := context.WithCancel(context.TODO())
+	// 从GET时刻的后续版本进行监听变化
+	watchStartRevision := getResp.Header.Revision + 1
+	// 开始监听
+	watchChan := a.etcd.Watcher().Watch(cancelCtx, watchKey, clientv3.WithRev(watchStartRevision), clientv3.WithPrefix())
+	for {
+		select {
+		case w, ok := <-watchChan:
+			if !ok {
+				return nil
+			}
+
+			if w.Err() != nil {
+				return w.Err()
+			}
+
+			for _, watchEvent := range w.Events {
+				switch watchEvent.Type {
+				case mvccpb.PUT: // 任务开始执行
+
+				case mvccpb.DELETE: // 任务执行完毕
+					// 解析watchEvent.Kv.Key
+				}
+			}
+		}
+	}
+}
+
 func (a *client) newWatchHandle() func(resp clientv3.WatchResponse, projectID int64) {
 	var (
 		err        error

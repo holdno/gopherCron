@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -78,8 +79,22 @@ func BuildKey(projectID int64, taskID string) string {
 	return fmt.Sprintf("%s/%d/%s", ETCD_PREFIX, projectID, taskID)
 }
 
+func GetTaskStatusPrefixKey() string {
+	return fmt.Sprintf("%s/%s/", ETCD_PREFIX, STATUS)
+}
+
+func ParseTaskStatusKey(key string) (int64, string) {
+	projectTask := strings.Replace(key, GetTaskStatusPrefixKey(), "", -1)
+	result := strings.Split(projectTask, "/")
+	if len(result) != 2 {
+		return 0, ""
+	}
+	projectID, _ := strconv.ParseInt(result[0], 10, 64)
+	return projectID, result[1]
+}
+
 func BuildTaskStatusKey(projectID int64, taskID string) string {
-	return fmt.Sprintf("%s/%d/%s/%s", ETCD_PREFIX, projectID, taskID, STATUS)
+	return fmt.Sprintf("%s%d/%s", GetTaskStatusPrefixKey(), projectID, taskID)
 }
 
 // BuildSchedulerKey 临时调度的key

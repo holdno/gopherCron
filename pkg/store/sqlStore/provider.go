@@ -60,6 +60,7 @@ type SqlProviderStores struct {
 	Project          store.ProjectStore
 	ProjectRelevance store.ProjectRelevanceStore
 	TaskLog          store.TaskLogStore
+	WebHook          store.TaskWebHookStore
 }
 
 func MustSetup(conf *config.MysqlConf, logger *logrus.Logger, install bool) SqlStore {
@@ -74,6 +75,7 @@ func MustSetup(conf *config.MysqlConf, logger *logrus.Logger, install bool) SqlS
 	provider.stores.Project = NewProjectStore(provider)
 	provider.stores.TaskLog = NewTaskLogStore(provider)
 	provider.stores.ProjectRelevance = NewProjectRelevanceStore(provider)
+	provider.stores.WebHook = NewWebHookStore(provider)
 	provider.CheckStores()
 
 	if install {
@@ -160,6 +162,7 @@ type SqlStore interface {
 	Project() store.ProjectStore
 	ProjectRelevance() store.ProjectRelevanceStore
 	TaskLog() store.TaskLogStore
+	WebHook() store.TaskWebHookStore
 	BeginTx() *gorm.DB
 	Install()
 	Shutdown()

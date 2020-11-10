@@ -28,7 +28,7 @@ func Update(c *gin.Context) {
 	)
 
 	if err = utils.BindArgsWithGin(c, &req); err != nil {
-		response.APIError(c, errors.ErrInvalidArgument)
+		response.APIError(c, err)
 		return
 	}
 
@@ -58,11 +58,10 @@ type RemoveUserRequest struct {
 
 func RemoveUser(c *gin.Context) {
 	var (
-		err     error
-		req     RemoveUserRequest
-		project *common.Project
-		uid     = utils.GetUserID(c)
-		srv     = app.GetApp(c)
+		err error
+		req RemoveUserRequest
+		uid = utils.GetUserID(c)
+		srv = app.GetApp(c)
 	)
 
 	if err = utils.BindArgsWithGin(c, &req); err != nil {
@@ -77,23 +76,9 @@ func RemoveUser(c *gin.Context) {
 		return
 	}
 
-	// 首先确认操作的用户是否为该项目的管理员
-	isAdmin, err := srv.IsAdmin(uid)
-	if err != nil {
+	if err = srv.CheckPermissions(req.ProjectID, uid); err != nil {
 		response.APIError(c, err)
 		return
-	}
-
-	if !isAdmin {
-		if project, err = srv.CheckUserProject(req.ProjectID, uid); err != nil {
-			response.APIError(c, err)
-			return
-		}
-
-		if project == nil {
-			response.APIError(c, errors.ErrUnauthorized)
-			return
-		}
 	}
 
 	// 验证通过后再执行移出操作
@@ -117,7 +102,6 @@ func AddUser(c *gin.Context) {
 		uid      = utils.GetUserID(c)
 		srv      = app.GetApp(c)
 		userInfo *common.User
-		project  *common.Project
 	)
 
 	if err = utils.BindArgsWithGin(c, &req); err != nil {
@@ -125,22 +109,9 @@ func AddUser(c *gin.Context) {
 		return
 	}
 
-	isAdmin, err := srv.IsAdmin(uid)
-	if err != nil {
+	if err = srv.CheckPermissions(req.ProjectID, uid); err != nil {
 		response.APIError(c, err)
 		return
-	}
-
-	if !isAdmin {
-		if project, err = srv.CheckUserProject(req.ProjectID, uid); err != nil {
-			response.APIError(c, err)
-			return
-		}
-
-		if project == nil {
-			response.APIError(c, errors.ErrUnauthorized)
-			return
-		}
 	}
 
 	if userInfo, err = srv.GetUserByAccount(req.UserAccount); err != nil {

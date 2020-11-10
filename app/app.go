@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -69,6 +70,12 @@ type App interface {
 	GetTaskLocker(task *common.TaskInfo) *etcd.Locker
 	GetIP() string
 	GetConfig() *config.ServiceConfig
+	CreateWebHook(projectID int64, types, callbackUrl string) error
+	GetWebHook(projectID int64, types string) (*common.WebHook, error)
+	GetWebHookList(projectID int64) ([]common.WebHook, error)
+	DeleteWebHook(tx *gorm.DB, projectID int64, types string) error
+	DeleteAllWebHook(tx *gorm.DB, projectID int64) error
+	CheckPermissions(projectID, uid int64) error
 
 	BeginTx() *gorm.DB
 	Close()
@@ -91,12 +98,13 @@ func GetApp(c *gin.Context) App {
 }
 
 type app struct {
-	store   sqlStore.SqlStore
-	logger  *logrus.Logger
-	etcd    EtcdManager
-	closeCh chan struct{}
-	isClose bool
-	localip string
+	httpClient *http.Client
+	store      sqlStore.SqlStore
+	logger     *logrus.Logger
+	etcd       EtcdManager
+	closeCh    chan struct{}
+	isClose    bool
+	localip    string
 
 	cfg *config.ServiceConfig
 
@@ -120,6 +128,9 @@ func NewApp(configPath string, opts ...AppOptions) App {
 	app.cfg = conf
 	app.logger = logger.MustSetup(conf.LogLevel)
 	app.store = sqlStore.MustSetup(conf.Mysql, app.logger, true)
+	app.httpClient = &http.Client{
+		Timeout: time.Second * 5,
+	}
 
 	for _, opt := range opts {
 		opt(app)
@@ -244,8 +255,6 @@ func (agent *client) loadConfigAndSetupAgentFunc() func() {
 		} else if agent.configPath == "" {
 			return
 		}
-
-		fmt.Println("--------------load config--------------")
 
 		if cfg.ReportAddr != agent.cfg.ReportAddr {
 			agent.logger.Infof("init http task log reporter, address: %s", cfg.ReportAddr)
@@ -601,6 +610,24 @@ func (a *app) GetUserByAccount(account string) (*common.User, error) {
 	}
 
 	return res[0], nil
+}
+
+func (a *app) CheckPermissions(projectID, uid int64) error {
+	// 首先确认操作的用户是否为该项目的管理员
+	isAdmin, err := a.IsAdmin(uid)
+	if err != nil {
+		return err
+	}
+
+	if !isAdmin {
+		if exist, err := a.CheckUserIsInProject(projectID, uid); err != nil {
+			return err
+		} else if !exist {
+			return errors.ErrProjectNotExist
+		}
+	}
+
+	return nil
 }
 
 func (a *app) IsAdmin(uid int64) (bool, error) {

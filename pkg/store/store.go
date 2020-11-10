@@ -48,3 +48,12 @@ type TaskLogStore interface {
 	GetList(selector selection.Selector) ([]*common.TaskLog, error)
 	Clean(tx *gorm.DB, selector selection.Selector) error
 }
+
+type TaskWebHookStore interface {
+	Commons
+	Create(data common.WebHook) error
+	GetList(projectID int64) ([]common.WebHook, error)
+	GetOne(projectID int64, types string) (*common.WebHook, error)
+	Delete(tx *gorm.DB, projectID int64, types string) error
+	DeleteAll(tx *gorm.DB, projectID int64) error
+}

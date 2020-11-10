@@ -33,7 +33,6 @@ func NewComm(etcd EtcdManager) CommonInterface {
 }
 
 func (a *comm) SetTaskRunning(task common.TaskInfo) error {
-	task.IsRunning = common.TASK_STATUS_RUNNING
 	ctx, _ := utils.GetContextWithTimeout()
 
 	_, err := a.etcd.KV().Put(ctx, common.BuildTaskStatusKey(task.ProjectID, task.TaskID), common.TASK_STATUS_RUNNING_V2)
@@ -47,12 +46,11 @@ func (a *comm) SetTaskRunning(task common.TaskInfo) error {
 }
 
 func (a *comm) SetTaskNotRunning(task common.TaskInfo) error {
-	task.IsRunning = common.TASK_STATUS_NOT_RUNNING
 	task.ClientIP = ""
 
 	ctx, _ := utils.GetContextWithTimeout()
 
-	_, err := a.etcd.KV().Put(ctx, common.BuildTaskStatusKey(task.ProjectID, task.TaskID), common.TASK_STATUS_NOT_RUNNING_V2)
+	_, err := a.etcd.KV().Delete(ctx, common.BuildTaskStatusKey(task.ProjectID, task.TaskID))
 	if err != nil {
 		errObj := errors.ErrInternalError
 		errObj.Log = "[Etcd - SetTaskNotRunning] etcd client kv put error:" + err.Error()
@@ -189,7 +187,7 @@ func (a *app) DeleteTask(projectID int64, taskID string) (*common.TaskInfo, erro
 	}
 
 	if taskID != "" && len(delResp.PrevKvs) != 0 {
-		json.Unmarshal([]byte(delResp.PrevKvs[0].Value), &oldTask)
+		_ = json.Unmarshal([]byte(delResp.PrevKvs[0].Value), &oldTask)
 	}
 
 	return oldTask, nil
@@ -281,8 +279,6 @@ func (a *app) GetTaskList(projectID int64) ([]*common.TaskInfo, error) {
 
 		taskList = append(taskList, task)
 	}
-
-	fmt.Println(taskStatus)
 
 	for _, v := range taskList {
 		status := taskStatus[fmt.Sprintf("%d%s", v.ProjectID, v.TaskID)]

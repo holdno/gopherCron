@@ -3,6 +3,8 @@ package router
 import (
 	"net/http"
 
+	"github.com/holdno/gopherCron/cmd/service/controller"
+
 	"github.com/holdno/gopherCron/cmd/service/controller/system"
 
 	"github.com/holdno/gopherCron/config"
@@ -34,6 +36,15 @@ func SetupRoute(r *gin.Engine, conf *config.DeployConf) {
 			user.GET("/list", user_func.GetUserList)
 		}
 
+		webhook := api.Group("/webhook")
+		{
+			webhook.Use(middleware.TokenVerify())
+			webhook.POST("/create", controller.CreateWebHook)
+			webhook.POST("/delete", controller.DeleteWebHook)
+			webhook.GET("/list", controller.GetWebHookList)
+			webhook.GET("/info", controller.GetWebHook)
+		}
+
 		cron := api.Group("/crontab")
 		{
 			cron.Use(middleware.TokenVerify())
@@ -44,6 +55,10 @@ func SetupRoute(r *gin.Engine, conf *config.DeployConf) {
 			cron.POST("/execute", etcd_func.ExecuteTask)
 			cron.GET("/client_list", etcd_func.GetClientList)
 			cron.POST("/monitor", etcd_func.GetWorkerListInfo)
+			service := cron.Group("/tmp")
+			{
+				service.POST("/execute", etcd_func.TmpExecute)
+			}
 		}
 
 		worker := api.Group("/client")

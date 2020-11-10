@@ -1,7 +1,6 @@
 package user_func
 
 import (
-	"github.com/gin-gonic/gin/binding"
 	"github.com/holdno/gopherCron/app"
 	"github.com/holdno/gopherCron/cmd/service/response"
 	"github.com/holdno/gopherCron/common"
@@ -26,11 +25,8 @@ func GetUserList(c *gin.Context) {
 		req GetUserListRequest
 	)
 
-	if err = c.ShouldBindWith(&req, binding.Default(c.Request.Method, c.ContentType())); err != nil {
-		errObj := errors.ErrInvalidArgument
-		errObj.Msg = "请求参数错误"
-		errObj.Log = err.Error()
-		response.APIError(c, errObj)
+	if err = utils.BindArgsWithGin(c, &req); err != nil {
+		response.APIError(c, err)
 		return
 	}
 
@@ -103,7 +99,7 @@ func GetUsersUnderTheProject(c *gin.Context) {
 	)
 
 	if err = utils.BindArgsWithGin(c, &req); err != nil {
-		response.APIError(c, errors.ErrInvalidArgument)
+		response.APIError(c, err)
 		return
 	}
 

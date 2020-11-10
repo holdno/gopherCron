@@ -23,20 +23,17 @@ func DeleteTask(c *gin.Context) {
 		req     DeleteTaskRequest
 		oldTask *common.TaskInfo
 		task    *common.TaskInfo
-		errObj  errors.Error
 		exist   bool
 		uid     = utils.GetUserID(c)
 		srv     = app.GetApp(c)
 	)
 
 	if err = utils.BindArgsWithGin(c, &req); err != nil {
-		errObj = errors.ErrInvalidArgument
-		errObj.Log = err.Error()
-		response.APIError(c, errObj)
+		response.APIError(c, err)
 		return
 	}
 
-	if exist, err = srv.CheckUserIsInProject(req.ProjectID, uid); err != nil {
+	if err = srv.CheckPermissions(req.ProjectID, uid); err != nil {
 		response.APIError(c, err)
 		return
 	}
