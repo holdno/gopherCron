@@ -51,6 +51,20 @@ func (s *taskLogStore) GetList(selector selection.Selector) ([]*common.TaskLog, 
 	return res, nil
 }
 
+func (s *taskLogStore) GetOne(projectID int64, taskID string) (*common.TaskLog, error) {
+	var (
+		err error
+		res *common.TaskLog
+	)
+
+	err = s.GetReplica().Table(s.GetTable()).Where("project_id = ?", projectID).
+		Where("task_id = ?", taskID).First(&res).Error
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
 func (s *taskLogStore) Clean(tx *gorm.DB, selector selection.Selector) error {
 	if tx == nil {
 		tx = s.GetMaster()

@@ -51,6 +51,7 @@ type App interface {
 	GetMonitor(ip string) (*common.MonitorInfo, error)
 	TemporarySchedulerTask(task *common.TaskInfo) error
 	GetTaskLogList(pid int64, tid string, page, pagesize int) ([]*common.TaskLog, error)
+	GetTaskLogDetail(pid int64, tid string) (*common.TaskLog, error)
 	GetLogTotalByDate(projects []int64, timestamp int64, errType int) (int, error)
 	GetTaskLogTotal(pid int64, tid string) (int, error)
 	CleanProjectLog(tx *gorm.DB, pid int64) error
@@ -463,6 +464,18 @@ func (a *app) CleanLog(tx *gorm.DB, pid int64, tid string) error {
 	}
 
 	return nil
+}
+
+func (a *app) GetTaskLogDetail(pid int64, tid string) (*common.TaskLog, error) {
+	res, err := a.store.TaskLog().GetOne(pid, tid)
+	if err != nil && err != gorm.ErrRecordNotFound {
+		errObj := errors.ErrInternalError
+		errObj.Msg = "获取日志列表失败"
+		errObj.Log = err.Error()
+		return nil, errObj
+	}
+
+	return res, nil
 }
 
 func (a *app) GetTaskLogList(pid int64, tid string, page, pagesize int) ([]*common.TaskLog, error) {

@@ -46,6 +46,7 @@ type TaskLogStore interface {
 	Commons
 	CreateTaskLog(data common.TaskLog) error
 	GetList(selector selection.Selector) ([]*common.TaskLog, error)
+	GetOne(projectID int64, taskID string) (*common.TaskLog, error)
 	Clean(tx *gorm.DB, selector selection.Selector) error
 }
 

@@ -1,7 +1,11 @@
 package app
 
 import (
+	"fmt"
+	"net/http"
 	"time"
+
+	"github.com/holdno/gopherCron/jwt"
 
 	"github.com/jinzhu/gorm"
 
@@ -85,4 +89,47 @@ func (a *app) HandleWebHook(projectID int64, taskID string, types string) error 
 		return nil
 	}
 
+	var (
+		retryTimes = [3]time.Duration{1, 3, 5}
+		index      = 0
+		logDetail  *common.TaskLog
+	)
+
+	// 获取项目创建者信息
+	project, err := a.GetProject(projectID)
+	if err != nil {
+		return err
+	}
+
+	for {
+		if index > 2 {
+			errObj := errors.ErrDataNotFound
+			errObj.Msg = "无法获取项目日志"
+			errObj.Log = fmt.Sprintf("project_id: %d, task_id: %s, failed to get logs", projectID, taskID)
+			return errObj
+		}
+		logDetail, err = a.GetTaskLogDetail(projectID, taskID)
+		if err != nil {
+			return err
+		}
+
+		if logDetail == nil {
+			time.Sleep(retryTimes[index] * time.Second)
+			index++
+			continue
+		}
+		break
+	}
+
+	token := jwt.Build(project.UID)
+
+	params := map[string]interface{}{
+		"task_id":    taskID,
+		"project_id": projectID,
+		"command":    logDetail.Command,
+		"start_time": logDetail.StartTime,
+		"end_time":   logDetail.EndTime,
+	}
+	http.NewRequest(http.MethodPost, wh.CallbackUrl)
+	a.httpClient.Post(wh.CallbackUrl, "content-type:application/json")
 }
