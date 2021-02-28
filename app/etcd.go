@@ -20,10 +20,10 @@ type comm struct {
 }
 
 type CommonInterface interface {
-	SetTaskRunning(task common.TaskInfo) error
-	SetTaskNotRunning(task common.TaskInfo) error
+	SetTaskRunning(plan *common.TaskSchedulePlan) error
+	SetTaskNotRunning(plan *common.TaskSchedulePlan) error
 	SaveTask(task *common.TaskInfo, opts ...clientv3.OpOption) (*common.TaskInfo, error)
-	GetTask(projectID int64, nameID string) (*common.TaskInfo, error)
+	GetTask(projectID int64, taskID string) (*common.TaskInfo, error)
 	TemporarySchedulerTask(task *common.TaskInfo) error
 	GetVersion() string
 }
@@ -32,10 +32,13 @@ func NewComm(etcd EtcdManager) CommonInterface {
 	return &comm{etcd: etcd}
 }
 
-func (a *comm) SetTaskRunning(task common.TaskInfo) error {
+func (a *comm) SetTaskRunning(plan *common.TaskSchedulePlan) error {
 	ctx, _ := utils.GetContextWithTimeout()
-
-	_, err := a.etcd.KV().Put(ctx, common.BuildTaskStatusKey(task.ProjectID, task.TaskID), common.TASK_STATUS_RUNNING_V2)
+	runningInfo, _ := json.Marshal(common.TaskRunningInfo{
+		Status: common.TASK_STATUS_RUNNING_V2,
+		TmpID:  plan.TmpID,
+	})
+	_, err := a.etcd.KV().Put(ctx, common.BuildTaskStatusKey(plan.Task.ProjectID, plan.Task.TaskID), string(runningInfo))
 	if err != nil {
 		errObj := errors.ErrInternalError
 		errObj.Log = "[Etcd - SetTaskRunning] etcd client kv put error:" + err.Error()
@@ -45,12 +48,12 @@ func (a *comm) SetTaskRunning(task common.TaskInfo) error {
 	return nil
 }
 
-func (a *comm) SetTaskNotRunning(task common.TaskInfo) error {
-	task.ClientIP = ""
+func (a *comm) SetTaskNotRunning(plan *common.TaskSchedulePlan) error {
+	plan.Task.ClientIP = ""
 
 	ctx, _ := utils.GetContextWithTimeout()
 
-	_, err := a.etcd.KV().Delete(ctx, common.BuildTaskStatusKey(task.ProjectID, task.TaskID))
+	_, err := a.etcd.KV().Delete(ctx, common.BuildTaskStatusKey(plan.Task.ProjectID, plan.Task.TaskID))
 	if err != nil {
 		errObj := errors.ErrInternalError
 		errObj.Log = "[Etcd - SetTaskNotRunning] etcd client kv put error:" + err.Error()
@@ -194,7 +197,7 @@ func (a *app) DeleteTask(projectID int64, taskID string) (*common.TaskInfo, erro
 }
 
 // GetTask 获取任务
-func (a *comm) GetTask(projectID int64, nameID string) (*common.TaskInfo, error) {
+func (a *comm) GetTask(projectID int64, taskID string) (*common.TaskInfo, error) {
 	var (
 		saveKey string
 		getResp *clientv3.GetResponse
@@ -205,7 +208,7 @@ func (a *comm) GetTask(projectID int64, nameID string) (*common.TaskInfo, error)
 	)
 
 	// build etcd save key
-	saveKey = common.BuildKey(projectID, nameID) // 保存的key同样也是获取的key
+	saveKey = common.BuildKey(projectID, taskID) // 保存的key同样也是获取的key
 
 	ctx, _ = utils.GetContextWithTimeout()
 
@@ -282,6 +285,10 @@ func (a *app) GetTaskList(projectID int64) ([]*common.TaskInfo, error) {
 
 	for _, v := range taskList {
 		status := taskStatus[fmt.Sprintf("%d%s", v.ProjectID, v.TaskID)]
+		var taskRuningInfo common.TaskRunningInfo
+		if err = json.Unmarshal([]byte(status), &taskRuningInfo); err == nil {
+			status = taskRuningInfo.Status
+		}
 		switch status {
 		case common.TASK_STATUS_RUNNING_V2:
 			v.IsRunning = common.TASK_STATUS_RUNNING

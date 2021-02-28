@@ -1,10 +1,12 @@
 package app
 
 import (
+	"bytes"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/holdno/gopherCron/utils"
 
 	"github.com/holdno/gopherCron/jwt"
 
@@ -80,7 +82,7 @@ func (a *app) DeleteAllWebHook(tx *gorm.DB, projectID int64) error {
 	return nil
 }
 
-func (a *app) HandleWebHook(projectID int64, taskID string, types string) error {
+func (a *app) HandleWebHook(projectID int64, taskID string, types string, logDetail *common.TaskLog) error {
 	wh, err := a.GetWebHook(projectID, types)
 	if err != nil {
 		return err
@@ -91,9 +93,8 @@ func (a *app) HandleWebHook(projectID int64, taskID string, types string) error 
 	}
 
 	var (
-		retryTimes = [3]time.Duration{1, 3, 5}
+		retryTimes = [5]time.Duration{1, 3, 5, 7, 9}
 		index      = 0
-		logDetail  *common.TaskLog
 	)
 
 	// 获取项目创建者信息
@@ -102,30 +103,7 @@ func (a *app) HandleWebHook(projectID int64, taskID string, types string) error 
 		return err
 	}
 
-	for {
-		if index > 2 {
-			errObj := errors.ErrDataNotFound
-			errObj.Msg = "无法获取项目日志"
-			errObj.Log = fmt.Sprintf("project_id: %d, task_id: %s, failed to get logs", projectID, taskID)
-			return errObj
-		}
-		logDetail, err = a.GetTaskLogDetail(projectID, taskID)
-		if err != nil {
-			return err
-		}
-
-		if logDetail == nil {
-			time.Sleep(retryTimes[index] * time.Second)
-			index++
-			continue
-		}
-		break
-	}
-
 	token := jwt.Build(project.UID)
-
-	var resultLog common.TaskResultLog
-	json.Unmarshal([]byte(logDetail.Result), &resultLog)
 
 	params := map[string]interface{}{
 		"task_id":    taskID,
@@ -137,6 +115,38 @@ func (a *app) HandleWebHook(projectID int64, taskID string, types string) error 
 		"client_ip":  logDetail.ClientIP,
 	}
 
-	http.NewRequest(http.MethodPost, wh.CallbackUrl)
-	a.httpClient.Post(wh.CallbackUrl, "content-type:application/json")
+	reqData, _ := json.Marshal(params)
+	req, _ := http.NewRequest(http.MethodPost, wh.CallbackUrl, bytes.NewReader(reqData))
+	req.Header.Set("token", token)
+
+	err = utils.RetryFunc(5, func() error {
+		resp, err := a.httpClient.Do(req)
+		if err != nil || resp.StatusCode != http.StatusOK {
+			if index >= 5 {
+				return err
+			}
+			time.Sleep(retryTimes[index] * time.Second)
+			index++
+			if err != nil {
+				return err
+			}
+			return errors.NewError(resp.StatusCode, "回调响应失败", "the hook is faild")
+		}
+		return nil
+	})
+
+	if err != nil {
+		task, getTaskErr := a.GetTask(projectID, taskID)
+		if getTaskErr != nil {
+			return getTaskErr
+		}
+		_ = a.Warning(WarningData{
+			Data:      err.Error(),
+			Type:      WarningTypeTask,
+			AgentIP:   a.localip,
+			TaskName:  task.Name,
+			ProjectID: projectID,
+		})
+	}
+	return nil
 }

@@ -223,6 +223,7 @@ func (a *client) TrySchedule() time.Duration {
 
 // TryStartTask 开始执行任务
 func (a *client) TryStartTask(plan *common.TaskSchedulePlan) {
+	plan.TmpID = utils.GetStrID()
 	// 执行的任务可能会执行很久
 	// 需要防止并发
 	var (
@@ -272,14 +273,14 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) {
 			// 删除任务的正在执行状态
 			a.scheduler.DeleteExecutingTask(plan.Task.SchedulerKey())
 			if err = utils.RetryFunc(5, func() error {
-				return a.SetTaskNotRunning(*plan.Task)
+				return a.SetTaskNotRunning(plan)
 			}); err != nil {
 				a.logger.Errorf("task: %s, id: %s, failed to change running status, the task is finished, error: %v",
 					plan.Task.Name, plan.Task.TaskID, err)
 			}
 		}()
 
-		if err = a.SetTaskRunning(*plan.Task); err != nil {
+		if err = a.SetTaskRunning(plan); err != nil {
 			a.logger.Warnf("task: %s, id: %s, change running status error, %v", plan.Task.Name,
 				plan.Task.TaskID, err)
 			// retry

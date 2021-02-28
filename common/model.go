@@ -37,6 +37,7 @@ type TaskLog struct {
 	Command   string `json:"command" gorm:"column:command;type:varchar(255);not null;comment:'任务指令'"`
 	WithError int    `json:"with_error" gorm:"column:with_error;type:int(11);not null;comment:'是否发生错误'"`
 	ClientIP  string `json:"client_ip" gorm:"client_ip;index:client_ip;type:varchar(20);not null;comment:'节点ip'"`
+	TmpID     string `json:"tmp_id" gorm:"column:tmp_id;type:varchar(50);not null;comment:'任务执行id'"`
 }
 
 // MonitorInfo 监控信息

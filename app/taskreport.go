@@ -168,6 +168,7 @@ func (r *TaskResultReporter) ResultReport(result *common.TaskExecuteResult) erro
 		Command:   result.ExecuteInfo.Task.Command,
 		WithError: getError,
 		ClientIP:  result.ExecuteInfo.Task.ClientIP,
+		TmpID:     result.ExecuteInfo.TmpID,
 	}
 
 	if projectInfo != nil {

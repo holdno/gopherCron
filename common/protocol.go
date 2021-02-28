@@ -36,12 +36,19 @@ type TaskInfo struct {
 	Noseize    int    `json:"noseize"`
 	Exclusion  int    `json:"exclusion"` // 互斥规则
 	ClientIP   string `json:"client_ip"`
+	TmpID      string `json:"tmp_id"` // 每次任务执行的唯一标识
+}
+
+type TaskRunningInfo struct {
+	Status string `json:"status"`
+	TmpID  string `json:"tmp_id"`
 }
 
 // TaskSchedulePlan 任务调度计划
 type TaskSchedulePlan struct {
 	Task     *TaskInfo
 	Expr     *cronexpr.Expression // 解析后的cron表达式
+	TmpID    string
 	NextTime time.Time
 }
 
@@ -50,6 +57,7 @@ type TaskExecutingInfo struct {
 	Task     *TaskInfo `json:"task"`
 	PlanTime time.Time `json:"plan_time"` // 理论上的调度时间
 	RealTime time.Time `json:"real_time"` // 实际调度时间
+	TmpID    string    `json:"tmp_id"`
 
 	CancelCtx  context.Context    `json:"-"`
 	CancelFunc context.CancelFunc `json:"-"` // 用来取消Command执行的cancel函数
@@ -228,6 +236,7 @@ func BuildTaskExecuteInfo(plan *TaskSchedulePlan) *TaskExecutingInfo {
 		Task:     plan.Task,
 		PlanTime: plan.NextTime, // 计划调度时间
 		RealTime: time.Now(),    // 真实执行时间
+		TmpID:    plan.TmpID,
 	}
 
 	if plan.Task.Timeout != 0 {
