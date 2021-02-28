@@ -50,7 +50,7 @@ type MonitorInfo struct {
 }
 
 type WebHook struct {
-	CallbackUrl string `json:"callback_url" gorm:"column:callback_url;type:varchar(255);not null;comment:'回调地址'"`
+	CallbackURL string `json:"callback_url" gorm:"column:callback_url;type:varchar(255);not null;comment:'回调地址'"`
 	ProjectID   int64  `json:"project_id" gorm:"column:project_id;type:int(11);index:project_id;not null;comment:'关联项目id'"`
 	Type        string `json:"type" gorm:"column:type;type:varchar(30);not null;index:type;comment:'webhook类型'"`
 	CreateTime  int64  `json:"create_time" gorm:"column:create_time;type:int(11);not null;comment:'创建时间'"`
