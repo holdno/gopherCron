@@ -1,6 +1,7 @@
 package app
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
@@ -123,13 +124,19 @@ func (a *app) HandleWebHook(projectID int64, taskID string, types string) error 
 
 	token := jwt.Build(project.UID)
 
+	var resultLog common.TaskResultLog
+	json.Unmarshal([]byte(logDetail.Result), &resultLog)
+
 	params := map[string]interface{}{
 		"task_id":    taskID,
 		"project_id": projectID,
 		"command":    logDetail.Command,
 		"start_time": logDetail.StartTime,
 		"end_time":   logDetail.EndTime,
+		"result":     logDetail.Result,
+		"client_ip":  logDetail.ClientIP,
 	}
+
 	http.NewRequest(http.MethodPost, wh.CallbackUrl)
 	a.httpClient.Post(wh.CallbackUrl, "content-type:application/json")
 }
