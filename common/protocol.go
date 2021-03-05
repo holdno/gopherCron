@@ -11,15 +11,6 @@ import (
 	"github.com/gorhill/cronexpr"
 )
 
-type WebHookParams struct {
-	TaskID    string `json:"task_id" form:"task_id"`
-	ProjectID int64  `json:"project_id" form:"project_id"`
-	Command   string `json:"command" form:"command"`
-	Result    string `json:"result" form:"result"`
-	StartTime int64  `json:"start_time" form:"start_time"`
-	EndTime   int64  `json:"end_time" form:"end_time"`
-}
-
 // TaskInfo 任务详情
 type TaskInfo struct {
 	TaskID    string `json:"task_id"`

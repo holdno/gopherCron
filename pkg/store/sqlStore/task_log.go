@@ -51,18 +51,18 @@ func (s *taskLogStore) GetList(selector selection.Selector) ([]*common.TaskLog, 
 	return res, nil
 }
 
-func (s *taskLogStore) GetOne(projectID int64, taskID string) (*common.TaskLog, error) {
+func (s *taskLogStore) GetOne(projectID int64, taskID, tmpID string) (*common.TaskLog, error) {
 	var (
 		err error
-		res *common.TaskLog
+		res common.TaskLog
 	)
 
-	err = s.GetReplica().Table(s.GetTable()).Where("project_id = ?", projectID).
-		Where("task_id = ?", taskID).First(&res).Error
+	err = s.GetReplica().Table(s.GetTable()).
+		Where("project_id = ? AND task_id = ? AND tmp_id = ?", projectID, taskID, tmpID).First(&res).Error
 	if err != nil {
 		return nil, err
 	}
-	return res, nil
+	return &res, nil
 }
 
 func (s *taskLogStore) Clean(tx *gorm.DB, selector selection.Selector) error {

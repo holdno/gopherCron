@@ -33,7 +33,6 @@ func SaveTask(c *gin.Context) {
 		req         TaskSaveRequest
 		oldTaskInfo *common.TaskInfo
 		err         error
-		exist       bool
 
 		uid = utils.GetUserID(c)
 		srv = app.GetApp(c)

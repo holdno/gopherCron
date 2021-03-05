@@ -53,5 +53,20 @@ type WebHook struct {
 	CallbackURL string `json:"callback_url" gorm:"column:callback_url;type:varchar(255);not null;comment:'回调地址'"`
 	ProjectID   int64  `json:"project_id" gorm:"column:project_id;type:int(11);index:project_id;not null;comment:'关联项目id'"`
 	Type        string `json:"type" gorm:"column:type;type:varchar(30);not null;index:type;comment:'webhook类型'"`
+	Secret      string `json:"secret" gorm:"column:secret;type:varchar(32);not null;comment:'secret'"`
 	CreateTime  int64  `json:"create_time" gorm:"column:create_time;type:int(11);not null;comment:'创建时间'"`
+}
+
+type WebHookBody struct {
+	TaskID      string `json:"task_id" form:"task_id"`
+	ProjectID   int64  `json:"project_id" form:"project_id"`
+	Command     string `json:"command" form:"command"`
+	StartTime   int64  `json:"start_time" form:"start_time"`
+	EndTime     int64  `json:"end_time" form:"end_time"`
+	Result      string `json:"result" form:"result"`
+	SystemError string `json:"system_error" form:"system_error"`
+	Error       string `json:"error" form:"error"`
+	ClientIP    string `json:"client_ip" form:"client_ip"`
+	RequestTime int64  `json:"request_time" form:"request_time"`
+	Sign        string `json:"sign,omitempty" form:"sign"`
 }

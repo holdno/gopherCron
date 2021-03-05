@@ -34,14 +34,10 @@ func CreateTaskLog(data *common.TaskLog) error {
 
 	ctx, _ = utils.GetContextWithTimeout()
 
-	if data.ID.IsZero() {
-		data.ID = primitive.NewObjectID()
-	}
-
 	if _, err = Database.Collection(TaskLogTable).InsertOne(ctx, data); err != nil {
 		logrus.WithFields(logrus.Fields{
-			"ProjectID": data.ProjectID.Hex(),
-			"TaskID":    data.TaskID.Hex(),
+			"ProjectID": data.ProjectID,
+			"TaskID":    data.TaskID,
 			"Project":   data.Project,
 			"Name":      data.Name,
 			"Command":   data.Command,

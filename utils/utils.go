@@ -1,11 +1,15 @@
 package utils
 
 import (
+	"bytes"
 	"context"
 	"crypto/md5"
 	"encoding/hex"
+	"encoding/json"
+	"fmt"
 	"math/rand"
 	"net"
+	"sort"
 	"strconv"
 	"time"
 
@@ -170,4 +174,46 @@ RETRY:
 		goto RETRY
 	}
 	return nil
+}
+
+func MakeSign(body common.WebHookBody, secret string) string {
+	var (
+		keys       []string
+		signString string
+		params     = make(map[string]interface{})
+	)
+
+	requestString, _ := json.Marshal(body)
+
+	d := json.NewDecoder(bytes.NewReader(requestString))
+	d.UseNumber()
+	_ = d.Decode(&params)
+	for k := range params {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, v := range keys {
+		if params[v] != nil {
+			signString += fmt.Sprintf("%s=%v&", v, params[v])
+		}
+	}
+
+	signString += "key=" + secret
+
+	md5Ctx := md5.New()
+	md5Ctx.Write([]byte(signString))
+	cipherStr := md5Ctx.Sum(nil)
+
+	return hex.EncodeToString(cipherStr)
+}
+
+func VerifySign(body common.WebHookBody, secret string, limit int64) bool {
+	sign := body.Sign
+	body.Sign = ""
+
+	newSign := MakeSign(body, secret)
+	if sign != newSign || time.Now().Unix()-limit > body.RequestTime {
+		return false
+	}
+	return true
 }

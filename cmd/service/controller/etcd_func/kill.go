@@ -68,9 +68,9 @@ func KillTask(c *gin.Context) {
 	if _, err = srv.SaveTask(task); err != nil {
 		goto ChangeStatusError
 	}
-	if err = srv.SetTaskNotRunning(*task); err != nil {
-		goto ChangeStatusError
-	}
+	//if err = srv.SetTaskNotRunning(*task); err != nil {
+	//	goto ChangeStatusError
+	//}
 	response.APISuccess(c, nil)
 	return
 

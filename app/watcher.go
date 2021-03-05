@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/sirupsen/logrus"
@@ -35,11 +36,12 @@ func (a *app) WebHookWorker() error {
 		return err
 	}
 
-	cancelCtx, cancelWatchFunc := context.WithCancel(context.TODO())
+	cancelCtx, _ := context.WithCancel(context.TODO())
 	// 从GET时刻的后续版本进行监听变化
 	watchStartRevision := getResp.Header.Revision + 1
 	// 开始监听
-	watchChan := a.etcd.Watcher().Watch(cancelCtx, watchKey, clientv3.WithRev(watchStartRevision), clientv3.WithPrefix())
+	watchChan := a.etcd.Watcher().Watch(cancelCtx, watchKey, clientv3.WithRev(watchStartRevision), clientv3.WithPrefix(), clientv3.WithPrevKV())
+
 	for {
 		select {
 		case w, ok := <-watchChan:
@@ -53,10 +55,44 @@ func (a *app) WebHookWorker() error {
 
 			for _, watchEvent := range w.Events {
 				switch watchEvent.Type {
-				case mvccpb.PUT: // 任务开始执行
-
+				// case mvccpb.PUT: // 任务开始执行
 				case mvccpb.DELETE: // 任务执行完毕
-					// 解析watchEvent.Kv.Key
+					func() {
+						projectID, taskID := common.ParseTaskStatusKey(string(watchEvent.Kv.Key))
+						lock := a.etcd.GetLocker(fmt.Sprintf("center_webhook_watcher_%d_%s", projectID, taskID))
+						if err = lock.TryLock(); err != nil {
+							a.logger.WithFields(logrus.Fields{
+								"project_id": projectID,
+								"task_id":    taskID,
+								"error":      err.Error(),
+							}).Error("failed to get webhook lock")
+							return
+						}
+						defer lock.Unlock()
+
+						// 解析watchEvent.Kv.Key
+
+						var runningInfo common.TaskRunningInfo
+						if err = json.Unmarshal(watchEvent.PrevKv.Value, &runningInfo); err != nil {
+							a.logger.WithFields(logrus.Fields{
+								"project_id": projectID,
+								"task_id":    taskID,
+								"tmp_id":     runningInfo.TmpID,
+								"value":      string(watchEvent.PrevKv.Value),
+								"error":      err.Error(),
+							}).Error("failed to unmarshal running info")
+						}
+
+						if err = a.HandleWebHook(projectID, taskID, "", runningInfo.TmpID); err != nil {
+							a.logger.WithFields(logrus.Fields{
+								"project_id": projectID,
+								"task_id":    taskID,
+								"type":       "",
+								"tmp_id":     runningInfo.TmpID,
+								"error":      err.Error(),
+							}).Error("failed to handle webhook")
+						}
+					}()
 				}
 			}
 		}

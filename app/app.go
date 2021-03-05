@@ -38,8 +38,6 @@ type App interface {
 	DeleteProject(tx *gorm.DB, pid, uid int64) error
 	SaveTask(task *common.TaskInfo, opts ...clientv3.OpOption) (*common.TaskInfo, error)
 	DeleteTask(pid int64, tid string) (*common.TaskInfo, error)
-	SetTaskRunning(task common.TaskInfo) error
-	SetTaskNotRunning(task common.TaskInfo) error
 	KillTask(pid int64, tid string) error
 	IsAdmin(uid int64) (bool, error)
 	GetWorkerList(projectID int64) ([]ClientInfo, error)
@@ -51,7 +49,7 @@ type App interface {
 	GetMonitor(ip string) (*common.MonitorInfo, error)
 	TemporarySchedulerTask(task *common.TaskInfo) error
 	GetTaskLogList(pid int64, tid string, page, pagesize int) ([]*common.TaskLog, error)
-	GetTaskLogDetail(pid int64, tid string) (*common.TaskLog, error)
+	GetTaskLogDetail(pid int64, tid, tmpID string) (*common.TaskLog, error)
 	GetLogTotalByDate(projects []int64, timestamp int64, errType int) (int, error)
 	GetTaskLogTotal(pid int64, tid string) (int, error)
 	CleanProjectLog(tx *gorm.DB, pid int64) error
@@ -71,7 +69,7 @@ type App interface {
 	GetTaskLocker(task *common.TaskInfo) *etcd.Locker
 	GetIP() string
 	GetConfig() *config.ServiceConfig
-	CreateWebHook(projectID int64, types, callbackUrl string) error
+	CreateWebHook(projectID int64, types, CallBackURL string) error
 	GetWebHook(projectID int64, types string) (*common.WebHook, error)
 	GetWebHookList(projectID int64) ([]common.WebHook, error)
 	DeleteWebHook(tx *gorm.DB, projectID int64, types string) error
@@ -109,6 +107,7 @@ type app struct {
 
 	cfg *config.ServiceConfig
 
+	panicgroup.PanicGroup
 	CommonInterface
 	Warner
 }
@@ -141,6 +140,10 @@ func NewApp(configPath string, opts ...AppOptions) App {
 		app.Warner = NewDefaultWarner(app.logger)
 	}
 
+	if app.localip, err = utils.GetLocalIP(); err != nil {
+		app.logger.Error("failed to get local ip")
+	}
+
 	jwt.InitJWT(conf.JWT)
 
 	app.logger.Info("start to connect etcd ...")
@@ -150,10 +153,41 @@ func NewApp(configPath string, opts ...AppOptions) App {
 	app.logger.Info("connected to etcd")
 	app.CommonInterface = NewComm(app.etcd)
 
-	utils.InitIDWorker(1)
+	clusterID, err := app.etcd.Inc(conf.Etcd.Prefix + common.CLUSTER_AUTO_INDEX)
+	if err != nil {
+		panic(err)
+	}
+
+	// why 1024. view https://github.com/holdno/snowFlakeByGo
+	utils.InitIDWorker(clusterID % 1024)
+	app.PanicGroup = panicgroup.NewPanicGroup(func(err error) {
+		reserr := app.Warning(WarningData{
+			Data:    err.Error(),
+			Type:    WarningTypeSystem,
+			AgentIP: app.localip,
+		})
+		if reserr != nil {
+			app.logger.WithFields(logrus.Fields{
+				"desc":         reserr,
+				"source_error": err,
+			}).Error("panicgroup: failed to warning panic error")
+		}
+	})
+	app.Go(func() {
+		for {
+			select {
+			case <-app.closeCh:
+				return
+			default:
+				if err = app.WebHookWorker(); err != nil {
+					app.logger.Error(err.Error())
+				}
+			}
+		}
+	})
 
 	// 自动清理任务
-	go func() {
+	app.Go(func() {
 		t := time.NewTicker(time.Hour * 12)
 		for {
 			select {
@@ -165,7 +199,7 @@ func NewApp(configPath string, opts ...AppOptions) App {
 				return
 			}
 		}
-	}()
+	})
 
 	return app
 }
@@ -207,6 +241,7 @@ type Client interface {
 	Loop()
 	ResultReport(result *common.TaskExecuteResult) error
 	Close()
+	Down() chan struct{}
 	Warner
 }
 
@@ -338,6 +373,10 @@ func (c *client) Close() {
 	}
 }
 
+func (c *client) Down() chan struct{} {
+	return c.closeChan
+}
+
 func (c *client) GetIP() string {
 	return c.localip
 }
@@ -466,9 +505,9 @@ func (a *app) CleanLog(tx *gorm.DB, pid int64, tid string) error {
 	return nil
 }
 
-func (a *app) GetTaskLogDetail(pid int64, tid string) (*common.TaskLog, error) {
-	res, err := a.store.TaskLog().GetOne(pid, tid)
-	if err != nil && err != gorm.ErrRecordNotFound {
+func (a *app) GetTaskLogDetail(pid int64, tid string, tmpID string) (*common.TaskLog, error) {
+	res, err := a.store.TaskLog().GetOne(pid, tid, tmpID)
+	if err != nil {
 		errObj := errors.ErrInternalError
 		errObj.Msg = "获取日志列表失败"
 		errObj.Log = err.Error()

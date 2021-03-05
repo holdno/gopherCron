@@ -118,6 +118,10 @@ func (s *SqlProvider) TaskLog() store.TaskLogStore {
 	return s.stores.TaskLog
 }
 
+func (s *SqlProvider) WebHook() store.TaskWebHookStore {
+	return s.stores.WebHook
+}
+
 func (s *SqlProvider) BeginTx() *gorm.DB {
 	return s.GetMaster().Begin()
 }

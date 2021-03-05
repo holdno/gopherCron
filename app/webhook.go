@@ -8,8 +8,6 @@ import (
 
 	"github.com/holdno/gopherCron/utils"
 
-	"github.com/holdno/gopherCron/jwt"
-
 	"github.com/jinzhu/gorm"
 
 	"github.com/holdno/gopherCron/common"
@@ -21,6 +19,7 @@ func (a *app) CreateWebHook(projectID int64, types, callbackUrl string) error {
 		CallbackURL: callbackUrl,
 		ProjectID:   projectID,
 		Type:        types,
+		Secret:      utils.RandomStr(32),
 		CreateTime:  time.Now().Unix(),
 	})
 
@@ -82,7 +81,7 @@ func (a *app) DeleteAllWebHook(tx *gorm.DB, projectID int64) error {
 	return nil
 }
 
-func (a *app) HandleWebHook(projectID int64, taskID string, types string, logDetail *common.TaskLog) error {
+func (a *app) HandleWebHook(projectID int64, taskID string, types string, tmpID string) error {
 	wh, err := a.GetWebHook(projectID, types)
 	if err != nil {
 		return err
@@ -95,31 +94,44 @@ func (a *app) HandleWebHook(projectID int64, taskID string, types string, logDet
 	var (
 		retryTimes = [5]time.Duration{1, 3, 5, 7, 9}
 		index      = 0
+		logDetail  *common.TaskLog
 	)
 
-	// 获取项目创建者信息
-	project, err := a.GetProject(projectID)
+	err = utils.RetryFunc(5, func() error {
+		if logDetail, err = a.GetTaskLogDetail(projectID, taskID, tmpID); err != nil {
+			time.Sleep(retryTimes[index] * time.Second)
+			index++
+			return err
+		}
+		return nil
+	})
+
 	if err != nil {
 		return err
 	}
 
-	token := jwt.Build(project.UID)
+	var result common.TaskResultLog
+	_ = json.Unmarshal([]byte(logDetail.Result), &result)
 
-	params := map[string]interface{}{
-		"task_id":    taskID,
-		"project_id": projectID,
-		"command":    logDetail.Command,
-		"start_time": logDetail.StartTime,
-		"end_time":   logDetail.EndTime,
-		"result":     logDetail.Result,
-		"client_ip":  logDetail.ClientIP,
+	body := common.WebHookBody{
+		TaskID:      taskID,
+		ProjectID:   projectID,
+		Command:     logDetail.Command,
+		StartTime:   logDetail.StartTime,
+		EndTime:     logDetail.EndTime,
+		ClientIP:    logDetail.ClientIP,
+		Result:      result.Result,
+		Error:       result.Error,
+		SystemError: result.SystemError,
 	}
 
-	reqData, _ := json.Marshal(params)
-	req, _ := http.NewRequest(http.MethodPost, wh.CallbackUrl, bytes.NewReader(reqData))
-	req.Header.Set("token", token)
-
 	err = utils.RetryFunc(5, func() error {
+		body.RequestTime = time.Now().Unix()
+		body.Sign = utils.MakeSign(body, wh.Secret)
+
+		reqData, _ := json.Marshal(body)
+		req, _ := http.NewRequest(http.MethodPost, wh.CallbackURL, bytes.NewReader(reqData))
+
 		resp, err := a.httpClient.Do(req)
 		if err != nil || resp.StatusCode != http.StatusOK {
 			if index >= 5 {
@@ -130,7 +142,7 @@ func (a *app) HandleWebHook(projectID int64, taskID string, types string, logDet
 			if err != nil {
 				return err
 			}
-			return errors.NewError(resp.StatusCode, "回调响应失败", "the hook is faild")
+			return errors.NewError(resp.StatusCode, "回调响应失败", "failed")
 		}
 		return nil
 	})
