@@ -11,8 +11,11 @@ import (
 // CrossDomain 全局添加跨域允许
 func CrossDomain() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "access-token, x-requested-with, content-type")
+		c.Writer.Header().Set("Access-Control-Allow-Origin", c.Request.Header.Get("Origin"))
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "access-token, content-type, Cookie")
+		c.Writer.Header().Set("Access-Control-Allow-Methods", "*")
+		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
+		c.Next()
 	}
 }
 

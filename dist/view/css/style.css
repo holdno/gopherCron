@@ -92,6 +92,27 @@ div::-webkit-scrollbar-thumb
 	transition: all .5s;
 }
 
+.common__config-button {
+	height: 34px;
+	line-height: 34px;
+	text-align: center;
+	border: 1px solid #555;
+	border-radius: 5px;
+	font-size: 14px;
+	margin-top: 3px;
+	box-sizing: border-box;
+	padding: 0 10px;
+	color: yellowgreen;
+	cursor: pointer;
+	transition: all .5s;
+	display: inline-block;
+}
+
+.common__delete-button:hover {
+	border: 1px solid #f00;
+	color: lawngreen;
+}
+
 .common__delete-button {
 	height: 34px;
 	line-height: 34px;

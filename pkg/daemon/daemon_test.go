@@ -10,7 +10,7 @@ import (
 
 func TestProjectDaemon_WaitSignal(t *testing.T) {
 	projects := []int64{1, 2, 3, 4, 5}
-	pd := NewProjectDaemon(nil)
+	pd := NewProjectDaemon(nil, nil)
 	addProjects, _ := pd.DiffProjects(projects)
 	for _, v := range addProjects {
 		pd.addProject(v)
@@ -29,7 +29,7 @@ func TestProjectDaemon_WaitSignal(t *testing.T) {
 
 func TestNewProjectDaemon(t *testing.T) {
 	projects := []int64{1, 2, 3, 4, 5}
-	pd := NewProjectDaemon(projects)
+	pd := NewProjectDaemon(projects, nil)
 	ctx, _ := context.WithTimeout(context.Background(), time.Second*5)
 	w := sync.WaitGroup{}
 	for _, v := range projects {

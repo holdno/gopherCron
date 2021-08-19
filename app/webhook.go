@@ -6,12 +6,11 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/holdno/gopherCron/common"
+	"github.com/holdno/gopherCron/errors"
 	"github.com/holdno/gopherCron/utils"
 
 	"github.com/jinzhu/gorm"
-
-	"github.com/holdno/gopherCron/common"
-	"github.com/holdno/gopherCron/errors"
 )
 
 func (a *app) CreateWebHook(projectID int64, types, callbackUrl string) error {

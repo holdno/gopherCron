@@ -3,7 +3,6 @@ module github.com/holdno/gopherCron
 require (
 	github.com/BurntSushi/toml v0.3.1
 	github.com/StackExchange/wmi v0.0.0-20181212234831-e0a55b97c705 // indirect
-	github.com/Workiva/go-datastructures v1.0.52 // indirect
 	github.com/boltdb/bolt v1.3.1 // indirect
 	github.com/coreos/bbolt v1.3.0 // indirect
 	github.com/coreos/etcd v3.3.10+incompatible
@@ -41,7 +40,7 @@ require (
 	go.uber.org/zap v1.9.1 // indirect
 	gopkg.in/go-playground/assert.v1 v1.2.1 // indirect
 	gopkg.in/go-playground/validator.v8 v8.18.2 // indirect
-	k8s.io/apimachinery v0.19.3 // indirect
+	k8s.io/apimachinery v0.19.3
 )
 
 go 1.13

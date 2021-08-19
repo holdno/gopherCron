@@ -7,16 +7,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/holdno/gopherCron/pkg/daemon"
-
-	"github.com/holdno/gopherCron/pkg/panicgroup"
-
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/config"
 	"github.com/holdno/gopherCron/errors"
 	"github.com/holdno/gopherCron/jwt"
+	"github.com/holdno/gopherCron/pkg/daemon"
 	"github.com/holdno/gopherCron/pkg/etcd"
 	"github.com/holdno/gopherCron/pkg/logger"
+	"github.com/holdno/gopherCron/pkg/panicgroup"
 	"github.com/holdno/gopherCron/pkg/store/sqlStore"
 	"github.com/holdno/gopherCron/utils"
 
@@ -75,6 +73,7 @@ type App interface {
 	DeleteWebHook(tx *gorm.DB, projectID int64, types string) error
 	DeleteAllWebHook(tx *gorm.DB, projectID int64) error
 	CheckPermissions(projectID, uid int64) error
+	GetErrorLogs(pids []int64, page, pagesize int) ([]*common.TaskLog, error)
 
 	BeginTx() *gorm.DB
 	Close()
@@ -520,6 +519,26 @@ func (a *app) GetTaskLogDetail(pid int64, tid string, tmpID string) (*common.Tas
 func (a *app) GetTaskLogList(pid int64, tid string, page, pagesize int) ([]*common.TaskLog, error) {
 	opt := selection.NewSelector(selection.NewRequirement("project_id", selection.Equals, pid),
 		selection.NewRequirement("task_id", selection.Equals, tid))
+	opt.Page = page
+	opt.Pagesize = pagesize
+	opt.OrderBy = "id DESC"
+
+	list, err := a.store.TaskLog().GetList(opt)
+	if err != nil && err != gorm.ErrRecordNotFound {
+		errObj := errors.ErrInternalError
+		errObj.Msg = "获取日志列表失败"
+		errObj.Log = err.Error()
+		return nil, errObj
+	}
+
+	return list, nil
+}
+
+func (a *app) GetErrorLogs(pids []int64, page, pagesize int) ([]*common.TaskLog, error) {
+	opt := selection.NewSelector(selection.NewRequirement("with_error", selection.Equals, common.ErrorLog))
+	if len(pids) > 0 {
+		opt.AddQuery(selection.NewRequirement("project_id", selection.In, pids))
+	}
 	opt.Page = page
 	opt.Pagesize = pagesize
 	opt.OrderBy = "id DESC"

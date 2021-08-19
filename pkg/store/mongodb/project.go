@@ -3,16 +3,13 @@ package mongodb
 import (
 	"context"
 
+	"github.com/holdno/gopherCron/common"
+	"github.com/holdno/gopherCron/errors"
 	"github.com/holdno/gopherCron/utils"
 
-	"github.com/mongodb/mongo-go-driver/bson/primitive"
-
 	"github.com/mongodb/mongo-go-driver/bson"
+	"github.com/mongodb/mongo-go-driver/bson/primitive"
 	"github.com/mongodb/mongo-go-driver/mongo"
-
-	"github.com/holdno/gopherCron/errors"
-
-	"github.com/holdno/gopherCron/common"
 )
 
 const (

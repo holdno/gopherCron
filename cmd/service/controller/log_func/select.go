@@ -12,6 +12,54 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+type GetErrorLogsRequest struct {
+	Page     int `form:"page" binding:"required"`
+	Pagesize int `form:"pagesize" binding:"required"`
+}
+
+// GetErrorLogs 获取用户相关项目的最新错误日志
+func GetErrorLogs(c *gin.Context) {
+	var (
+		err error
+		req GetErrorLogsRequest
+		srv = app.GetApp(c)
+		uid = utils.GetUserID(c)
+
+		projectIDs []int64
+	)
+
+	if err = utils.BindArgsWithGin(c, &req); err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	isAdmin, err := srv.IsAdmin(uid)
+	if err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	if !isAdmin {
+		projects, err := srv.GetUserProjects(uid)
+		if err != nil {
+			response.APIError(c, err)
+			return
+		}
+
+		for _, v := range projects {
+			projectIDs = append(projectIDs, v.ID)
+		}
+	}
+
+	logs, err := srv.GetErrorLogs(projectIDs, req.Page, req.Pagesize)
+	if err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	response.APISuccess(c, logs)
+}
+
 // GetListRequest 获取任务执行日志
 type GetListRequest struct {
 	Page      int    `form:"page" binding:"required"`

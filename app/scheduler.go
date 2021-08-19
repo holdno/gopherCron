@@ -150,7 +150,7 @@ func (a *client) Loop() {
 func (a *client) handleTaskEvent(event *common.TaskEvent) {
 	var (
 		taskSchedulePlan *common.TaskSchedulePlan
-		taskExecuteinfo  *common.TaskExecutingInfo
+		taskExecuteInfo  *common.TaskExecutingInfo
 		taskExecuting    bool
 		err              error
 	)
@@ -180,8 +180,8 @@ func (a *client) handleTaskEvent(event *common.TaskEvent) {
 		a.RemovePlan(event.Task.SchedulerKey())
 	case common.TASK_EVENT_KILL:
 		// 先判断任务是否在执行中
-		if taskExecuteinfo, taskExecuting = a.scheduler.CheckTaskExecuting(event.Task.SchedulerKey()); taskExecuting {
-			taskExecuteinfo.CancelFunc()
+		if taskExecuteInfo, taskExecuting = a.scheduler.CheckTaskExecuting(event.Task.SchedulerKey()); taskExecuting {
+			taskExecuteInfo.CancelFunc()
 		}
 	}
 }

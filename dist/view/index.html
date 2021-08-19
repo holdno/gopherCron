@@ -295,6 +295,10 @@
 							&#xeb61; {{detail.project.title}} ID:{{detail.project.project_id}}
 						</div>
 						<div class="detail__box-top-buttons">
+							<div class="common__config-button" @click="openWebhookConfig">
+								Webhook
+							</div>
+
 							<div class="common__delete-button" @click="deleteProject(null)">
 								删除项目
 							</div>

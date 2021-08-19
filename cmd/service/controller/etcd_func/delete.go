@@ -23,7 +23,6 @@ func DeleteTask(c *gin.Context) {
 		req     DeleteTaskRequest
 		oldTask *common.TaskInfo
 		task    *common.TaskInfo
-		exist   bool
 		uid     = utils.GetUserID(c)
 		srv     = app.GetApp(c)
 	)
@@ -38,14 +37,14 @@ func DeleteTask(c *gin.Context) {
 		return
 	}
 
-	if !exist {
-		response.APIError(c, errors.ErrProjectNotExist)
+	// 强杀任务后暂停任务
+	if task, err = srv.GetTask(req.ProjectID, req.TaskID); err != nil {
+		response.APIError(c, err)
 		return
 	}
 
-	// 强杀任务后暂停任务
-	if task, err = srv.GetTask(req.ProjectID, req.TaskID); err != nil {
-		response.APIError(c, errors.ErrInternalError)
+	if task == nil {
+		response.APIError(c, errors.ErrProjectNotExist)
 		return
 	}
 

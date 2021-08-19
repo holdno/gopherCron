@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 
 	"github.com/sirupsen/logrus"
 
@@ -27,16 +28,17 @@ func (a *app) WebHookWorker() error {
 		return nil
 	}); err != nil {
 		warningErr := a.Warning(WarningData{
-			Data: fmt.Sprintf("[agent - WebHookWorker] etcd kv get error: %s", err.Error()),
+			Data: fmt.Sprintf("[service - WebHookWorker] etcd kv get error: %s", err.Error()),
 			Type: WarningTypeSystem,
 		})
 		if warningErr != nil {
-			a.logger.Errorf("[agent - WebHookWorker] failed to push warning, %s", err.Error())
+			a.logger.Errorf("[service - WebHookWorker] failed to push warning, %s", err.Error())
 		}
 		return err
 	}
 
-	cancelCtx, _ := context.WithCancel(context.TODO())
+	cancelCtx, cancelFunc := context.WithCancel(context.TODO())
+	defer cancelFunc()
 	// 从GET时刻的后续版本进行监听变化
 	watchStartRevision := getResp.Header.Revision + 1
 	// 开始监听
@@ -57,45 +59,60 @@ func (a *app) WebHookWorker() error {
 				switch watchEvent.Type {
 				// case mvccpb.PUT: // 任务开始执行
 				case mvccpb.DELETE: // 任务执行完毕
-					func() {
-						projectID, taskID := common.ParseTaskStatusKey(string(watchEvent.Kv.Key))
-						lock := a.etcd.GetLocker(fmt.Sprintf("center_webhook_watcher_%d_%s", projectID, taskID))
-						if err = lock.TryLock(); err != nil {
-							a.logger.WithFields(logrus.Fields{
-								"project_id": projectID,
-								"task_id":    taskID,
-								"error":      err.Error(),
-							}).Error("failed to get webhook lock")
-							return
-						}
-						defer lock.Unlock()
-
-						// 解析watchEvent.Kv.Key
-
-						var runningInfo common.TaskRunningInfo
-						if err = json.Unmarshal(watchEvent.PrevKv.Value, &runningInfo); err != nil {
-							a.logger.WithFields(logrus.Fields{
-								"project_id": projectID,
-								"task_id":    taskID,
-								"tmp_id":     runningInfo.TmpID,
-								"value":      string(watchEvent.PrevKv.Value),
-								"error":      err.Error(),
-							}).Error("failed to unmarshal running info")
-						}
-
-						if err = a.HandleWebHook(projectID, taskID, "", runningInfo.TmpID); err != nil {
-							a.logger.WithFields(logrus.Fields{
-								"project_id": projectID,
-								"task_id":    taskID,
-								"type":       "",
-								"tmp_id":     runningInfo.TmpID,
-								"error":      err.Error(),
-							}).Error("failed to handle webhook")
-						}
-					}()
+					a.transportWebhookEvent(watchEvent)
 				}
 			}
 		}
+	}
+}
+
+func (a *app) transportWebhookEvent(watchEvent *clientv3.Event) {
+	if !common.IsStatusKey(string(watchEvent.Kv.Key)) {
+		return
+	}
+	_projectID, taskID := common.PatchProjectIDTaskIDFromStatusKey(string(watchEvent.Kv.Key))
+	projectID, err := strconv.ParseInt(_projectID, 10, 64)
+	if err != nil {
+		a.logger.WithFields(logrus.Fields{
+			"project_id": _projectID,
+			"task_id":    taskID,
+			"error":      err.Error(),
+		}).Error("failed to parse project id, not int")
+		return
+	}
+	lock := a.etcd.GetLocker(fmt.Sprintf("center_webhook_watcher_%d_%s", projectID, taskID))
+	if err = lock.TryLock(); err != nil {
+		a.logger.WithFields(logrus.Fields{
+			"project_id": projectID,
+			"task_id":    taskID,
+			"error":      err.Error(),
+		}).Error("failed to get webhook lock")
+		return
+	}
+	defer lock.Unlock()
+
+	// 解析watchEvent.Kv.Key
+
+	var runningInfo common.TaskRunningInfo
+	if err = json.Unmarshal(watchEvent.PrevKv.Value, &runningInfo); err != nil {
+		a.logger.WithFields(logrus.Fields{
+			"project_id": projectID,
+			"task_id":    taskID,
+			"tmp_id":     runningInfo.TmpID,
+			"value":      string(watchEvent.PrevKv.Value),
+			"error":      err.Error(),
+		}).Error("failed to unmarshal running info")
+		return
+	}
+
+	if err = a.HandleWebHook(projectID, taskID, "", runningInfo.TmpID); err != nil {
+		a.logger.WithFields(logrus.Fields{
+			"project_id": projectID,
+			"task_id":    taskID,
+			"type":       "",
+			"tmp_id":     runningInfo.TmpID,
+			"error":      err.Error(),
+		}).Error("failed to handle webhook")
 	}
 }
 
@@ -196,6 +213,7 @@ func (a *client) startTaskWatcher(projectID int64) error {
 	}
 
 	cancelCtx, cancelWatchFunc := context.WithCancel(context.TODO())
+	defer cancelWatchFunc()
 	// 从GET时刻的后续版本进行监听变化
 	watchStartRevision = getResp.Header.Revision + 1
 	// 开始监听
@@ -211,7 +229,6 @@ func (a *client) startTaskWatcher(projectID int64) error {
 				}
 				return true
 			})
-			cancelWatchFunc()
 			a.logger.Infof("[agent - TaskWatcher] stop to watching project %d", projectID)
 			return nil
 		case w, ok := <-watchChan:
