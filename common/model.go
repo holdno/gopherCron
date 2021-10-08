@@ -1,5 +1,10 @@
 package common
 
+type ClientInfo struct {
+	ClientIP string `json:"client_ip"`
+	Version  string `json:"version"`
+}
+
 type User struct {
 	ID         int64  `json:"id" gorm:"column:id;pirmary_key;auto_increment"`
 	Name       string `json:"name" gorm:"column:name;index:name;type:varchar(100);not null;comment:'用户名称'"`

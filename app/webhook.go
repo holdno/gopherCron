@@ -8,6 +8,7 @@ import (
 
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/errors"
+	"github.com/holdno/gopherCron/pkg/warning"
 	"github.com/holdno/gopherCron/utils"
 
 	"github.com/jinzhu/gorm"
@@ -151,9 +152,9 @@ func (a *app) HandleWebHook(projectID int64, taskID string, types string, tmpID 
 		if getTaskErr != nil {
 			return getTaskErr
 		}
-		_ = a.Warning(WarningData{
+		_ = a.Warning(warning.WarningData{
 			Data:      err.Error(),
-			Type:      WarningTypeTask,
+			Type:      warning.WarningTypeTask,
 			AgentIP:   a.localip,
 			TaskName:  task.Name,
 			ProjectID: projectID,

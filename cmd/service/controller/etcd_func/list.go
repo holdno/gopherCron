@@ -60,7 +60,7 @@ func GetClientList(c *gin.Context) {
 	var (
 		err error
 		req GetClientListRequest
-		res []app.ClientInfo
+		res []common.ClientInfo
 		srv = app.GetApp(c)
 		uid = utils.GetUserID(c)
 	)
@@ -125,7 +125,7 @@ func GetWorkerListInfo(c *gin.Context) {
 	var (
 		err                error
 		req                GetWorkerListInfoRequest
-		workerList         []app.ClientInfo
+		workerList         []common.ClientInfo
 		noRepeatWorkerList []string
 		srv                = app.GetApp(c)
 		uid                = utils.GetUserID(c)

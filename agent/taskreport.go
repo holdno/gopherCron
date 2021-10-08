@@ -1,4 +1,4 @@
-package app
+package agent
 
 import (
 	"bytes"
@@ -13,6 +13,7 @@ import (
 	"github.com/holdno/gopherCron/config"
 	"github.com/holdno/gopherCron/pkg/store"
 	"github.com/holdno/gopherCron/pkg/store/sqlStore"
+	"github.com/holdno/gopherCron/pkg/warning"
 
 	"github.com/holdno/gocommons/selection"
 	"github.com/sirupsen/logrus"
@@ -22,9 +23,6 @@ const (
 	ReportHeaderKey      = "Report-Type"
 	ReportTypeWarning    = "report_warning"
 	ReportTypeTaskResult = "report_task_result"
-
-	WarningTypeSystem = "system"
-	WarningTypeTask   = "task"
 )
 
 type HttpReporter struct {
@@ -45,15 +43,7 @@ func (r *HttpReporter) GetReportAddress() string {
 	return r.reportAddress
 }
 
-type WarningData struct {
-	Data      string `json:"data"`
-	Type      string `json:"type"`
-	AgentIP   string `json:"agent_ip"`
-	TaskName  string `json:"task_name"`
-	ProjectID int64  `json:"project_id"`
-}
-
-func (r *HttpReporter) Warning(data WarningData) error {
+func (r *HttpReporter) Warning(data warning.WarningData) error {
 	b, _ := json.Marshal(data)
 	req, _ := http.NewRequest(http.MethodPost, r.reportAddress, bytes.NewReader(b))
 	req.Header.Add("Content-Type", "application/json")

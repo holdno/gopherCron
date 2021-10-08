@@ -1,4 +1,4 @@
-package app
+package agent
 
 import (
 	"context"
@@ -11,11 +11,6 @@ import (
 
 	"github.com/coreos/etcd/clientv3"
 )
-
-type ClientInfo struct {
-	ClientIP string `json:"client_ip"`
-	Version  string `json:"version"`
-}
 
 func (a *client) startRegister(projectID int64, clientinfo string) {
 	a.Go(func() {

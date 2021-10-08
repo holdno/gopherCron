@@ -1,10 +1,11 @@
 package common
 
 const (
-	TASK_EVENT_SAVE      = 1
-	TASK_EVENT_DELETE    = 2
-	TASK_EVENT_KILL      = 3
-	TASK_EVENT_TEMPORARY = 4
+	TASK_EVENT_SAVE              = 1
+	TASK_EVENT_DELETE            = 2
+	TASK_EVENT_KILL              = 3
+	TASK_EVENT_TEMPORARY         = 4
+	TASK_EVENT_WORKFLOW_SCHEDULE = 5
 
 	TASK_STATUS_START = 1
 	TASK_STATUS_STOP  = 2
@@ -17,6 +18,8 @@ const (
 
 	TASK_STATUS_RUNNING_V2     = "running"
 	TASK_STATUS_NOT_RUNNING_V2 = ""
+	TASK_STATUS_DONE_V2        = "done"
+	TASK_STATUS_FAIL_V2        = "fail"
 
 	APP_KEY = "app_impl"
 	USER_ID = "user_id"

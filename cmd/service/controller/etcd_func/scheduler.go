@@ -24,7 +24,7 @@ func TmpExecute(c *gin.Context) {
 	var (
 		req TmpExecuteRequest
 		err error
-		res []app.ClientInfo
+		res []common.ClientInfo
 
 		srv = app.GetApp(c)
 	)
@@ -71,7 +71,7 @@ func ExecuteTask(c *gin.Context) {
 		req  ExecuteTaskRequest
 		err  error
 		task *common.TaskInfo
-		res  []app.ClientInfo
+		res  []common.ClientInfo
 
 		srv = app.GetApp(c)
 	)

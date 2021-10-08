@@ -13,6 +13,7 @@ import (
 	"github.com/holdno/gopherCron/cmd/service/router"
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/config"
+	"github.com/holdno/gopherCron/pkg/warning"
 	"github.com/holdno/gopherCron/utils"
 
 	"github.com/gin-gonic/gin"
@@ -85,9 +86,9 @@ func Run(opts *SetupOptions) error {
 
 	defer func() {
 		if r := recover(); r != nil {
-			srv.Warning(app.WarningData{
+			srv.Warning(warning.WarningData{
 				Data:    fmt.Sprintf("gophercron service panic: %v", r),
-				Type:    app.WarningTypeSystem,
+				Type:    warning.WarningTypeSystem,
 				AgentIP: srv.GetIP(),
 			})
 		}

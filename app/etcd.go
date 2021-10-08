@@ -9,232 +9,12 @@ import (
 
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/errors"
+	"github.com/holdno/gopherCron/protocol"
 	"github.com/holdno/gopherCron/utils"
 
 	"github.com/coreos/etcd/clientv3"
 	"github.com/coreos/etcd/mvcc/mvccpb"
 )
-
-type comm struct {
-	etcd EtcdManager
-}
-
-type CommonInterface interface {
-	SetTaskRunning(plan *common.TaskSchedulePlan) error
-	SetTaskNotRunning(plan *common.TaskSchedulePlan) error
-	SaveTask(task *common.TaskInfo, opts ...clientv3.OpOption) (*common.TaskInfo, error)
-	GetTask(projectID int64, taskID string) (*common.TaskInfo, error)
-	TemporarySchedulerTask(task *common.TaskInfo) error
-	GetVersion() string
-}
-
-func NewComm(etcd EtcdManager) CommonInterface {
-	return &comm{etcd: etcd}
-}
-
-func (a *comm) SetTaskRunning(plan *common.TaskSchedulePlan) error {
-	ctx, _ := utils.GetContextWithTimeout()
-	runningInfo, _ := json.Marshal(common.TaskRunningInfo{
-		Status: common.TASK_STATUS_RUNNING_V2,
-		TmpID:  plan.TmpID,
-	})
-	_, err := a.etcd.KV().Put(ctx, common.BuildTaskStatusKey(plan.Task.ProjectID, plan.Task.TaskID), string(runningInfo))
-	if err != nil {
-		errObj := errors.ErrInternalError
-		errObj.Log = "[Etcd - SetTaskRunning] etcd client kv put error:" + err.Error()
-		return errObj
-	}
-
-	return nil
-}
-
-func (a *comm) SetTaskNotRunning(plan *common.TaskSchedulePlan) error {
-	plan.Task.ClientIP = ""
-
-	ctx, _ := utils.GetContextWithTimeout()
-
-	_, err := a.etcd.KV().Delete(ctx, common.BuildTaskStatusKey(plan.Task.ProjectID, plan.Task.TaskID))
-	if err != nil {
-		errObj := errors.ErrInternalError
-		errObj.Log = "[Etcd - SetTaskNotRunning] etcd client kv put error:" + err.Error()
-		return errObj
-	}
-
-	return nil
-}
-
-// SaveTask save task to etcd
-// return oldtask & error
-func (a *comm) SaveTask(task *common.TaskInfo, opts ...clientv3.OpOption) (*common.TaskInfo, error) {
-	var (
-		saveKey  string
-		saveByte []byte
-		putResp  *clientv3.PutResponse
-		oldTask  *common.TaskInfo
-		ctx      context.Context
-		errObj   errors.Error
-		err      error
-		locker   = a.etcd.GetLocker(common.BuildTaskUpdateKey(task.ProjectID, task.TaskID))
-	)
-	err = utils.RetryFunc(10, func() error {
-		if err = locker.TryLock(); err != nil {
-			time.Sleep(time.Duration(utils.Random(200, 600)) * time.Second)
-			return err
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	defer locker.Unlock()
-
-	if oldTask, err = a.GetTask(task.ProjectID, task.TaskID); err != nil && err != errors.ErrDataNotFound {
-		errObj = errors.ErrInternalError
-		errObj.Log = "[Etcd - SaveTask] get old task info error:" + err.Error()
-		return nil, errObj
-	}
-
-	if oldTask != nil && task.IsRunning == common.TASK_STATUS_UNDEFINED {
-		task.IsRunning = oldTask.IsRunning
-		task.ClientIP = oldTask.ClientIP
-	}
-	// build etcd save key
-	saveKey = common.BuildKey(task.ProjectID, task.TaskID)
-
-	// task to json
-	if saveByte, err = json.Marshal(task); err != nil {
-		errObj = errors.ErrInternalError
-		errObj.Log = "[Etcd - SaveTask] json.mashal task error:" + err.Error()
-		return nil, errObj
-	}
-	ctx, _ = utils.GetContextWithTimeout()
-	// save to etcd
-	if putResp, err = a.etcd.KV().Put(ctx, saveKey, string(saveByte), clientv3.WithPrevKV()); err != nil {
-		errObj = errors.ErrInternalError
-		errObj.Log = "[Etcd - SaveTask] etcd client kv put error:" + err.Error()
-		return nil, errObj
-	}
-
-	// oldtask exist
-	if putResp.PrevKv != nil {
-		// if oldtask unmarshal error
-		// don't care because this err doesn't affect result
-		_ = json.Unmarshal(putResp.PrevKv.Value, &oldTask)
-	} else {
-		oldTask = task
-	}
-	return oldTask, nil
-}
-
-// TemporarySchedulerTask 临时调度任务
-func (a *comm) TemporarySchedulerTask(task *common.TaskInfo) error {
-	var (
-		schedulerKey   string
-		saveByte       []byte
-		leaseGrantResp *clientv3.LeaseGrantResponse
-		ctx            context.Context
-		errObj         errors.Error
-		err            error
-	)
-
-	// task to json
-	if saveByte, err = json.Marshal(task); err != nil {
-		errObj = errors.ErrInternalError
-		errObj.Log = "[Etcd - TemporarySchedulerTask] json.mashal task error:" + err.Error()
-		return errObj
-	}
-
-	// build etcd save key
-	schedulerKey = common.BuildSchedulerKey(task.ProjectID, task.TaskID)
-
-	ctx, _ = utils.GetContextWithTimeout()
-	// make lease to notify worker
-	// 创建一个租约 让其稍后过期并自动删除
-	if leaseGrantResp, err = a.etcd.Lease().Grant(ctx, 1); err != nil {
-		errObj = errors.ErrInternalError
-		errObj.Log = "[Etcd - TemporarySchedulerTask] lease grant error:" + err.Error()
-		return errObj
-	}
-
-	ctx, _ = utils.GetContextWithTimeout()
-	// save to etcd
-	if _, err = a.etcd.KV().Put(ctx, schedulerKey, string(saveByte), clientv3.WithLease(leaseGrantResp.ID)); err != nil {
-		errObj = errors.ErrInternalError
-		errObj.Log = "[Etcd - TemporarySchedulerTask] etcd client kv put error:" + err.Error()
-		return errObj
-	}
-
-	return nil
-}
-
-func (a *app) DeleteTask(projectID int64, taskID string) (*common.TaskInfo, error) {
-	var (
-		deleteKey string
-		delResp   *clientv3.DeleteResponse
-		oldTask   *common.TaskInfo
-		ctx       context.Context
-		errObj    errors.Error
-		err       error
-	)
-
-	// build etcd delete key
-	deleteKey = common.BuildKey(projectID, taskID)
-
-	ctx, _ = utils.GetContextWithTimeout()
-	// save to etcd
-	if delResp, err = a.etcd.KV().Delete(ctx, deleteKey, clientv3.WithPrevKV(), clientv3.WithPrefix()); err != nil {
-		errObj = errors.ErrInternalError
-		errObj.Log = "[Etcd - DeleteTask] etcd client kv delete error:" + err.Error()
-		return nil, errObj
-	}
-
-	if taskID != "" && len(delResp.PrevKvs) != 0 {
-		_ = json.Unmarshal([]byte(delResp.PrevKvs[0].Value), &oldTask)
-	}
-
-	return oldTask, nil
-}
-
-// GetTask 获取任务
-func (a *comm) GetTask(projectID int64, taskID string) (*common.TaskInfo, error) {
-	var (
-		saveKey string
-		getResp *clientv3.GetResponse
-		task    *common.TaskInfo
-		ctx     context.Context
-		errObj  errors.Error
-		err     error
-	)
-
-	// build etcd save key
-	saveKey = common.BuildKey(projectID, taskID) // 保存的key同样也是获取的key
-
-	ctx, _ = utils.GetContextWithTimeout()
-
-	if getResp, err = a.etcd.KV().Get(ctx, saveKey); err != nil {
-		errObj = errors.ErrInternalError
-		errObj.Log = "[Etcd - GetTask] etcd client kv get one error:" + err.Error()
-		return nil, errObj
-	}
-
-	if getResp.Count > 1 {
-		errObj = errors.ErrInternalError
-		errObj.Log = "[Etcd - GetTask] etcd client kv get one task but result > 1"
-		return nil, errObj
-	} else if getResp.Count == 0 {
-		return nil, errors.ErrDataNotFound
-	}
-
-	task = &common.TaskInfo{}
-	if err = json.Unmarshal(getResp.Kvs[0].Value, task); err != nil {
-		errObj = errors.ErrInternalError
-		errObj.Log = "[Etcd - GetTask] task json.Unmarshal error:" + err.Error()
-		return nil, errObj
-	}
-
-	return task, nil
-}
 
 // GetTaskList 获取任务列表
 func (a *app) GetTaskList(projectID int64) ([]*common.TaskInfo, error) {
@@ -378,7 +158,7 @@ func (a *app) CheckProjectWorkerExist(projectID int64, host string) (bool, error
 }
 
 // GetWorkerList 获取节点列表
-func (a *app) GetWorkerList(projectID int64) ([]ClientInfo, error) {
+func (a *app) GetWorkerList(projectID int64) ([]common.ClientInfo, error) {
 	var (
 		preKey  string
 		err     error
@@ -386,7 +166,7 @@ func (a *app) GetWorkerList(projectID int64) ([]ClientInfo, error) {
 		getResp *clientv3.GetResponse
 		kv      *mvccpb.KeyValue
 		ctx     context.Context
-		res     []ClientInfo
+		res     []common.ClientInfo
 	)
 
 	preKey = common.BuildRegisterKey(projectID, "")
@@ -400,7 +180,7 @@ func (a *app) GetWorkerList(projectID int64) ([]ClientInfo, error) {
 	for _, kv = range getResp.Kvs {
 		var (
 			ip         = common.ExtractWorkerIP(projectID, string(kv.Key))
-			clientinfo ClientInfo
+			clientinfo common.ClientInfo
 		)
 
 		_ = json.Unmarshal(kv.Value, &clientinfo)

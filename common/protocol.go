@@ -16,22 +16,29 @@ type TaskInfo struct {
 	Name      string `json:"name"`
 	ProjectID int64  `json:"project_id"`
 
-	Command    string `json:"command"`
-	Cron       string `json:"cron"`
-	Remark     string `json:"remark"`
-	Timeout    int    `json:"timeout"` // 任务超时时间 单位 秒(s)
-	CreateTime int64  `json:"create_time"`
-	Status     int    `json:"status"`
-	IsRunning  int    `json:"is_running"`
-	Noseize    int    `json:"noseize"`
-	Exclusion  int    `json:"exclusion"` // 互斥规则
-	ClientIP   string `json:"client_ip"`
-	TmpID      string `json:"tmp_id"` // 每次任务执行的唯一标识
+	Command    string        `json:"command"`
+	Cron       string        `json:"cron"`
+	Remark     string        `json:"remark"`
+	Timeout    int           `json:"timeout"` // 任务超时时间 单位 秒(s)
+	CreateTime int64         `json:"create_time"`
+	Status     int           `json:"status"`
+	IsRunning  int           `json:"is_running"`
+	Noseize    int           `json:"noseize"`
+	Exclusion  int           `json:"exclusion"` // 互斥规则
+	ClientIP   string        `json:"client_ip"`
+	TmpID      string        `json:"tmp_id"` // 每次任务执行的唯一标识
+	FlowInfo   *WorkflowInfo `json:"flow_info,omitempty"`
+}
+
+type WorkflowInfo struct {
+	WorkflowID string `json:"workflow_id"`
+	TmpID      string `json:"tmp_id"`
 }
 
 type TaskRunningInfo struct {
-	Status string `json:"status"`
-	TmpID  string `json:"tmp_id"`
+	Status    string `json:"status"`
+	TmpID     string `json:"tmp_id"`
+	Timestamp int64  `json:"timestamp,omitempty"`
 }
 
 // TaskSchedulePlan 任务调度计划
@@ -40,7 +47,15 @@ type TaskSchedulePlan struct {
 	Expr     *cronexpr.Expression // 解析后的cron表达式
 	TmpID    string
 	NextTime time.Time
+	Type     PlanType
 }
+
+type PlanType string
+
+const (
+	NormalPlan   PlanType = "normal"
+	WorkflowPlan PlanType = "workflow"
+)
 
 // TaskExecutingInfo 任务执行状态
 type TaskExecutingInfo struct {
@@ -73,6 +88,7 @@ type TaskResultLog struct {
 var (
 	ETCD_PREFIX = "/cron"
 	TEMPORARY   = "t_scheduler"
+	WORKFLOW    = "t_flow"
 	STATUS      = "t_status"
 )
 
@@ -104,14 +120,27 @@ func BuildTaskStatusKey(projectID int64, taskID string) string {
 	return fmt.Sprintf("%s/%d/%s/%s", ETCD_PREFIX, projectID, taskID, STATUS)
 }
 
+func BuildWorkflowTaskStatusKey(projectID int64, workflowID, taskID string) string {
+	return fmt.Sprintf("%s/%d/%s/%s/%s", ETCD_PREFIX, projectID, WORKFLOW, workflowID, taskID)
+}
+
 // BuildSchedulerKey 临时调度的key
 func BuildSchedulerKey(projectID int64, taskID string) string {
 	return fmt.Sprintf("%s/%d/%s/%s", ETCD_PREFIX, projectID, TEMPORARY, taskID)
 }
 
+// BuildWorkflowSchedulerKey workflow调度的key
+func BuildWorkflowSchedulerKey(projectID int64, taskID string) string {
+	return fmt.Sprintf("%s/%d/%s/%s", ETCD_PREFIX, projectID, WORKFLOW, taskID)
+}
+
 // IsTemporaryKey 检测是否为临时调度key
 func IsTemporaryKey(key string) bool {
 	return strings.Contains(key, "/"+TEMPORARY+"/")
+}
+
+func IsWorkflowKey(key string) bool {
+	return strings.Contains(key, "/"+WORKFLOW+"/")
 }
 
 func IsStatusKey(key string) bool {
@@ -217,6 +246,15 @@ func BuildTaskSchedulerPlan(task *TaskInfo) (*TaskSchedulePlan, error) {
 		Task:     task,
 		Expr:     expr,
 		NextTime: expr.Next(time.Now()),
+		Type:     NormalPlan,
+	}, nil
+}
+
+// 构造执行计划
+func BuildWorkflowTaskSchedulerPlan(task *TaskInfo) (*TaskSchedulePlan, error) {
+	return &TaskSchedulePlan{
+		Task: task,
+		Type: WorkflowPlan,
 	}, nil
 }
 

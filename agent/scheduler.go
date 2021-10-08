@@ -1,4 +1,4 @@
-package app
+package agent
 
 import (
 	"fmt"
@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/holdno/gopherCron/common"
+	"github.com/holdno/gopherCron/pkg/warning"
 	"github.com/holdno/gopherCron/utils"
 
 	"github.com/sirupsen/logrus"
@@ -56,6 +57,7 @@ func (ts *TaskScheduler) SetExecutingTask(key string, task *common.TaskExecuting
 }
 
 func (ts *TaskScheduler) CheckTaskExecuting(key string) (*common.TaskExecutingInfo, bool) {
+
 	res, exist := ts.TaskExecutingTable.Load(key)
 	if !exist {
 		return nil, false
@@ -163,6 +165,13 @@ func (a *client) handleTaskEvent(event *common.TaskEvent) {
 			return
 		}
 		a.TryStartTask(taskSchedulePlan)
+	case common.TASK_EVENT_WORKFLOW_SCHEDULE:
+		// 构建执行计划
+		if taskSchedulePlan, err = common.BuildWorkflowTaskSchedulerPlan(event.Task); err != nil {
+			logrus.WithField("Error", err.Error()).Error("build task schedule plan error")
+			return
+		}
+		a.TryStartTask(taskSchedulePlan)
 	case common.TASK_EVENT_SAVE:
 		// 构建执行计划
 		if event.Task.Status == common.TASK_STATUS_START {
@@ -235,7 +244,7 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) {
 	if taskExecuteInfo, taskExecuting = a.scheduler.CheckTaskExecuting(plan.Task.SchedulerKey()); taskExecuting {
 		a.scheduler.PushTaskResult(&common.TaskExecuteResult{
 			ExecuteInfo: common.BuildTaskExecuteInfo(plan),
-			Output:      "last task was not completed",
+			Output:      "latest task was not completed",
 			Err:         fmt.Sprintf("task %s execute error: last task was not completed", plan.Task.Name),
 			StartTime:   time.Now(),
 			EndTime:     time.Now(),
@@ -280,17 +289,11 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) {
 			}
 		}()
 
-		if err = a.SetTaskRunning(plan); err != nil {
+		if err = utils.RetryFunc(5, func() error {
+			return a.SetTaskRunning(plan)
+		}); err != nil {
 			a.logger.Warnf("task: %s, id: %s, change running status error, %v", plan.Task.Name,
 				plan.Task.TaskID, err)
-			// retry
-			if err = utils.RetryFunc(5, func() error {
-				return a.TemporarySchedulerTask(plan.Task)
-			}); err != nil {
-				a.logger.Errorf(
-					"task: %s, id: %s, save task running status error and rescheduler error: %v",
-					plan.Task.Name, plan.Task.TaskID, err)
-			}
 			return
 		}
 
@@ -305,9 +308,9 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) {
 func (a *client) handleTaskResult(result *common.TaskExecuteResult) {
 	err := utils.RetryFunc(10, func() error {
 		if result.Err != "" {
-			err := a.Warning(WarningData{
+			err := a.Warning(warning.WarningData{
 				Data:      result.Err,
-				Type:      WarningTypeTask,
+				Type:      warning.WarningTypeTask,
 				TaskName:  result.ExecuteInfo.Task.Name,
 				ProjectID: result.ExecuteInfo.Task.ProjectID,
 				AgentIP:   a.GetIP(),

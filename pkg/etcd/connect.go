@@ -2,7 +2,6 @@ package etcd
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"time"
 
@@ -45,7 +44,6 @@ func Connect(config *config.EtcdConf) (*TaskManager, error) {
 	)
 
 	common.ETCD_PREFIX = config.Prefix
-	fmt.Println("etcd prefix:", common.ETCD_PREFIX)
 
 	// client config
 	etcdConf = clientv3.Config{

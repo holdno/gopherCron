@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -11,11 +10,12 @@ import (
 	"github.com/holdno/gopherCron/config"
 	"github.com/holdno/gopherCron/errors"
 	"github.com/holdno/gopherCron/jwt"
-	"github.com/holdno/gopherCron/pkg/daemon"
 	"github.com/holdno/gopherCron/pkg/etcd"
 	"github.com/holdno/gopherCron/pkg/logger"
 	"github.com/holdno/gopherCron/pkg/panicgroup"
 	"github.com/holdno/gopherCron/pkg/store/sqlStore"
+	"github.com/holdno/gopherCron/pkg/warning"
+	"github.com/holdno/gopherCron/protocol"
 	"github.com/holdno/gopherCron/utils"
 
 	"github.com/coreos/etcd/clientv3"
@@ -38,7 +38,7 @@ type App interface {
 	DeleteTask(pid int64, tid string) (*common.TaskInfo, error)
 	KillTask(pid int64, tid string) error
 	IsAdmin(uid int64) (bool, error)
-	GetWorkerList(projectID int64) ([]ClientInfo, error)
+	GetWorkerList(projectID int64) ([]common.ClientInfo, error)
 	CheckProjectWorkerExist(projectID int64, host string) (bool, error)
 	ReloadWorkerConfig(host string) error
 	GetProjectTaskCount(projectID int64) (int64, error)
@@ -78,17 +78,7 @@ type App interface {
 	BeginTx() *gorm.DB
 	Close()
 	GetVersion() string
-	Warner
-}
-
-type EtcdManager interface {
-	Client() *clientv3.Client
-	KV() clientv3.KV
-	Lease() clientv3.Lease
-	Watcher() clientv3.Watcher
-	GetTaskLocker(task *common.TaskInfo) *etcd.Locker
-	GetLocker(key string) *etcd.Locker
-	Inc(key string) (int64, error)
+	warning.Warner
 }
 
 func GetApp(c *gin.Context) App {
@@ -99,7 +89,7 @@ type app struct {
 	httpClient *http.Client
 	store      sqlStore.SqlStore
 	logger     *logrus.Logger
-	etcd       EtcdManager
+	etcd       protocol.EtcdManager
 	closeCh    chan struct{}
 	isClose    bool
 	localip    string
@@ -107,13 +97,13 @@ type app struct {
 	cfg *config.ServiceConfig
 
 	panicgroup.PanicGroup
-	CommonInterface
-	Warner
+	protocol.CommonInterface
+	warning.Warner
 }
 
 type AppOptions func(a *app)
 
-func WithWarning(w Warner) AppOptions {
+func WithWarning(w warning.Warner) AppOptions {
 	return func(a *app) {
 		a.Warner = w
 	}
@@ -136,7 +126,7 @@ func NewApp(configPath string, opts ...AppOptions) App {
 	}
 
 	if app.Warner == nil {
-		app.Warner = NewDefaultWarner(app.logger)
+		app.Warner = warning.NewDefaultWarner(app.logger)
 	}
 
 	if app.localip, err = utils.GetLocalIP(); err != nil {
@@ -160,9 +150,9 @@ func NewApp(configPath string, opts ...AppOptions) App {
 	// why 1024. view https://github.com/holdno/snowFlakeByGo
 	utils.InitIDWorker(clusterID % 1024)
 	app.PanicGroup = panicgroup.NewPanicGroup(func(err error) {
-		reserr := app.Warning(WarningData{
+		reserr := app.Warning(common.WarningData{
 			Data:    err.Error(),
-			Type:    WarningTypeSystem,
+			Type:    warning.WarningTypeSystem,
 			AgentIP: app.localip,
 		})
 		if reserr != nil {
@@ -213,171 +203,6 @@ func (a *app) GetIP() string {
 
 func (a *app) GetTaskLocker(task *common.TaskInfo) *etcd.Locker {
 	return a.etcd.GetTaskLocker(task)
-}
-
-type client struct {
-	localip    string
-	logger     *logrus.Logger
-	etcd       EtcdManager
-	scheduler  *TaskScheduler
-	configPath string
-	cfg        *config.ServiceConfig
-
-	daemon *daemon.ProjectDaemon
-
-	isClose   bool
-	closeChan chan struct{}
-
-	panicgroup.PanicGroup
-	ClientTaskReporter
-	CommonInterface
-	Warner
-}
-
-type Client interface {
-	Go(f func())
-	GetIP() string
-	Loop()
-	ResultReport(result *common.TaskExecuteResult) error
-	Close()
-	Down() chan struct{}
-	Warner
-}
-
-type ClientOptions func(a *client)
-
-func ClientWithTaskReporter(reporter ClientTaskReporter) ClientOptions {
-	return func(agent *client) {
-		agent.ClientTaskReporter = reporter
-	}
-}
-
-func ClientWithWarning(w Warner) ClientOptions {
-	return func(a *client) {
-		a.Warner = w
-	}
-}
-
-func (agent *client) loadConfigAndSetupAgentFunc() func() {
-	inited := false
-
-	return func() {
-		var err error
-		cfg := config.InitServiceConfig(agent.configPath)
-		if !inited {
-			inited = true
-			agent.cfg = &config.ServiceConfig{}
-			if agent.configPath == "" {
-				panic("empty config path")
-			}
-
-			if agent.etcd, err = etcd.Connect(cfg.Etcd); err != nil {
-				panic(err)
-			}
-
-			agent.CommonInterface = NewComm(agent.etcd)
-
-			clusterID, err := agent.etcd.Inc(cfg.Etcd.Prefix + common.CLUSTER_AUTO_INDEX)
-			if err != nil {
-				panic(err)
-			}
-
-			// why 1024. view https://github.com/holdno/snowFlakeByGo
-			utils.InitIDWorker(clusterID % 1024)
-			agent.logger = logger.MustSetup(cfg.LogLevel)
-			agent.scheduler = initScheduler()
-			agent.daemon = daemon.NewProjectDaemon(nil, agent.logger)
-		} else if agent.configPath == "" {
-			return
-		}
-
-		if cfg.ReportAddr != agent.cfg.ReportAddr {
-			agent.logger.Infof("init http task log reporter, address: %s", cfg.ReportAddr)
-			reporter := NewHttpReporter(cfg.ReportAddr)
-			agent.ClientTaskReporter = reporter
-			agent.Warner = reporter
-		} else if agent.ClientTaskReporter == nil {
-			agent.logger.Info("init default task log reporter, it must be used mysql config")
-			agent.ClientTaskReporter = NewDefaultTaskReporter(agent.logger, cfg.Mysql)
-		}
-
-		if agent.Warner == nil {
-			agent.Warner = NewDefaultWarner(agent.logger)
-		}
-
-		addProjects, _ := agent.daemon.DiffProjects(cfg.Etcd.Projects)
-		agent.logger.WithField("projects", addProjects).Debug("diff projects")
-
-		agent.TaskWatcher(addProjects)
-		agent.TaskKiller(addProjects)
-		agent.Register(addProjects)
-
-		agent.cfg = cfg
-	}
-
-}
-
-func NewClient(configPath string, opts ...ClientOptions) Client {
-	var err error
-
-	agent := &client{
-		configPath: configPath,
-		isClose:    false,
-		closeChan:  make(chan struct{}),
-	}
-	agent.configPath = configPath
-	setupFunc := agent.loadConfigAndSetupAgentFunc()
-
-	if agent.localip, err = utils.GetLocalIP(); err != nil {
-		agent.logger.Error("failed to get local ip")
-	}
-
-	for _, opt := range opts {
-		opt(agent)
-	}
-
-	agent.PanicGroup = panicgroup.NewPanicGroup(func(err error) {
-		reserr := agent.Warning(WarningData{
-			Data:    err.Error(),
-			Type:    WarningTypeSystem,
-			AgentIP: agent.localip,
-		})
-		if reserr != nil {
-			agent.logger.WithFields(logrus.Fields{
-				"desc":         reserr,
-				"source_error": err,
-			}).Error("panicgroup: failed to warning panic error")
-		}
-	})
-
-	setupFunc()
-
-	agent.OnCommand(func(command string) {
-		switch command {
-		case common.AGENT_COMMAND_RELOAD_CONFIG:
-			setupFunc()
-		}
-	})
-
-	return agent
-}
-
-func (c *client) Close() {
-	if !c.isClose {
-		c.isClose = true
-		c.daemon.Close()
-		c.scheduler.Stop()
-		<-c.closeChan
-		fmt.Println("shut down")
-	}
-}
-
-func (c *client) Down() chan struct{} {
-	return c.closeChan
-}
-
-func (c *client) GetIP() string {
-	return c.localip
 }
 
 func (a *app) Close() {

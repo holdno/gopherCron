@@ -1,9 +1,22 @@
-package app
+package warning
 
 import (
 	"fmt"
 
 	"github.com/sirupsen/logrus"
+)
+
+type WarningData struct {
+	Data      string `json:"data"`
+	Type      string `json:"type"`
+	AgentIP   string `json:"agent_ip"`
+	TaskName  string `json:"task_name"`
+	ProjectID int64  `json:"project_id"`
+}
+
+const (
+	WarningTypeSystem = "system"
+	WarningTypeTask   = "task"
 )
 
 type Warner interface {
