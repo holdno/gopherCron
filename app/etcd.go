@@ -5,11 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
-	"time"
 
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/errors"
-	"github.com/holdno/gopherCron/protocol"
 	"github.com/holdno/gopherCron/utils"
 
 	"github.com/coreos/etcd/clientv3"
