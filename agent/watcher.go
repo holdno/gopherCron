@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/holdno/gopherCron/common"
+	"github.com/holdno/gopherCron/pkg/warning"
 	"github.com/holdno/gopherCron/utils"
 	"github.com/sirupsen/logrus"
 
@@ -90,9 +91,9 @@ func (a *client) startTaskWatcher(projectID int64) error {
 		}
 		return nil
 	}); err != nil {
-		warningErr := a.Warning(WarningData{
+		warningErr := a.Warning(warning.WarningData{
 			Data:      fmt.Sprintf("[agent - TaskWatcher] etcd kv get error: %s, projectid: %d", err.Error(), projectID),
-			Type:      WarningTypeSystem,
+			Type:      warning.WarningTypeSystem,
 			AgentIP:   a.GetIP(),
 			ProjectID: projectID,
 		})

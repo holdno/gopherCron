@@ -140,7 +140,7 @@ func NewApp(configPath string, opts ...AppOptions) App {
 		panic(err)
 	}
 	app.logger.Info("connected to etcd")
-	app.CommonInterface = NewComm(app.etcd)
+	app.CommonInterface = protocol.NewComm(app.etcd)
 
 	clusterID, err := app.etcd.Inc(conf.Etcd.Prefix + common.CLUSTER_AUTO_INDEX)
 	if err != nil {
@@ -150,7 +150,7 @@ func NewApp(configPath string, opts ...AppOptions) App {
 	// why 1024. view https://github.com/holdno/snowFlakeByGo
 	utils.InitIDWorker(clusterID % 1024)
 	app.PanicGroup = panicgroup.NewPanicGroup(func(err error) {
-		reserr := app.Warning(common.WarningData{
+		reserr := app.Warning(warning.WarningData{
 			Data:    err.Error(),
 			Type:    warning.WarningTypeSystem,
 			AgentIP: app.localip,
