@@ -26,7 +26,7 @@ func (d *defaultRunningManager) SetTaskRunning(kv clientv3.KV, plan *common.Task
 	}
 	return nil
 }
-func (d *defaultRunningManager) SetTaskNotRunning(kv clientv3.KV, plan *common.TaskSchedulePlan, result *common.TaskExecuteResult) error {
+func (d *defaultRunningManager) SetTaskNotRunning(kv clientv3.KV, plan *common.TaskSchedulePlan) error {
 	plan.Task.ClientIP = ""
 
 	ctx, _ := utils.GetContextWithTimeout()

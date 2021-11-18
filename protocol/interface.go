@@ -29,7 +29,7 @@ type comm struct {
 
 type CommonInterface interface {
 	SetTaskRunning(plan *common.TaskSchedulePlan) error
-	SetTaskNotRunning(plan *common.TaskSchedulePlan, result *common.TaskExecuteResult) error
+	SetTaskNotRunning(plan *common.TaskSchedulePlan) error
 	SaveTask(task *common.TaskInfo, opts ...clientv3.OpOption) (*common.TaskInfo, error)
 	GetTask(projectID int64, taskID string) (*common.TaskInfo, error)
 	TemporarySchedulerTask(task *common.TaskInfo) error
@@ -42,7 +42,7 @@ func NewComm(etcd EtcdManager) CommonInterface {
 
 type RunningManager interface {
 	SetTaskRunning(kv clientv3.KV, plan *common.TaskSchedulePlan) error
-	SetTaskNotRunning(kv clientv3.KV, plan *common.TaskSchedulePlan, result *common.TaskExecuteResult) error
+	SetTaskNotRunning(kv clientv3.KV, plan *common.TaskSchedulePlan) error
 }
 
 var runningManager = make(map[common.PlanType]RunningManager)
@@ -55,12 +55,12 @@ func (a *comm) SetTaskRunning(plan *common.TaskSchedulePlan) error {
 	return rm.SetTaskRunning(a.etcd.KV(), plan)
 }
 
-func (a *comm) SetTaskNotRunning(plan *common.TaskSchedulePlan, result *common.TaskExecuteResult) error {
+func (a *comm) SetTaskNotRunning(plan *common.TaskSchedulePlan) error {
 	rm, exist := runningManager[plan.Type]
 	if !exist {
 		rm = &defaultRunningManager{}
 	}
-	return rm.SetTaskNotRunning(a.etcd.KV(), plan, result)
+	return rm.SetTaskNotRunning(a.etcd.KV(), plan)
 }
 
 // SaveTask save task to etcd

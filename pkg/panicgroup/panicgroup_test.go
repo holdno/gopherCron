@@ -14,10 +14,9 @@ func TestPanicgroup_Go(t *testing.T) {
 	w := sync.WaitGroup{}
 	for i := 0; i < 10; i++ {
 		w.Add(1)
-		pg.Go(func(a ...interface{}) {
-			fmt.Println(a[0])
+		pg.Go(func() {
 			w.Done()
-		})(i)
+		})
 	}
 
 	w.Wait()

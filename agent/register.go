@@ -78,7 +78,7 @@ func (a *client) Register(projects []int64) {
 		a.localip = "未知IP节点"
 	}
 
-	clientinfo, _ := json.Marshal(&ClientInfo{
+	clientinfo, _ := json.Marshal(&common.ClientInfo{
 		ClientIP: a.localip,
 		Version:  a.GetVersion(),
 	})
