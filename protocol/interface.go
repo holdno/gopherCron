@@ -127,6 +127,11 @@ func (a *comm) SaveTask(task *common.TaskInfo, opts ...clientv3.OpOption) (*comm
 	return oldTask, nil
 }
 
+// TemporarySchedulerTaskWithResult 临时调度任务 并返回调度结果
+func (a *comm) TemporarySchedulerTaskWithResult(task *common.TaskInfo) (interface{}, error) {
+	a.TemporarySchedulerTask(task)
+}
+
 // TemporarySchedulerTask 临时调度任务
 func (a *comm) TemporarySchedulerTask(task *common.TaskInfo) error {
 	var (

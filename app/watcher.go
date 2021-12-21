@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/holdno/gopherCron/common"
+	"github.com/holdno/gopherCron/pkg/warning"
 	"github.com/holdno/gopherCron/utils"
 
 	"github.com/coreos/etcd/clientv3"
@@ -26,9 +27,9 @@ func (a *app) WebHookWorker() error {
 		}
 		return nil
 	}); err != nil {
-		warningErr := a.Warning(WarningData{
+		warningErr := a.Warning(warning.WarningData{
 			Data: fmt.Sprintf("[service - WebHookWorker] etcd kv get error: %s", err.Error()),
-			Type: WarningTypeSystem,
+			Type: warning.WarningTypeSystem,
 		})
 		if warningErr != nil {
 			a.logger.Errorf("[service - WebHookWorker] failed to push warning, %s", err.Error())

@@ -93,15 +93,31 @@ func (d *workflowRunningManager) SetTaskNotRunning(kv clientv3.KV, plan *common.
 		status = common.TASK_STATUS_DONE_V2
 	}
 	ctx, _ := utils.GetContextWithTimeout()
-	runningInfo, _ := json.Marshal(common.TaskRunningInfo{
-		Status:    status,
-		TmpID:     plan.TmpID,
-		Timestamp: time.Now().Unix(),
-	})
-	_, err := kv.Put(ctx, common.BuildWorkflowTaskStatusKey(plan.Task.ProjectID, plan.Task.FlowInfo.WorkflowID, plan.Task.TaskID), string(runningInfo))
+	key := common.BuildWorkflowTaskStatusKey(plan.Task.ProjectID, plan.Task.FlowInfo.WorkflowID, plan.Task.TaskID)
+	resp, err := kv.Get(ctx, key)
 	if err != nil {
 		errObj := errors.ErrInternalError
-		errObj.Log = "[Etcd - SetTaskRunning] etcd client kv put error:" + err.Error()
+		errObj.Log = "[Etcd - SetTaskNotRunning] etcd client kv get error:" + err.Error()
+		return errObj
+	}
+	if resp.Count == 0 {
+		// What happen?
+		return nil
+	}
+
+	var workflowTaskRunningResult WorkflowTaskRunningResult
+	if err = json.Unmarshal(resp.Kvs[0].Value, &workflowTaskRunningResult); err != nil {
+		errObj := errors.ErrInternalError
+		errObj.Log = "[Etcd - workflowRunningManager - SetTaskRunning] json unmarshal workflow task running result error:" + err.Error()
+		return nil
+	}
+
+	workflowTaskRunningResult.CurrentStatus = status
+
+	runningInfo, _ := json.Marshal(workflowTaskRunningResult)
+	if _, err = kv.Put(ctx, key, string(runningInfo)); err != nil {
+		errObj := errors.ErrInternalError
+		errObj.Log = "[Etcd - SetTaskNotRunning] etcd client kv put error:" + err.Error()
 		return errObj
 	}
 	return nil

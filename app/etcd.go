@@ -197,6 +197,34 @@ func (a *app) GetWorkerList(projectID int64) ([]common.ClientInfo, error) {
 	return res, nil
 }
 
+func (a *app) DeleteTask(projectID int64, taskID string) (*common.TaskInfo, error) {
+	var (
+		deleteKey string
+		delResp   *clientv3.DeleteResponse
+		oldTask   *common.TaskInfo
+		ctx       context.Context
+		errObj    errors.Error
+		err       error
+	)
+
+	// build etcd delete key
+	deleteKey = common.BuildKey(projectID, taskID)
+
+	ctx, _ = utils.GetContextWithTimeout()
+	// save to etcd
+	if delResp, err = a.etcd.KV().Delete(ctx, deleteKey, clientv3.WithPrevKV(), clientv3.WithPrefix()); err != nil {
+		errObj = errors.ErrInternalError
+		errObj.Log = "[Etcd - DeleteTask] etcd client kv delete error:" + err.Error()
+		return nil, errObj
+	}
+
+	if taskID != "" && len(delResp.PrevKvs) != 0 {
+		json.Unmarshal([]byte(delResp.PrevKvs[0].Value), &oldTask)
+	}
+
+	return oldTask, nil
+}
+
 func (a *app) DeleteAll() error {
 	var (
 		deleteKey string

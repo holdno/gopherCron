@@ -4,17 +4,15 @@ import (
 	"net/http"
 
 	"github.com/holdno/gopherCron/cmd/service/controller"
-
-	"github.com/holdno/gopherCron/cmd/service/controller/system"
-
-	"github.com/holdno/gopherCron/config"
-
-	"github.com/gin-gonic/gin"
 	"github.com/holdno/gopherCron/cmd/service/controller/etcd_func"
 	"github.com/holdno/gopherCron/cmd/service/controller/log_func"
 	"github.com/holdno/gopherCron/cmd/service/controller/project_func"
+	"github.com/holdno/gopherCron/cmd/service/controller/system"
 	"github.com/holdno/gopherCron/cmd/service/controller/user_func"
 	"github.com/holdno/gopherCron/cmd/service/middleware"
+	"github.com/holdno/gopherCron/config"
+
+	"github.com/gin-gonic/gin"
 )
 
 func SetupRoute(r *gin.Engine, conf *config.DeployConf) {
