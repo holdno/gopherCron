@@ -9,7 +9,7 @@ import (
 )
 
 type DeleteOneRequest struct {
-	ProjectID int64 `form:"project_id" binding:"required"`
+	ProjectID int64 `json:"project_id" form:"project_id" binding:"required"`
 }
 
 func DeleteOne(c *gin.Context) {

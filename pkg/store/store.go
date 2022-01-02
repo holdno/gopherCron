@@ -50,6 +50,31 @@ type TaskLogStore interface {
 	Clean(tx *gorm.DB, selector selection.Selector) error
 }
 
+type UserWorkflowRelevanceStore interface {
+	Commons
+	Create(tx *gorm.DB, data common.UserWorkflowRelevance) error
+	GetUserWorkflows(userID int64) ([]common.UserWorkflowRelevance, error)
+	GetUserWorkflowRelevance(userID int64, workflowID int64) (*common.UserWorkflowRelevance, error)
+}
+
+type WorkflowTaskStore interface {
+	Commons
+	Create(tx *gorm.DB, data common.WorkflowTask) error
+	GetList(workflowID int64) ([]common.WorkflowTask, error)
+	GetTaskList(workflowID int64, taskID string) ([]common.WorkflowTask, error)
+	Delete(tx *gorm.DB, id int64) error
+	DeleteList(tx *gorm.DB, ids []int64) error
+}
+
+type WorkflowStore interface {
+	Commons
+	Create(tx *gorm.DB, data *common.Workflow) error
+	GetList(selector selection.Selector, page, pagesize uint64) ([]common.Workflow, error)
+	Update(tx *gorm.DB, data common.Workflow) error
+	GetOne(id int64) (*common.Workflow, error)
+	Delete(tx *gorm.DB, id int64) error
+}
+
 type TaskWebHookStore interface {
 	Commons
 	Create(data common.WebHook) error

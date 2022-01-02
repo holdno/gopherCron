@@ -59,6 +59,16 @@ func SetupRoute(r *gin.Engine, conf *config.DeployConf) {
 			}
 		}
 
+		workflow := api.Group("/workflow")
+		{
+			workflow.Use(middleware.TokenVerify())
+			workflow.POST("/create", controller.CreateWorkflow)
+			workflow.POST("/delete", controller.DeleteWorkflow)
+			workflow.POST("/update", controller.UpdateWorkflow)
+			workflow.POST("/task/create", controller.CreateWorkflowTask)
+			
+		}
+
 		worker := api.Group("/client")
 		{
 			worker.Use(middleware.TokenVerify())

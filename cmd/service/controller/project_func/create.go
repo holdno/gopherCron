@@ -11,8 +11,8 @@ import (
 )
 
 type CreateRequest struct {
-	Title  string `form:"title" binding:"required"`
-	Remark string `form:"remark"`
+	Title  string `json:"title" form:"title" binding:"required"`
+	Remark string `json:"remark" form:"remark"`
 }
 
 func Create(c *gin.Context) {

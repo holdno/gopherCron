@@ -8,9 +8,12 @@ import (
 	"github.com/holdno/gopherCron/utils"
 
 	"github.com/coreos/etcd/clientv3"
+	recipe "github.com/coreos/etcd/contrib/recipes"
 )
 
-type defaultRunningManager struct{}
+type defaultRunningManager struct {
+	queue *recipe.Queue
+}
 
 func (d *defaultRunningManager) SetTaskRunning(kv clientv3.KV, plan *common.TaskSchedulePlan) error {
 	ctx, _ := utils.GetContextWithTimeout()
@@ -26,9 +29,15 @@ func (d *defaultRunningManager) SetTaskRunning(kv clientv3.KV, plan *common.Task
 	}
 	return nil
 }
-func (d *defaultRunningManager) SetTaskNotRunning(kv clientv3.KV, plan *common.TaskSchedulePlan) error {
-	plan.Task.ClientIP = ""
-
+func (d *defaultRunningManager) SetTaskNotRunning(kv clientv3.KV, plan *common.TaskSchedulePlan, result *common.TaskExecuteResult) error {
+	// plan.Task.ClientIP = ""
+	var status string
+	if result == nil || result.Err != "" {
+		// 未执行，发生未知错误
+		status = common.TASK_STATUS_FAIL_V2
+	} else {
+		status = common.TASK_STATUS_DONE_V2
+	}
 	ctx, _ := utils.GetContextWithTimeout()
 
 	_, err := kv.Delete(ctx, common.BuildTaskStatusKey(plan.Task.ProjectID, plan.Task.TaskID))
@@ -38,5 +47,13 @@ func (d *defaultRunningManager) SetTaskNotRunning(kv clientv3.KV, plan *common.T
 		return errObj
 	}
 
+	err = d.queue.Enqueue(generateTaskFinishedResultV1(TaskFinishedQueueItemV1{
+		ProjectID: plan.Task.ProjectID,
+		TaskID:    plan.Task.TaskID,
+		Status:    status,
+		TaskType:  common.NormalPlan,
+		StartTime: result.StartTime.Unix(),
+		EndTime:   result.EndTime.Unix(),
+	}))
 	return nil
 }

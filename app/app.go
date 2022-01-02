@@ -74,10 +74,20 @@ type App interface {
 	DeleteAllWebHook(tx *gorm.DB, projectID int64) error
 	CheckPermissions(projectID, uid int64) error
 	GetErrorLogs(pids []int64, page, pagesize int) ([]*common.TaskLog, error)
+	// workflow
+	CreateWorkflow(userID int64, data common.Workflow) error
+	DeleteWorkflow(userID int64, workflowID int64) error
+	UpdateWorkflow(userID int64, data common.Workflow) error
+	CreateWorkflowTask(userID int64, workflowID int64, taskList []CreateWorkflowTaskArgs) error
+	GetWorkflowList(opts common.GetWorkflowListOptions, page, pagesize uint64) ([]common.Workflow, int, error)
+	GetUserWorkflows(userID int64) ([]int64, error)
+	GetWorkflowTasks(workflowID int64) ([]common.WorkflowTask, error)
 
 	BeginTx() *gorm.DB
 	Close()
 	GetVersion() string
+
+	Go(f func())
 	warning.Warner
 }
 
@@ -189,6 +199,13 @@ func NewApp(configPath string, opts ...AppOptions) App {
 			}
 		}
 	})
+
+	workflow, err := NewWorkflowRunner(app, app.etcd.Client())
+	if err != nil {
+		panic(err)
+	}
+
+	app.Go(workflow.Loop)
 
 	return app
 }

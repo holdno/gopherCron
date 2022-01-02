@@ -16,10 +16,13 @@ const (
 
 	TASK_EXECUTE_NOSEIZE = 1
 
+	TASK_STATUS_STARTING_V2    = "starting"
 	TASK_STATUS_RUNNING_V2     = "running"
 	TASK_STATUS_NOT_RUNNING_V2 = ""
 	TASK_STATUS_DONE_V2        = "done"
 	TASK_STATUS_FAIL_V2        = "fail"
+
+	WORKFLOW_SCHEDULE_LIMIT int = 3
 
 	APP_KEY = "app_impl"
 	USER_ID = "user_id"
@@ -39,6 +42,8 @@ const (
 
 	WEBHOOK_TYPE_TASK_START    = "task_start"
 	WEBHOOK_TYPE_TASK_FINISHED = "task_finished"
+
+	ACK_RESPONSE_V1 = "v1"
 
 	// Log
 	ErrorLog   = 1

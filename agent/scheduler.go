@@ -9,6 +9,7 @@ import (
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/pkg/warning"
 	"github.com/holdno/gopherCron/utils"
+	"github.com/holdno/rego"
 
 	"github.com/sirupsen/logrus"
 )
@@ -172,6 +173,7 @@ func (a *client) handleTaskEvent(event *common.TaskEvent) {
 			return
 		}
 		a.TryStartTask(taskSchedulePlan)
+		// todo ack
 	case common.TASK_EVENT_SAVE:
 		// 构建执行计划
 		if event.Task.Status == common.TASK_STATUS_START {
@@ -278,27 +280,42 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) {
 		}
 
 		a.scheduler.SetExecutingTask(plan.Task.SchedulerKey(), taskExecuteInfo)
+		var result *common.TaskExecuteResult
 		defer func() {
 			// 删除任务的正在执行状态
 			a.scheduler.DeleteExecutingTask(plan.Task.SchedulerKey())
-			if err = utils.RetryFunc(5, func() error {
-				return a.SetTaskNotRunning(plan)
+			if err = rego.Retry(func() error {
+				return a.SetTaskNotRunning(plan, result)
 			}); err != nil {
+				a.Warning(warning.WarningData{
+					Type:      warning.WarningTypeTask,
+					AgentIP:   a.localip,
+					TaskName:  plan.Task.Name,
+					ProjectID: plan.Task.ProjectID,
+					Data:      "变更任务运行状态失败",
+				})
 				a.logger.Errorf("task: %s, id: %s, failed to change running status, the task is finished, error: %v",
 					plan.Task.Name, plan.Task.TaskID, err)
 			}
 		}()
 
-		if err = utils.RetryFunc(5, func() error {
+		if err = rego.Retry(func() error {
 			return a.SetTaskRunning(plan)
 		}); err != nil {
+			a.Warning(warning.WarningData{
+				Type:      warning.WarningTypeTask,
+				AgentIP:   a.localip,
+				TaskName:  plan.Task.Name,
+				ProjectID: plan.Task.ProjectID,
+				Data:      "设置任务运行状态失败",
+			})
 			a.logger.Warnf("task: %s, id: %s, change running status error, %v", plan.Task.Name,
 				plan.Task.TaskID, err)
 			return
 		}
 
 		// 执行任务
-		result := a.ExecuteTask(taskExecuteInfo)
+		result = a.ExecuteTask(taskExecuteInfo)
 		// 执行结束后 返回给scheduler
 		a.scheduler.PushTaskResult(result)
 	})

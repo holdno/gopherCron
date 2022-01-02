@@ -142,7 +142,7 @@ func (a *app) HandleWebHook(projectID int64, taskID string, types string, tmpID 
 			if err != nil {
 				return err
 			}
-			return errors.NewError(resp.StatusCode, "回调响应失败", "failed")
+			return errors.NewError(resp.StatusCode, "回调响应失败")
 		}
 		return nil
 	})

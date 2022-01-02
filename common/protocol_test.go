@@ -11,7 +11,7 @@ func Test_JSON_Unmarshal(t *testing.T) {
 		Name:      "test",
 		ProjectID: 1,
 		FlowInfo: &WorkflowInfo{
-			WorkflowID: "workflowid",
+			WorkflowID: 1,
 		},
 	}
 

@@ -47,11 +47,10 @@ func (e *Error) IsTypeOf(code int) bool {
 }
 
 // NewError 新建一个error对象
-func NewError(code int, msg, msgEn string) Error {
-	return Error{
+func NewError(code int, msg string) *Error {
+	return &Error{
 		Code:  code,
 		Msg:   msg,
-		MsgEn: msgEn,
 	}
 }
 

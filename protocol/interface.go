@@ -11,6 +11,7 @@ import (
 	"github.com/holdno/gopherCron/utils"
 
 	"github.com/coreos/etcd/clientv3"
+	recipe "github.com/coreos/etcd/contrib/recipes"
 )
 
 type EtcdManager interface {
@@ -29,7 +30,7 @@ type comm struct {
 
 type CommonInterface interface {
 	SetTaskRunning(plan *common.TaskSchedulePlan) error
-	SetTaskNotRunning(plan *common.TaskSchedulePlan) error
+	SetTaskNotRunning(plan *common.TaskSchedulePlan, result *common.TaskExecuteResult) error
 	SaveTask(task *common.TaskInfo, opts ...clientv3.OpOption) (*common.TaskInfo, error)
 	GetTask(projectID int64, taskID string) (*common.TaskInfo, error)
 	TemporarySchedulerTask(task *common.TaskInfo) error
@@ -42,10 +43,19 @@ func NewComm(etcd EtcdManager) CommonInterface {
 
 type RunningManager interface {
 	SetTaskRunning(kv clientv3.KV, plan *common.TaskSchedulePlan) error
-	SetTaskNotRunning(kv clientv3.KV, plan *common.TaskSchedulePlan) error
+	SetTaskNotRunning(kv clientv3.KV, plan *common.TaskSchedulePlan, result *common.TaskExecuteResult) error
 }
 
 var runningManager = make(map[common.PlanType]RunningManager)
+
+func InitRunningManager(queue *recipe.Queue) {
+	runningManager[common.NormalPlan] = &defaultRunningManager{
+		queue: queue,
+	}
+	runningManager[common.WorkflowPlan] = &workflowRunningManager{
+		queue: queue,
+	}
+}
 
 func (a *comm) SetTaskRunning(plan *common.TaskSchedulePlan) error {
 	rm, exist := runningManager[plan.Type]
@@ -55,12 +65,12 @@ func (a *comm) SetTaskRunning(plan *common.TaskSchedulePlan) error {
 	return rm.SetTaskRunning(a.etcd.KV(), plan)
 }
 
-func (a *comm) SetTaskNotRunning(plan *common.TaskSchedulePlan) error {
+func (a *comm) SetTaskNotRunning(plan *common.TaskSchedulePlan, result *common.TaskExecuteResult) error {
 	rm, exist := runningManager[plan.Type]
 	if !exist {
 		rm = &defaultRunningManager{}
 	}
-	return rm.SetTaskNotRunning(a.etcd.KV(), plan)
+	return rm.SetTaskNotRunning(a.etcd.KV(), plan, result)
 }
 
 // SaveTask save task to etcd
@@ -127,11 +137,6 @@ func (a *comm) SaveTask(task *common.TaskInfo, opts ...clientv3.OpOption) (*comm
 	return oldTask, nil
 }
 
-// TemporarySchedulerTaskWithResult 临时调度任务 并返回调度结果
-func (a *comm) TemporarySchedulerTaskWithResult(task *common.TaskInfo) (interface{}, error) {
-	a.TemporarySchedulerTask(task)
-}
-
 // TemporarySchedulerTask 临时调度任务
 func (a *comm) TemporarySchedulerTask(task *common.TaskInfo) error {
 	var (
@@ -151,7 +156,11 @@ func (a *comm) TemporarySchedulerTask(task *common.TaskInfo) error {
 	}
 
 	// build etcd save key
-	schedulerKey = common.BuildSchedulerKey(task.ProjectID, task.TaskID)
+	if task.FlowInfo != nil {
+		schedulerKey = common.BuildWorkflowSchedulerKey(task.FlowInfo.WorkflowID, task.ProjectID, task.TaskID)
+	} else {
+		schedulerKey = common.BuildSchedulerKey(task.ProjectID, task.TaskID)
+	}
 
 	ctx, _ = utils.GetContextWithTimeout()
 	// make lease to notify worker
@@ -219,4 +228,24 @@ const (
 
 func (a *comm) GetVersion() string {
 	return version
+}
+
+const (
+	QueueItemV1 = "v1"
+)
+
+type TaskFinishedQueueItemV1 struct {
+	TaskID     string          `json:"task_id"`
+	ProjectID  int64           `json:"project_id"`
+	Status     string          `json:"status"`
+	TaskType   common.PlanType `json:"task_type"`
+	WorkflowID int64           `json:"workflow_id"`
+	StartTime  int64           `json:"start_time"`
+	EndTime    int64           `json:"end_time"`
+	TmpID      string          `json:"tmp_id"`
+}
+
+type TaskFinishedQueueContent struct {
+	Version string          `json:"version"`
+	Data    json.RawMessage `json:"data"`
 }

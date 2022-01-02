@@ -56,11 +56,14 @@ func (s *SqlProvider) CheckStores() {
 }
 
 type SqlProviderStores struct {
-	User             store.UserStore
-	Project          store.ProjectStore
-	ProjectRelevance store.ProjectRelevanceStore
-	TaskLog          store.TaskLogStore
-	WebHook          store.TaskWebHookStore
+	User                  store.UserStore
+	Project               store.ProjectStore
+	ProjectRelevance      store.ProjectRelevanceStore
+	TaskLog               store.TaskLogStore
+	WebHook               store.TaskWebHookStore
+	Workflow              store.WorkflowStore
+	WorkflowTask          store.WorkflowTaskStore
+	UserWorkflowRelevance store.UserWorkflowRelevanceStore
 }
 
 func MustSetup(conf *config.MysqlConf, logger *logrus.Logger, install bool) SqlStore {
@@ -76,6 +79,10 @@ func MustSetup(conf *config.MysqlConf, logger *logrus.Logger, install bool) SqlS
 	provider.stores.TaskLog = NewTaskLogStore(provider)
 	provider.stores.ProjectRelevance = NewProjectRelevanceStore(provider)
 	provider.stores.WebHook = NewWebHookStore(provider)
+	provider.stores.Workflow = NewWorkflowStore(provider)
+	provider.stores.WorkflowTask = NewWorkflowTaskStore(provider)
+	provider.stores.UserWorkflowRelevance = NewUserWorkflowRelevanceStore(provider)
+
 	provider.CheckStores()
 
 	if install {
@@ -100,6 +107,18 @@ func MustSetup(conf *config.MysqlConf, logger *logrus.Logger, install bool) SqlS
 		}).Info("admin user created")
 	}
 	return provider
+}
+
+func (s *SqlProvider) UserWorkflowRelevance() store.UserWorkflowRelevanceStore {
+	return s.stores.UserWorkflowRelevance
+}
+
+func (s *SqlProvider) Workflow() store.WorkflowStore {
+	return s.stores.Workflow
+}
+
+func (s *SqlProvider) WorkflowTask() store.WorkflowTaskStore {
+	return s.stores.WorkflowTask
 }
 
 func (s *SqlProvider) User() store.UserStore {
@@ -167,6 +186,9 @@ type SqlStore interface {
 	ProjectRelevance() store.ProjectRelevanceStore
 	TaskLog() store.TaskLogStore
 	WebHook() store.TaskWebHookStore
+	Workflow() store.WorkflowStore
+	WorkflowTask() store.WorkflowTaskStore
+	UserWorkflowRelevance() store.UserWorkflowRelevanceStore
 	BeginTx() *gorm.DB
 	Install()
 	Shutdown()

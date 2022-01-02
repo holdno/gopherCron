@@ -75,3 +75,34 @@ type WebHookBody struct {
 	RequestTime int64  `json:"request_time" form:"request_time"`
 	Sign        string `json:"sign,omitempty" form:"sign"`
 }
+
+type Workflow struct {
+	ID         int64  `json:"id" gorm:"column:id;pirmary_key;auto_increment"`
+	Title      string `json:"title" gorm:"column:title;type:varchar(100);not null;comment:'flow标题'"`
+	Remark     string `json:"remark" gorm:"column:remark;type:text;not null;comment:'flow详细介绍'"`
+	Cron       string `json:"cron" gorm:"column:cron;type:varchar(20);not null;comment:'cron表达式'"`
+	Status     int    `json:"status" gorm:"column:status;type:tinyint(1);not null;default:2;comment:'workflow状态，1启用2暂停'"`
+	CreateTime int64  `json:"create_time" gorm:"column:create_time;type:int(11);not null;comment:'创建时间'"`
+}
+
+type GetWorkflowListOptions struct {
+	Title string
+	IDs   []int64
+}
+
+type WorkflowTask struct {
+	ID                  int64  `json:"id" gorm:"column:id;pirmary_key;auto_increment"`
+	WorkflowID          int64  `json:"workflow_id" gorm:"column:workflow_id;type:int(11);not null;index:workflow_id;comment:'关联workflow id'"`
+	TaskID              string `json:"task_id" gorm:"column:task_id;type:varchar(50);not null;index:task_id;comment:'task id'"`
+	ProjectID           int64  `json:"project_id" gorm:"column:project_id;type:int(11);not null;index:project_id;comment:'project id'"`
+	DependencyTaskID    string `json:"dependency_task_id" gorm:"column:dependency_task_id;not null;type:varchar(50);default:'';index:dependency_task_id;"`
+	DependencyProjectID int64  `json:"dependency_project_id" gorm:"column:dependency_project_id;not null;type:int(11);default:'';index:dependency_project_id;comment:'依赖任务的项目id'"`
+	CreateTime          int64  `json:"create_time" gorm:"column:create_time;type:int(11);not null;comment:'创建时间'"`
+}
+
+type UserWorkflowRelevance struct {
+	ID         int64 `json:"id" gorm:"column:id;pirmary_key;auto_increment"`
+	UserID     int64 `json:"user_id" gorm:"column:user_id;type:int(11);not null;index:user_id;comment:'关联用户id'"`
+	WorkflowID int64 `json:"workflow_id" gorm:"column:workflow_id;type:int(11);not null;index:workflow_id;comment:'关联workflow id'"`
+	CreateTime int64 `json:"create_time" gorm:"column:create_time;type:int(11);not null;comment:'创建时间'"`
+}

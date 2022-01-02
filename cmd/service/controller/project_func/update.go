@@ -11,9 +11,9 @@ import (
 )
 
 type UpdateRequest struct {
-	ProjectID int64  `form:"project_id" binding:"required"`
-	Title     string `form:"title" binding:"required"`
-	Remark    string `form:"remark"`
+	ProjectID int64  `json:"project_id" form:"project_id" binding:"required"`
+	Title     string `json:"title" form:"title" binding:"required"`
+	Remark    string `json:"remark" form:"remark"`
 }
 
 // Update 更新项目信息

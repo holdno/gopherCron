@@ -14,6 +14,25 @@ import (
 	"github.com/coreos/etcd/mvcc/mvccpb"
 )
 
+func getTaskDetail(kv clientv3.KV, projectID int64, taskID string) (*common.TaskInfo, error) {
+	taskKey := common.BuildKey(projectID, taskID)
+	ctx, _ := utils.GetContextWithTimeout()
+	resp, err := kv.Get(ctx, taskKey)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.Count == 0 {
+		return nil, nil
+	}
+
+	var task common.TaskInfo
+	if err = json.Unmarshal(resp.Kvs[0].Value, &task); err != nil {
+		return nil, err
+	}
+	return &task, nil
+}
+
 // GetTaskList 获取任务列表
 func (a *app) GetTaskList(projectID int64) ([]*common.TaskInfo, error) {
 	var (

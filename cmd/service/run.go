@@ -116,7 +116,7 @@ func waitingShutdown(srv app.App) {
 		// 关闭http服务
 		err := shutdownHTTPServer()
 		if err != nil {
-			fmt.Println(os.Stderr, "http server graceful shutdown failed", err)
+			fmt.Println("http server graceful shutdown failed", err)
 		} else {
 			fmt.Println(utils.GetCurrentTimeText(), "http server graceful shutdown successfully.")
 		}

@@ -31,7 +31,7 @@ type TaskInfo struct {
 }
 
 type WorkflowInfo struct {
-	WorkflowID string `json:"workflow_id"`
+	WorkflowID int64  `json:"workflow_id"`
 	TmpID      string `json:"tmp_id"`
 }
 
@@ -86,10 +86,11 @@ type TaskResultLog struct {
 
 // ETCD_PREFIX topic prefix  default: /cron
 var (
-	ETCD_PREFIX = "/cron"
-	TEMPORARY   = "t_scheduler"
-	WORKFLOW    = "t_flow"
-	STATUS      = "t_status"
+	ETCD_PREFIX  = "/cron"
+	TEMPORARY    = "t_scheduler"
+	WORKFLOW     = "t_flow"
+	WORKFLOW_ACK = "t_flow_ack"
+	STATUS       = "t_status"
 )
 
 // BuildTaskUpdateKey 任务更新锁的key
@@ -120,8 +121,12 @@ func BuildTaskStatusKey(projectID int64, taskID string) string {
 	return fmt.Sprintf("%s/%d/%s/%s", ETCD_PREFIX, projectID, taskID, STATUS)
 }
 
-func BuildWorkflowTaskStatusKey(projectID int64, workflowID, taskID string) string {
-	return fmt.Sprintf("%s/%d/%s/%s/%s", ETCD_PREFIX, projectID, WORKFLOW, workflowID, taskID)
+func BuildWorkflowTaskStatusKey(workflowID, projectID int64, taskID string) string {
+	return fmt.Sprintf("%s/%d/%s", BuildWorkflowTaskStatusKeyPrefix(workflowID), projectID, taskID)
+}
+
+func BuildWorkflowTaskStatusKeyPrefix(workflowID int64) string {
+	return fmt.Sprintf("%s/%s/%d/", ETCD_PREFIX, WORKFLOW, workflowID)
 }
 
 // BuildSchedulerKey 临时调度的key
@@ -130,8 +135,21 @@ func BuildSchedulerKey(projectID int64, taskID string) string {
 }
 
 // BuildWorkflowSchedulerKey workflow调度的key
-func BuildWorkflowSchedulerKey(projectID int64, taskID string) string {
-	return fmt.Sprintf("%s/%d/%s/%s", ETCD_PREFIX, projectID, WORKFLOW, taskID)
+func BuildWorkflowSchedulerKey(workflowID, projectID int64, taskID string) string {
+	return fmt.Sprintf("%s/%d/%s/%d/%s", ETCD_PREFIX, projectID, WORKFLOW, workflowID, taskID)
+}
+
+// BuildWorkflowSchedulerKey agent返回接收调度确认的key
+func BuildWorkflowAckKey(workflowID, projectID int64, taskID, tmpID string) string {
+	return fmt.Sprintf("%s/%d/%s/%d/%s/%s", ETCD_PREFIX, projectID, WORKFLOW_ACK, workflowID, taskID, tmpID)
+}
+
+func BuildWorkflowQueuePrefixKey() string {
+	return fmt.Sprintf("%s/%s/%s/", ETCD_PREFIX, "queue", WORKFLOW)
+}
+
+func BuildWorkflowQueueProjectKey(projectID int64) string {
+	return fmt.Sprintf("%s%d/", BuildWorkflowQueuePrefixKey(), projectID)
 }
 
 // IsTemporaryKey 检测是否为临时调度key
@@ -184,9 +202,14 @@ func BuildMonitorKey(ip string) string {
 	return ETCD_PREFIX + "/monitor/" + ip
 }
 
+// BuildWorkflowPlanKey 构建
+func BuildWorkflowPlanKey(workflowID int64) string {
+	return fmt.Sprintf("%s/workflow_plan/%d", ETCD_PREFIX, workflowID)
+}
+
 // BuildTableKey 构建scheduler 关系表中的key
 func (t *TaskInfo) SchedulerKey() string {
-	return fmt.Sprintf("%d%s", t.ProjectID, t.TaskID)
+	return fmt.Sprintf("%d_%s", t.ProjectID, t.TaskID)
 }
 
 func Unmarshal(value []byte) (*TaskInfo, error) {
@@ -274,4 +297,15 @@ func BuildTaskExecuteInfo(plan *TaskSchedulePlan) *TaskExecutingInfo {
 	}
 
 	return info
+}
+
+type AckResponse struct {
+	Version string          `json:"version"`
+	Data    json.RawMessage `json:"data"`
+}
+
+type AckResponseV1 struct {
+	Type     string `json:"ack"`
+	ClientIP string `json:"client_ip"`
+	TmpID    string `json:"tmp_id"`
 }

@@ -40,7 +40,7 @@ func Connect(config *config.EtcdConf) (*TaskManager, error) {
 		etcdConf clientv3.Config
 		client   *clientv3.Client
 		err      error
-		errObj   errors.Error
+		errObj   *errors.Error
 	)
 
 	common.ETCD_PREFIX = config.Prefix
@@ -55,7 +55,7 @@ func Connect(config *config.EtcdConf) (*TaskManager, error) {
 
 	if client, err = clientv3.New(etcdConf); err != nil {
 		errObj = errors.NewError(http.StatusInternalServerError,
-			"[api_context - InitAPIContext] etcd.Connect get error:"+err.Error(), "")
+			"[api_context - InitAPIContext] etcd.Connect get error:"+err.Error())
 		return nil, errObj
 	}
 
