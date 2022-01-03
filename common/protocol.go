@@ -122,7 +122,7 @@ func BuildTaskStatusKey(projectID int64, taskID string) string {
 }
 
 func BuildWorkflowTaskStatusKey(workflowID, projectID int64, taskID string) string {
-	return fmt.Sprintf("%s/%d/%s", BuildWorkflowTaskStatusKeyPrefix(workflowID), projectID, taskID)
+	return fmt.Sprintf("%s%d/%s", BuildWorkflowTaskStatusKeyPrefix(workflowID), projectID, taskID)
 }
 
 func BuildWorkflowTaskStatusKeyPrefix(workflowID int64) string {
@@ -248,6 +248,7 @@ type TaskEvent struct {
 }
 
 func BuildTaskEvent(eventType int, task *TaskInfo) *TaskEvent {
+	fmt.Println(eventType, "build task event", *task)
 	return &TaskEvent{
 		EventType: eventType,
 		Task:      task,

@@ -52,14 +52,14 @@ type TaskLogStore interface {
 
 type UserWorkflowRelevanceStore interface {
 	Commons
-	Create(tx *gorm.DB, data common.UserWorkflowRelevance) error
+	Create(tx *gorm.DB, data *common.UserWorkflowRelevance) error
 	GetUserWorkflows(userID int64) ([]common.UserWorkflowRelevance, error)
 	GetUserWorkflowRelevance(userID int64, workflowID int64) (*common.UserWorkflowRelevance, error)
 }
 
 type WorkflowTaskStore interface {
 	Commons
-	Create(tx *gorm.DB, data common.WorkflowTask) error
+	Create(tx *gorm.DB, data *common.WorkflowTask) error
 	GetList(workflowID int64) ([]common.WorkflowTask, error)
 	GetTaskList(workflowID int64, taskID string) ([]common.WorkflowTask, error)
 	Delete(tx *gorm.DB, id int64) error

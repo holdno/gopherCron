@@ -32,6 +32,7 @@ func NewDefaultWarner(logger *logrus.Logger) *warning {
 }
 
 func (a *warning) Warning(data WarningData) error {
+
 	if data.Type == WarningTypeSystem {
 		a.logger.Error(data.Data)
 	} else {

@@ -1,9 +1,5 @@
 package panicgroup
 
-import (
-	"fmt"
-)
-
 type PanicGroup interface {
 	Go(f func())
 }
@@ -14,11 +10,11 @@ type panicgroup struct {
 
 func (p *panicgroup) Go(f func()) {
 	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				p.err <- fmt.Errorf("%+v", r)
-			}
-		}()
+		// defer func() {
+		// 	if r := recover(); r != nil {
+		// 		p.err <- fmt.Errorf("%+v", r)
+		// 	}
+		// }()
 		f()
 	}()
 }

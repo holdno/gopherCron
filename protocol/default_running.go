@@ -12,7 +12,7 @@ import (
 )
 
 type defaultRunningManager struct {
-	queue *recipe.Queue
+	queue map[int64]*recipe.Queue
 }
 
 func (d *defaultRunningManager) SetTaskRunning(kv clientv3.KV, plan *common.TaskSchedulePlan) error {
@@ -47,7 +47,7 @@ func (d *defaultRunningManager) SetTaskNotRunning(kv clientv3.KV, plan *common.T
 		return errObj
 	}
 
-	err = d.queue.Enqueue(generateTaskFinishedResultV1(TaskFinishedQueueItemV1{
+	err = d.queue[plan.Task.ProjectID].Enqueue(generateTaskFinishedResultV1(TaskFinishedQueueItemV1{
 		ProjectID: plan.Task.ProjectID,
 		TaskID:    plan.Task.TaskID,
 		Status:    status,

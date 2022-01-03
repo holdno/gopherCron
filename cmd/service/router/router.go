@@ -66,7 +66,8 @@ func SetupRoute(r *gin.Engine, conf *config.DeployConf) {
 			workflow.POST("/delete", controller.DeleteWorkflow)
 			workflow.POST("/update", controller.UpdateWorkflow)
 			workflow.POST("/task/create", controller.CreateWorkflowTask)
-			
+			workflow.GET("/list", controller.GetWorkflowList)
+
 		}
 
 		worker := api.Group("/client")

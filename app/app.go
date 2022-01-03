@@ -87,6 +87,7 @@ type App interface {
 	Close()
 	GetVersion() string
 
+	GetEtcdClient() *clientv3.Client
 	Go(f func())
 	warning.Warner
 }
@@ -109,6 +110,10 @@ type app struct {
 	panicgroup.PanicGroup
 	protocol.CommonInterface
 	warning.Warner
+}
+
+func (a *app) GetEtcdClient() *clientv3.Client {
+	return a.etcd.Client()
 }
 
 type AppOptions func(a *app)

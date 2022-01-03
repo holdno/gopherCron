@@ -57,6 +57,12 @@ func (a *client) newWatchHandle() func(resp clientv3.WatchResponse, projectID in
 				if common.IsTemporaryKey(string(watchEvent.Kv.Key)) {
 					continue
 				}
+				if common.IsWorkflowKey(string(watchEvent.Kv.Key)) {
+					continue
+				}
+				if common.IsStatusKey(string(watchEvent.Kv.Key)) {
+					continue
+				}
 				taskID = common.ExtractTaskID(projectID, string(watchEvent.Kv.Key))
 				// 构建一个delete event
 				task = &common.TaskInfo{TaskID: taskID, ProjectID: projectID}

@@ -25,7 +25,8 @@ type EtcdManager interface {
 }
 
 type comm struct {
-	etcd EtcdManager
+	etcd     EtcdManager
+	queueMap map[int64]*recipe.Queue
 }
 
 type CommonInterface interface {
@@ -41,6 +42,25 @@ func NewComm(etcd EtcdManager) CommonInterface {
 	return &comm{etcd: etcd}
 }
 
+type ClientEtcdManager interface {
+	SetTaskRunning(plan *common.TaskSchedulePlan) error
+	SetTaskNotRunning(plan *common.TaskSchedulePlan, result *common.TaskExecuteResult) error
+	TemporarySchedulerTask(task *common.TaskInfo) error
+	GetVersion() string
+}
+
+func NewClientEtcdManager(etcd EtcdManager, projects []int64) ClientEtcdManager {
+	m := &comm{etcd: etcd, queueMap: make(map[int64]*recipe.Queue)}
+
+	for _, v := range projects {
+		m.queueMap[v] = recipe.NewQueue(etcd.Client(), common.BuildWorkflowQueueProjectKey(v))
+	}
+
+	InitRunningManager(m.queueMap)
+
+	return m
+}
+
 type RunningManager interface {
 	SetTaskRunning(kv clientv3.KV, plan *common.TaskSchedulePlan) error
 	SetTaskNotRunning(kv clientv3.KV, plan *common.TaskSchedulePlan, result *common.TaskExecuteResult) error
@@ -48,7 +68,7 @@ type RunningManager interface {
 
 var runningManager = make(map[common.PlanType]RunningManager)
 
-func InitRunningManager(queue *recipe.Queue) {
+func InitRunningManager(queue map[int64]*recipe.Queue) {
 	runningManager[common.NormalPlan] = &defaultRunningManager{
 		queue: queue,
 	}
@@ -60,7 +80,7 @@ func InitRunningManager(queue *recipe.Queue) {
 func (a *comm) SetTaskRunning(plan *common.TaskSchedulePlan) error {
 	rm, exist := runningManager[plan.Type]
 	if !exist {
-		rm = &defaultRunningManager{}
+		rm = runningManager[common.NormalPlan]
 	}
 	return rm.SetTaskRunning(a.etcd.KV(), plan)
 }
@@ -68,7 +88,7 @@ func (a *comm) SetTaskRunning(plan *common.TaskSchedulePlan) error {
 func (a *comm) SetTaskNotRunning(plan *common.TaskSchedulePlan, result *common.TaskExecuteResult) error {
 	rm, exist := runningManager[plan.Type]
 	if !exist {
-		rm = &defaultRunningManager{}
+		rm = runningManager[common.NormalPlan]
 	}
 	return rm.SetTaskNotRunning(a.etcd.KV(), plan, result)
 }

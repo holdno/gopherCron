@@ -35,7 +35,7 @@ type client struct {
 
 	panicgroup.PanicGroup
 	ClientTaskReporter
-	protocol.CommonInterface
+	protocol.ClientEtcdManager
 	warning.Warner
 }
 
@@ -80,7 +80,7 @@ func (agent *client) loadConfigAndSetupAgentFunc() func() {
 				panic(err)
 			}
 
-			agent.CommonInterface = protocol.NewComm(agent.etcd)
+			agent.ClientEtcdManager = protocol.NewClientEtcdManager(agent.etcd, cfg.Etcd.Projects)
 
 			clusterID, err := agent.etcd.Inc(cfg.Etcd.Prefix + common.CLUSTER_AUTO_INDEX)
 			if err != nil {

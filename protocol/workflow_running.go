@@ -1,8 +1,9 @@
 package protocol
 
 import (
+	"context"
 	"encoding/json"
-	"time"
+	"fmt"
 
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/errors"
@@ -13,7 +14,7 @@ import (
 )
 
 type workflowRunningManager struct {
-	queue *recipe.Queue
+	queue map[int64]*recipe.Queue
 }
 
 type WorkflowTaskStates struct {
@@ -34,53 +35,27 @@ type WorkflowTaskScheduleRecord struct {
 }
 
 func (d *workflowRunningManager) SetTaskRunning(kv clientv3.KV, plan *common.TaskSchedulePlan) error {
-	key := common.BuildWorkflowTaskStatusKey(plan.Task.FlowInfo.WorkflowID, plan.Task.ProjectID, plan.Task.TaskID)
-	ctx, _ := utils.GetContextWithTimeout()
-	resp, err := kv.Get(ctx, key)
-	if err != nil {
-		errObj := errors.ErrInternalError
-		errObj.Log = "[Etcd - workflowRunningManager - SetTaskRunning] etcd client kv get error:" + err.Error()
-		return errObj
+	// todo ack
+	ackKey := common.BuildWorkflowAckKey(plan.Task.FlowInfo.WorkflowID, plan.Task.ProjectID, plan.Task.TaskID, plan.TmpID)
+	data, _ := json.Marshal(common.AckResponseV1{
+		ClientIP: "",
+		Type:     "success",
+		TmpID:    plan.TmpID,
+	})
+	ackData, _ := json.Marshal(common.AckResponse{
+		Version: common.ACK_RESPONSE_V1,
+		Data:    data,
+	})
+	if _, err := kv.Put(context.TODO(), ackKey, string(ackData)); err != nil {
+		return err
 	}
-
-	var states []byte
-	if resp.Count == 0 {
-		states, _ = json.Marshal(WorkflowTaskStates{
-			ProjectID:     plan.Task.ProjectID,
-			TaskID:        plan.Task.TaskID,
-			WorkflowID:    plan.Task.FlowInfo.WorkflowID,
-			CurrentStatus: common.TASK_STATUS_RUNNING_V2,
-			ScheduleCount: 1,
-			ScheduleRecords: []WorkflowTaskScheduleRecord{{
-				TmpID:     plan.TmpID,
-				Status:    common.TASK_STATUS_RUNNING_V2,
-				StartTime: time.Now().Unix(),
-			}},
-		})
-	} else {
-		var workflowTaskStates WorkflowTaskStates
-		if err = json.Unmarshal(resp.Kvs[0].Value, &workflowTaskStates); err != nil {
-			errObj := errors.ErrInternalError
-			errObj.Log = "[Etcd - workflowRunningManager - SetTaskRunning] json unmarshal workflow task running result error:" + err.Error()
-			return nil
-		}
-
-		workflowTaskStates.CurrentStatus = common.TASK_STATUS_RUNNING_V2
-		workflowTaskStates.ScheduleCount += 1
-		workflowTaskStates.ScheduleRecords = append(workflowTaskStates.ScheduleRecords, WorkflowTaskScheduleRecord{
-			TmpID:     plan.TmpID,
-			Status:    common.TASK_STATUS_RUNNING_V2,
-			StartTime: time.Now().Unix(),
-		})
-
-		states, _ = json.Marshal(workflowTaskStates)
-	}
-
-	if _, err = kv.Put(ctx, key, string(states)); err != nil {
-		errObj := errors.ErrInternalError
-		errObj.Log = "[Etcd - workflowRunningManager - SetTaskRunning] etcd client kv put error:" + err.Error()
-		return errObj
-	}
+	// todo warning
+	// a.Warner.Warning(warning.WarningData{
+	// 	Type:      warning.WarningTypeTask,
+	// 	TaskName:  taskSchedulePlan.Task.Name,
+	// 	ProjectID: taskSchedulePlan.Task.ProjectID,
+	// 	Data:      fmt.Sprintf("workflow任务执行响应失败, %s", err.Error()),
+	// })
 	return nil
 }
 
@@ -108,6 +83,7 @@ func GetWorkflowTaskStates(kv clientv3.KV, key string) (*WorkflowTaskStates, err
 }
 
 func (d *workflowRunningManager) SetTaskNotRunning(kv clientv3.KV, plan *common.TaskSchedulePlan, result *common.TaskExecuteResult) error {
+	fmt.Println("result", *result)
 	var status string
 	if result == nil || result.Err != "" {
 		// 未执行，发生未知错误
@@ -116,30 +92,7 @@ func (d *workflowRunningManager) SetTaskNotRunning(kv clientv3.KV, plan *common.
 		status = common.TASK_STATUS_DONE_V2
 	}
 
-	key := common.BuildWorkflowTaskStatusKey(plan.Task.FlowInfo.WorkflowID, plan.Task.ProjectID, plan.Task.TaskID)
-	workflowTaskStates, err := GetWorkflowTaskStates(kv, key)
-	if err != nil {
-		return err
-	}
-
-	workflowTaskStates.CurrentStatus = status
-	for _, v := range workflowTaskStates.ScheduleRecords {
-		if v.TmpID == plan.TmpID {
-			v.Status = status
-			v.EndTime = result.EndTime.Unix()
-			break
-		}
-	}
-
-	ctx, _ := utils.GetContextWithTimeout()
-	states, _ := json.Marshal(workflowTaskStates)
-	if _, err = kv.Put(ctx, key, string(states)); err != nil {
-		errObj := errors.ErrInternalError
-		errObj.Log = "[Etcd - SetTaskNotRunning] etcd client kv put error:" + err.Error()
-		return errObj
-	}
-
-	err = d.queue.Enqueue(generateTaskFinishedResultV1(TaskFinishedQueueItemV1{
+	err := d.queue[plan.Task.ProjectID].Enqueue(generateTaskFinishedResultV1(TaskFinishedQueueItemV1{
 		ProjectID:  plan.Task.ProjectID,
 		TaskID:     plan.Task.TaskID,
 		WorkflowID: plan.Task.FlowInfo.WorkflowID,

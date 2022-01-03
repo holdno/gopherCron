@@ -28,11 +28,11 @@ func (s *userWorkflowRelevanceStore) AutoMigrate() {
 	s.provider.Logger().Infof("%s, complete initialization", s.GetTable())
 }
 
-func (s *userWorkflowRelevanceStore) Create(tx *gorm.DB, data common.UserWorkflowRelevance) error {
+func (s *userWorkflowRelevanceStore) Create(tx *gorm.DB, data *common.UserWorkflowRelevance) error {
 	if tx == nil {
 		tx = s.GetMaster()
 	}
-	return tx.Table(s.GetTable()).Create(data).Error
+	return tx.Table(s.GetTable()).Create(&data).Error
 }
 
 func (s *userWorkflowRelevanceStore) GetUserWorkflows(userID int64) ([]common.UserWorkflowRelevance, error) {

@@ -46,7 +46,7 @@ type CreateWorkflowTaskRequest struct {
 }
 
 type WorkflowTaskItem struct {
-	Task         app.WorkflowTaskInfo   `json:"task_id" form:"task_id" binding:"required"`
+	Task         app.WorkflowTaskInfo   `json:"task" form:"task" binding:"required"`
 	Dependencies []app.WorkflowTaskInfo `json:"dependencies" form:"dependencies"`
 }
 

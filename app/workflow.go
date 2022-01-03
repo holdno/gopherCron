@@ -42,7 +42,7 @@ func (a *app) CreateWorkflow(userID int64, data common.Workflow) error {
 		return errors.NewError(errors.CodeInternalError, "创建workflow失败").WithLog(err.Error())
 	}
 
-	if err = a.store.UserWorkflowRelevance().Create(tx, common.UserWorkflowRelevance{
+	if err = a.store.UserWorkflowRelevance().Create(tx, &common.UserWorkflowRelevance{
 		UserID:     userID,
 		WorkflowID: data.ID,
 		CreateTime: time.Now().Unix(),
@@ -83,24 +83,33 @@ func (a *app) CreateWorkflowTask(userID, workflowID int64, taskList []CreateWork
 		return errors.NewError(errors.CodeInternalError, "创建workflow 任务信息失败").WithLog(err.Error())
 	}
 
-	workflowTaskMap := make(map[WorkflowTaskInfo][]common.WorkflowTask)
-	for _, v := range workflowTaskList {
-		key := WorkflowTaskInfo{v.ProjectID, v.TaskID}
-		workflowTaskMap[key] = append(workflowTaskMap[key], v)
-	}
-
-	newTaskDependenciesMap := make(map[WorkflowTaskInfo][]WorkflowTaskInfo)
-	for _, v := range taskList {
-		newTaskDependenciesMap[WorkflowTaskInfo{v.ProjectID, v.TaskID}] = v.Dependencies
-	}
-
 	var needToDelete []int64
+	for _, v := range workflowTaskList {
+		needToDelete = append(needToDelete, v.ID)
+	}
 	var needToCreate []common.WorkflowTask
-	for taskID, v := range workflowTaskMap {
-		dependencies := newTaskDependenciesMap[taskID]
-		_d, _c := disposeWorkflowTaskData(v, taskID, dependencies)
-		needToDelete = append(needToDelete, _d...)
-		needToCreate = append(needToCreate, _c...)
+	for _, v := range taskList {
+		if len(v.Dependencies) > 0 {
+			for _, vv := range v.Dependencies {
+				needToCreate = append(needToCreate, common.WorkflowTask{
+					WorkflowID:          workflowID,
+					TaskID:              v.TaskID,
+					ProjectID:           v.ProjectID,
+					DependencyTaskID:    vv.TaskID,
+					DependencyProjectID: vv.ProjectID,
+					CreateTime:          time.Now().Unix(),
+				})
+			}
+		} else {
+			needToCreate = append(needToCreate, common.WorkflowTask{
+				WorkflowID:          workflowID,
+				TaskID:              v.TaskID,
+				ProjectID:           v.ProjectID,
+				DependencyTaskID:    "",
+				DependencyProjectID: 0,
+				CreateTime:          time.Now().Unix(),
+			})
+		}
 	}
 
 	tx := a.store.BeginTx()
@@ -116,7 +125,7 @@ func (a *app) CreateWorkflowTask(userID, workflowID int64, taskList []CreateWork
 	}
 
 	for _, v := range needToCreate {
-		if err = a.store.WorkflowTask().Create(tx, v); err != nil {
+		if err = a.store.WorkflowTask().Create(tx, &v); err != nil {
 			return errors.NewError(errors.CodeInternalError, "创建workflow 任务信息失败, 创建任务关联关系失败").WithLog(err.Error())
 		}
 	}
@@ -153,6 +162,17 @@ func disposeWorkflowTaskData(workflowTaskList []common.WorkflowTask, task Workfl
 			ProjectID:           task.ProjectID,
 			DependencyTaskID:    k.TaskID,
 			DependencyProjectID: k.ProjectID,
+			CreateTime:          time.Now().Unix(),
+		})
+	}
+
+	if len(needToCreate) == 0 && len(workflowTaskList) == 0 {
+		needToCreate = append(needToCreate, common.WorkflowTask{
+			WorkflowID:          workflowID,
+			TaskID:              task.TaskID,
+			ProjectID:           task.ProjectID,
+			DependencyTaskID:    "",
+			DependencyProjectID: 0,
 			CreateTime:          time.Now().Unix(),
 		})
 	}
@@ -246,10 +266,13 @@ type workflowRunner struct {
 func NewWorkflowRunner(app App, cli *clientv3.Client) (*workflowRunner, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	runner := &workflowRunner{
-		ctx:            ctx,
-		cancelFunc:     cancel,
-		queue:          recipe.NewQueue(cli, common.BuildWorkflowQueuePrefixKey()),
-		taskResultChan: make(chan string, 10),
+		app:               app,
+		etcd:              app.GetEtcdClient(),
+		ctx:               ctx,
+		cancelFunc:        cancel,
+		queue:             recipe.NewQueue(cli, common.BuildWorkflowQueuePrefixKey()),
+		taskResultChan:    make(chan string, 10),
+		scheduleEventChan: make(chan *common.TaskEvent, 10),
 	}
 
 	list, _, err := app.GetWorkflowList(common.GetWorkflowListOptions{}, 1, 1000)
@@ -296,8 +319,12 @@ type WorkflowPlan struct {
 	planState *PlanState
 }
 
-func (p *WorkflowPlan) Finished() error {
+func (p *WorkflowPlan) Finished(scheduleError error) error {
 	p.planState.Status = common.TASK_STATUS_DONE_V2
+	if scheduleError != nil {
+		p.planState.Status = common.TASK_STATUS_FAIL_V2
+	}
+
 	states, err := getWorkflowAllTaskStates(p.runner.etcd.KV, p.Workflow.ID)
 	if err != nil {
 		return err
@@ -316,6 +343,9 @@ func (p *WorkflowPlan) Finished() error {
 			failedReason.WriteString(taskDetail.Name)
 			failedReason.WriteString(" 任务执行失败\n")
 		}
+	}
+	if scheduleError != nil {
+		failedReason.WriteString(scheduleError.Error() + "\n")
 	}
 
 	p.planState.Reason = failedReason.String()
@@ -353,18 +383,21 @@ func (a *workflowRunner) TryStartPlan(plan *WorkflowPlan) error {
 		return err
 	}
 
+	fmt.Println("can schedule")
 	needToScheduleTasks, finished, err := plan.CanSchedule()
 	if err != nil && err != ErrWorkflowFailed {
 		return err
 	}
 
 	if finished {
-		plan.Finished()
+		plan.Finished(err)
 		return nil
 	}
 
+	fmt.Println("need to schedule", needToScheduleTasks)
 	for _, v := range needToScheduleTasks {
 		a.scheduleEventChan <- common.BuildTaskEvent(common.TASK_EVENT_WORKFLOW_SCHEDULE, plan.Tasks[v])
+		fmt.Println("send schedule event")
 	}
 	return nil
 }
@@ -399,15 +432,23 @@ func (s *WorkflowPlan) CanSchedule() ([]WorkflowTaskInfo, bool, error) {
 		// 检查依赖的任务是否都已结束
 		ok := true
 		for _, check := range deps {
-			states := taskStatesMap[check]
-			if states == nil || states.CurrentStatus != common.TASK_STATUS_DONE_V2 {
-				ok = false
-				break
+			if check.TaskID != "" {
+				states := taskStatesMap[check]
+				if states == nil || states.CurrentStatus != common.TASK_STATUS_DONE_V2 {
+					ok = false
+					break
+				}
 			}
 		}
 		if !ok { // 上游还未跑完
 			finished = false
 			continue
+		}
+
+		if taskStates == nil {
+			taskStates = &WorkflowTaskStates{
+				CurrentStatus: common.TASK_STATUS_NOT_RUNNING_V2,
+			}
 		}
 
 		switch taskStates.CurrentStatus {
@@ -424,9 +465,12 @@ func (s *WorkflowPlan) CanSchedule() ([]WorkflowTaskInfo, bool, error) {
 			finished = false
 			readys = append(readys, task)
 		case common.TASK_STATUS_STARTING_V2: // 异常补救
+			if taskStates.ScheduleCount >= common.WORKFLOW_SCHEDULE_LIMIT {
+				return nil, true, ErrWorkflowFailed
+			}
 			finished = false
 			readys = append(readys, task)
-			if time.Now().Unix()-taskStates.StartTime > 10 {
+			if time.Now().Unix()-taskStates.StartTime > 5 {
 				taskStates.CurrentStatus = common.TASK_STATUS_NOT_RUNNING_V2
 				latestRecord := taskStates.GetLatestScheduleRecord()
 				taskStates.ScheduleRecords = append(taskStates.ScheduleRecords, &WorkflowTaskScheduleRecord{
@@ -434,7 +478,7 @@ func (s *WorkflowPlan) CanSchedule() ([]WorkflowTaskInfo, bool, error) {
 					Status:    common.TASK_STATUS_NOT_RUNNING_V2,
 					EventTime: time.Now().Unix(),
 				})
-				newStates, _ := json.Marshal(states)
+				newStates, _ := json.Marshal(taskStates)
 				ctx, _ := utils.GetContextWithTimeout()
 				if _, err = s.runner.etcd.KV.Put(ctx, common.BuildWorkflowTaskStatusKey(taskStates.WorkflowID, taskStates.ProjectID, taskStates.TaskID), string(newStates)); err != nil {
 					return nil, false, err
@@ -525,6 +569,8 @@ func (a *workflowRunner) SetPlan(data common.Workflow) error {
 		return err
 	}
 
+	fmt.Println("flow tasks", tasks)
+
 	plan := &WorkflowPlan{
 		runner:   a,
 		Workflow: data,
@@ -553,6 +599,9 @@ func (a *workflowRunner) SetPlan(data common.Workflow) error {
 			plan.Tasks[key], err = a.app.GetTask(key.ProjectID, key.TaskID)
 			if err != nil {
 				return err
+			}
+			plan.Tasks[key].FlowInfo = &common.WorkflowInfo{
+				WorkflowID: plan.Workflow.ID,
 			}
 		}
 	}
@@ -603,7 +652,9 @@ func (a *workflowRunner) TrySchedule() time.Duration {
 		if plan.NextTime.Before(now) || plan.NextTime.Equal(now) {
 			// 尝试执行任务
 			// 因为可能上一次任务还没执行结束
-			a.TryStartPlan(plan)
+			if err := a.TryStartPlan(plan); err != nil {
+				fmt.Println("执行workflow失败", err.Error())
+			}
 			plan.NextTime = plan.Expr.Next(now) // 更新下一次执行时间
 		}
 
@@ -686,7 +737,7 @@ func (a *workflowRunner) handleTaskResultV1(data protocol.TaskFinishedQueueItemV
 				next = false
 				plan := a.GetPlan(data.WorkflowID)
 				if plan != nil {
-					plan.Finished()
+					plan.Finished(nil)
 				}
 			}
 			return nil
@@ -715,6 +766,7 @@ func (a *workflowRunner) handleTaskResultV1(data protocol.TaskFinishedQueueItemV
 }
 
 func (a *workflowRunner) handleTaskEvent(event *common.TaskEvent) {
+	fmt.Println("get task event", *event)
 	switch event.EventType {
 	case common.TASK_EVENT_WORKFLOW_SCHEDULE:
 		err := rego.Retry(func() error {
@@ -746,6 +798,11 @@ func (p *WorkflowPlan) IsRunning() (bool, error) {
 			return false, nil
 		}
 		p.planState = states
+	}
+	now := time.Now()
+
+	if now.Unix()-p.planState.LatestTryTime > p.Expr.Next(now).Unix()-now.Unix() {
+		return false, nil
 	}
 	return p.planState.Status == common.TASK_STATUS_RUNNING_V2, nil
 }

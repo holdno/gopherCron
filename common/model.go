@@ -96,7 +96,7 @@ type WorkflowTask struct {
 	TaskID              string `json:"task_id" gorm:"column:task_id;type:varchar(50);not null;index:task_id;comment:'task id'"`
 	ProjectID           int64  `json:"project_id" gorm:"column:project_id;type:int(11);not null;index:project_id;comment:'project id'"`
 	DependencyTaskID    string `json:"dependency_task_id" gorm:"column:dependency_task_id;not null;type:varchar(50);default:'';index:dependency_task_id;"`
-	DependencyProjectID int64  `json:"dependency_project_id" gorm:"column:dependency_project_id;not null;type:int(11);default:'';index:dependency_project_id;comment:'依赖任务的项目id'"`
+	DependencyProjectID int64  `json:"dependency_project_id" gorm:"column:dependency_project_id;not null;type:int(11);default:0;index:dependency_project_id;comment:'依赖任务的项目id'"`
 	CreateTime          int64  `json:"create_time" gorm:"column:create_time;type:int(11);not null;comment:'创建时间'"`
 }
 

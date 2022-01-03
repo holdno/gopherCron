@@ -173,7 +173,6 @@ func (a *client) handleTaskEvent(event *common.TaskEvent) {
 			return
 		}
 		a.TryStartTask(taskSchedulePlan)
-		// todo ack
 	case common.TASK_EVENT_SAVE:
 		// 构建执行计划
 		if event.Task.Status == common.TASK_STATUS_START {
@@ -302,6 +301,7 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) {
 		if err = rego.Retry(func() error {
 			return a.SetTaskRunning(plan)
 		}); err != nil {
+			fmt.Println("errr", err.Error())
 			a.Warning(warning.WarningData{
 				Type:      warning.WarningTypeTask,
 				AgentIP:   a.localip,

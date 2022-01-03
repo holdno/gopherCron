@@ -22,7 +22,9 @@ func scheduleTask(cli *clientv3.Client, taskInfo *common.TaskInfo) error {
 		return err
 	}
 
-	if taskStates != nil && taskStates.CurrentStatus != common.TASK_STATUS_NOT_RUNNING_V2 {
+	if taskStates != nil &&
+		taskStates.CurrentStatus != common.TASK_STATUS_NOT_RUNNING_V2 &&
+		taskStates.CurrentStatus != common.TASK_STATUS_STARTING_V2 {
 		return nil
 	}
 
@@ -229,7 +231,9 @@ func setWorkflowTaskRunning(kv concurrency.STM, taskInfo *common.TaskInfo) error
 func setWorkflowTaskStarting(kv concurrency.STM, taskInfo *common.TaskInfo) error {
 
 	key := common.BuildWorkflowTaskStatusKey(taskInfo.FlowInfo.WorkflowID, taskInfo.ProjectID, taskInfo.TaskID)
+	fmt.Println("starting key:", key)
 	value := kv.Get(key)
+	fmt.Println("get starting key:", string(value))
 	var states []byte
 	if value == "" {
 		states, _ = json.Marshal(WorkflowTaskStates{
@@ -369,7 +373,7 @@ func getWorkflowTasksStates(kv clientv3.KV, prefix string) ([]*WorkflowTaskState
 		if err = json.Unmarshal(v.Value, &workflowTaskStates); err != nil {
 			errObj := errors.ErrInternalError
 			errObj.Log = "[Etcd - getWorkflowTasksStates] json unmarshal workflow task running result error:" + err.Error()
-			return nil, nil
+			return nil, errObj
 		}
 
 		list = append(list, &workflowTaskStates)

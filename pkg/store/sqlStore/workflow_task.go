@@ -28,7 +28,7 @@ func (s *workflowTaskStore) AutoMigrate() {
 	s.provider.Logger().Infof("%s, complete initialization", s.GetTable())
 }
 
-func (s *workflowTaskStore) Create(tx *gorm.DB, data common.WorkflowTask) error {
+func (s *workflowTaskStore) Create(tx *gorm.DB, data *common.WorkflowTask) error {
 	if tx == nil {
 		tx = s.GetMaster()
 	}
