@@ -29,6 +29,7 @@ func (s *workflowTaskStore) AutoMigrate() {
 }
 
 func (s *workflowTaskStore) Create(tx *gorm.DB, data *common.WorkflowTask) error {
+	data.BuildIndex()
 	if tx == nil {
 		tx = s.GetMaster()
 	}
@@ -46,6 +47,19 @@ func (s *workflowTaskStore) GetList(workflowID int64) ([]common.WorkflowTask, er
 		return nil, err
 	}
 
+	return res, nil
+}
+
+func (s *workflowTaskStore) GetTaskWorkflowIDs(index []string) ([]common.WorkflowTask, error) {
+	var (
+		err error
+		res []common.WorkflowTask
+	)
+
+	err = s.GetReplica().Table(s.GetTable()).Where("project_task_index IN(?)", index).Find(&res).Error
+	if err != nil {
+		return nil, err
+	}
 	return res, nil
 }
 

@@ -64,6 +64,7 @@ type SqlProviderStores struct {
 	Workflow              store.WorkflowStore
 	WorkflowTask          store.WorkflowTaskStore
 	UserWorkflowRelevance store.UserWorkflowRelevanceStore
+	WorkflowLog           store.WorkflowLogStore
 }
 
 func MustSetup(conf *config.MysqlConf, logger *logrus.Logger, install bool) SqlStore {
@@ -82,6 +83,7 @@ func MustSetup(conf *config.MysqlConf, logger *logrus.Logger, install bool) SqlS
 	provider.stores.Workflow = NewWorkflowStore(provider)
 	provider.stores.WorkflowTask = NewWorkflowTaskStore(provider)
 	provider.stores.UserWorkflowRelevance = NewUserWorkflowRelevanceStore(provider)
+	provider.stores.WorkflowLog = NewWorkflowLogStore(provider)
 
 	provider.CheckStores()
 
@@ -107,6 +109,10 @@ func MustSetup(conf *config.MysqlConf, logger *logrus.Logger, install bool) SqlS
 		}).Info("admin user created")
 	}
 	return provider
+}
+
+func (s *SqlProvider) WorkflowLog() store.WorkflowLogStore {
+	return s.stores.WorkflowLog
 }
 
 func (s *SqlProvider) UserWorkflowRelevance() store.UserWorkflowRelevanceStore {
@@ -189,6 +195,7 @@ type SqlStore interface {
 	Workflow() store.WorkflowStore
 	WorkflowTask() store.WorkflowTaskStore
 	UserWorkflowRelevance() store.UserWorkflowRelevanceStore
+	WorkflowLog() store.WorkflowLogStore
 	BeginTx() *gorm.DB
 	Install()
 	Shutdown()

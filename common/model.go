@@ -1,5 +1,7 @@
 package common
 
+import "fmt"
+
 type ClientInfo struct {
 	ClientIP string `json:"client_ip"`
 	Version  string `json:"version"`
@@ -97,7 +99,16 @@ type WorkflowTask struct {
 	ProjectID           int64  `json:"project_id" gorm:"column:project_id;type:int(11);not null;index:project_id;comment:'project id'"`
 	DependencyTaskID    string `json:"dependency_task_id" gorm:"column:dependency_task_id;not null;type:varchar(50);default:'';index:dependency_task_id;"`
 	DependencyProjectID int64  `json:"dependency_project_id" gorm:"column:dependency_project_id;not null;type:int(11);default:0;index:dependency_project_id;comment:'依赖任务的项目id'"`
+	ProjectTaskIndex    string `json:"project_task_index" gorm:"column:project_task_index;not null;type:varchar(100);default:'';index:project_task_index;comment:'项目+任务索引'"`
 	CreateTime          int64  `json:"create_time" gorm:"column:create_time;type:int(11);not null;comment:'创建时间'"`
+}
+
+func (w *WorkflowTask) BuildIndex() {
+	w.ProjectTaskIndex = BuildWorkflowIndex(w.ProjectID, w.TaskID)
+}
+
+func BuildWorkflowIndex(pid int64, tid string) string {
+	return fmt.Sprintf("%d_%s", pid, tid)
 }
 
 type UserWorkflowRelevance struct {
@@ -105,4 +116,13 @@ type UserWorkflowRelevance struct {
 	UserID     int64 `json:"user_id" gorm:"column:user_id;type:int(11);not null;index:user_id;comment:'关联用户id'"`
 	WorkflowID int64 `json:"workflow_id" gorm:"column:workflow_id;type:int(11);not null;index:workflow_id;comment:'关联workflow id'"`
 	CreateTime int64 `json:"create_time" gorm:"column:create_time;type:int(11);not null;comment:'创建时间'"`
+}
+
+type WorkflowLog struct {
+	ID         int64  `json:"id" gorm:"column:id;pirmary_key;auto_increment"`
+	WorkflowID int64  `json:"workflow_id" gorm:"column:workflow_id;type:int(11);not null;index:workflow_id;comment:'关联workflow id'"`
+	StartTime  int64  `json:"start_time" gorm:"column:start_time;type:int(11);not null;comment:'开始时间'"`
+	EndTime    int64  `json:"end_time" gorm:"column:end_time;type:int(11);not null;comment:'结束时间'"`
+	Result     string `json:"result" gorm:"column:result;type:text;not null;comment:'任务执行结果'"`
+	CreateTime int64  `json:"create_time" gorm:"column:create_time;type:int(11);not null;comment:'创建时间'"`
 }

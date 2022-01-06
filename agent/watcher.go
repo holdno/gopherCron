@@ -33,9 +33,13 @@ func (a *client) newWatchHandle() func(resp clientv3.WatchResponse, projectID in
 		}
 
 		for _, watchEvent = range resp.Events {
+			if common.IsAckKey(string(watchEvent.Kv.Key)) {
+				continue
+			}
 			switch watchEvent.Type {
 			case mvccpb.PUT: // 任务保存
 				// 反序列化task
+				fmt.Println("get key", string(watchEvent.Kv.Key))
 				if task, err = common.Unmarshal(watchEvent.Kv.Value); err != nil {
 					continue
 				}

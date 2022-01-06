@@ -165,6 +165,10 @@ func IsStatusKey(key string) bool {
 	return strings.Contains(key, "/"+STATUS)
 }
 
+func IsAckKey(key string) bool {
+	return strings.Contains(key, "/"+WORKFLOW_ACK)
+}
+
 func PatchProjectIDTaskIDFromStatusKey(key string) (string, string) {
 	sp := strings.Split(key, "/")
 	if len(sp) != 5 {
@@ -277,8 +281,9 @@ func BuildTaskSchedulerPlan(task *TaskInfo) (*TaskSchedulePlan, error) {
 // 构造执行计划
 func BuildWorkflowTaskSchedulerPlan(task *TaskInfo) (*TaskSchedulePlan, error) {
 	return &TaskSchedulePlan{
-		Task: task,
-		Type: WorkflowPlan,
+		Task:  task,
+		Type:  WorkflowPlan,
+		TmpID: task.TmpID,
 	}, nil
 }
 

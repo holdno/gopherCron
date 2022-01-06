@@ -61,7 +61,7 @@ type WorkflowTaskStore interface {
 	Commons
 	Create(tx *gorm.DB, data *common.WorkflowTask) error
 	GetList(workflowID int64) ([]common.WorkflowTask, error)
-	GetTaskList(workflowID int64, taskID string) ([]common.WorkflowTask, error)
+	GetTaskWorkflowIDs(index []string) ([]common.WorkflowTask, error)
 	Delete(tx *gorm.DB, id int64) error
 	DeleteList(tx *gorm.DB, ids []int64) error
 }
@@ -82,4 +82,11 @@ type TaskWebHookStore interface {
 	GetOne(projectID int64, types string) (*common.WebHook, error)
 	Delete(tx *gorm.DB, projectID int64, types string) error
 	DeleteAll(tx *gorm.DB, projectID int64) error
+}
+
+type WorkflowLogStore interface {
+	Commons
+	Create(tx *gorm.DB, data *common.WorkflowLog) error
+	GetList(selector selection.Selector, page, pagesize uint64) ([]common.WorkflowLog, error)
+	Clear(tx *gorm.DB, selector selection.Selector) error
 }

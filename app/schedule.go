@@ -17,6 +17,7 @@ import (
 )
 
 func scheduleTask(cli *clientv3.Client, taskInfo *common.TaskInfo) error {
+	taskInfo.TmpID = utils.GetStrID()
 	taskStates, err := getWorkflowTaskStates(cli.KV, common.BuildWorkflowTaskStatusKey(taskInfo.FlowInfo.WorkflowID, taskInfo.ProjectID, taskInfo.TaskID))
 	if err != nil {
 		return err
@@ -62,6 +63,7 @@ func scheduleTask(cli *clientv3.Client, taskInfo *common.TaskInfo) error {
 			var v1 common.AckResponseV1
 			if err := json.Unmarshal(ack.Data, &v1); err != nil {
 				// log
+				fmt.Println("unmarshal ack data error", err.Error())
 				return false
 			}
 		default:
@@ -77,6 +79,7 @@ func scheduleTask(cli *clientv3.Client, taskInfo *common.TaskInfo) error {
 		})
 		if err != nil {
 			// log
+			fmt.Println("delete ack key error", err.Error())
 			return false
 		}
 		return true
@@ -85,26 +88,29 @@ func scheduleTask(cli *clientv3.Client, taskInfo *common.TaskInfo) error {
 	if err != nil {
 		// 针对err为watch超时的场景，配置not runnint
 		// watch 超时 / 失败  log
-		_, err = concurrency.NewSTM(cli, func(s concurrency.STM) error {
-			if err = setWorkflowTaskNotRunning(s, taskInfo); err != nil {
-				return err
-			}
-			return nil
-		})
-		if err != nil {
-			// log
-			return err
-		}
+		// fmt.Println("waiting ack failed:", err.Error())
+		// _, err = concurrency.NewSTM(cli, func(s concurrency.STM) error {
+		// 	if err = setWorkflowTaskNotRunning(s, taskInfo); err != nil {
+		// 		return err
+		// 	}
+		// 	return nil
+		// })
+		// if err != nil {
+		// 	// log
+
+		// 	return err
+		// }
+		return err
 	}
 
 	return nil
 }
 
 type WorkflowTaskScheduleRecord struct {
-	TmpID     string
-	Result    string
-	Status    string
-	EventTime int64
+	TmpID     string `json:"tmp_id"`
+	Result    string `json:"result"`
+	Status    string `json:"status"`
+	EventTime int64  `json:"event_time"`
 }
 
 type WorkflowTaskStates struct {
@@ -289,9 +295,10 @@ func putSchedule(kv concurrency.STM, leaseID clientv3.LeaseID, taskInfo *common.
 
 func waitingAck(cli *clientv3.Client, taskInfo *common.TaskInfo, onAck func(*clientv3.Event) bool) error {
 	ackKey := common.BuildWorkflowAckKey(taskInfo.FlowInfo.WorkflowID, taskInfo.ProjectID, taskInfo.TaskID, taskInfo.TmpID)
+	fmt.Println("waiting ack key", ackKey)
 	ctx, _ := utils.GetContextWithTimeout()
 	// 开始监听
-	watchChan := cli.Watcher.Watch(ctx, ackKey)
+	watchChan := cli.Watcher.Watch(ctx, ackKey, clientv3.WithPrefix())
 
 	for {
 		select {
@@ -308,13 +315,15 @@ func waitingAck(cli *clientv3.Client, taskInfo *common.TaskInfo, onAck func(*cli
 				switch watchEvent.Type {
 				// case mvccpb.PUT: // 任务开始执行
 				case mvccpb.PUT: // 任务开始执行
-					err := rego.Retry(func() error {
+					errList := rego.Retry(func() error {
 						if ok := onAck(watchEvent); ok {
 							return nil
 						}
 						return fmt.Errorf("retry")
 					})
-					return err
+					if len(errList) > 0 {
+						return errList
+					}
 				}
 			}
 		}

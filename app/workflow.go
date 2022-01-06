@@ -49,7 +49,9 @@ func (a *app) CreateWorkflow(userID int64, data common.Workflow) error {
 	}); err != nil {
 		return errors.NewError(http.StatusInternalServerError, "创建workflow用户关联关系失败").WithLog(err.Error())
 	}
-	return nil
+
+	err = a.workflowRunner.SetPlan(data)
+	return err
 }
 
 func checkUserWorkflowPermission(checkFunc interface {
@@ -78,6 +80,20 @@ func (a *app) CreateWorkflowTask(userID, workflowID int64, taskList []CreateWork
 	if err != nil {
 		return err
 	}
+
+	plan := a.workflowRunner.GetPlan(workflowID)
+	if plan == nil {
+		// what happen?
+		return nil
+	}
+	running, err := plan.IsRunning()
+	if err != nil {
+		return err
+	}
+	if running {
+		return errors.NewError(http.StatusBadRequest, "当前workflow正在运行中，请稍后再试")
+	}
+
 	workflowTaskList, err := a.store.WorkflowTask().GetList(workflowID)
 	if err != nil && err != gorm.ErrRecordNotFound {
 		return errors.NewError(errors.CodeInternalError, "创建workflow 任务信息失败").WithLog(err.Error())
@@ -112,6 +128,8 @@ func (a *app) CreateWorkflowTask(userID, workflowID int64, taskList []CreateWork
 		}
 	}
 
+	// TODO check
+
 	tx := a.store.BeginTx()
 	defer func() {
 		if r := recover(); r != nil || err != nil {
@@ -129,7 +147,9 @@ func (a *app) CreateWorkflowTask(userID, workflowID int64, taskList []CreateWork
 			return errors.NewError(errors.CodeInternalError, "创建workflow 任务信息失败, 创建任务关联关系失败").WithLog(err.Error())
 		}
 	}
-	return nil
+
+	err = a.workflowRunner.SetPlan(plan.Workflow)
+	return err
 }
 
 func disposeWorkflowTaskData(workflowTaskList []common.WorkflowTask, task WorkflowTaskInfo, dependencies []WorkflowTaskInfo) ([]int64, []common.WorkflowTask) {
@@ -180,6 +200,41 @@ func disposeWorkflowTaskData(workflowTaskList []common.WorkflowTask, task Workfl
 	return needToDelete, needToCreate
 }
 
+func (a *app) CreateWorkflowLog(workflowID int64, startTime, endTime int64, result string) error {
+	err := a.store.WorkflowLog().Create(nil, &common.WorkflowLog{
+		WorkflowID: workflowID,
+		StartTime:  startTime,
+		EndTime:    endTime,
+		Result:     result,
+		CreateTime: time.Now().Unix(),
+	})
+	if err != nil {
+		return errors.NewError(http.StatusInternalServerError, "workflow任务日志入库失败").WithLog(err.Error())
+	}
+	return nil
+}
+
+func (a *app) GetWorkflowLogList(workflowID int64, page, pagesize uint64) ([]common.WorkflowLog, int, error) {
+	opts := selection.NewSelector(selection.NewRequirement("id", selection.Equals, workflowID))
+	list, err := a.store.WorkflowLog().GetList(opts,
+		page, pagesize)
+	if err != nil && err != gorm.ErrRecordNotFound {
+		return nil, 0, errors.NewError(http.StatusInternalServerError, "获取workflow任务执行结果失败").WithLog(err.Error())
+	}
+
+	for i, v := range list {
+		if len(v.Result) > 255 {
+			list[i].Result = v.Result[:255]
+		}
+	}
+
+	total, err := a.store.WorkflowLog().GetTotal(opts)
+	if err != nil {
+		return nil, 0, errors.NewError(http.StatusInternalServerError, "获取workflow日志总记录数失败").WithLog(err.Error())
+	}
+	return list, total, nil
+}
+
 func (a *app) GetWorkflowList(opts common.GetWorkflowListOptions, page, pagesize uint64) ([]common.Workflow, int, error) {
 	// TODO get user workflow
 	selector := selection.NewSelector()
@@ -202,6 +257,14 @@ func (a *app) GetWorkflowList(opts common.GetWorkflowListOptions, page, pagesize
 	return list, total, nil
 }
 
+func (a *app) GetUserWorkflowPermission(userID, workflowID int64) error {
+	err := checkUserWorkflowPermission(a.store.UserWorkflowRelevance(), userID, workflowID)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func (a *app) GetWorkflowTasks(workflowID int64) ([]common.WorkflowTask, error) {
 	list, err := a.store.WorkflowTask().GetList(workflowID)
 	if err != nil && err != gorm.ErrRecordNotFound {
@@ -209,6 +272,14 @@ func (a *app) GetWorkflowTasks(workflowID int64) ([]common.WorkflowTask, error) 
 	}
 
 	return list, nil
+}
+
+func (a *app) ClearWorkflowLog(workflowID int64) error {
+	err := a.store.WorkflowLog().Clear(nil, selection.NewSelector(selection.NewRequirement("id", selection.Equals, workflowID)))
+	if err != nil {
+		return errors.NewError(http.StatusInternalServerError, "清理workflow日志失败").WithLog(err.Error())
+	}
+	return nil
 }
 
 func (a *app) GetUserWorkflows(userID int64) ([]int64, error) {
@@ -229,10 +300,24 @@ func (a *app) UpdateWorkflow(userID int64, data common.Workflow) error {
 		return err
 	}
 
-	if err = a.store.Workflow().Update(nil, data); err != nil {
+	tx := a.store.BeginTx()
+	defer func() {
+		if r := recover(); r != nil || err != nil {
+			tx.Rollback()
+		} else {
+			tx.Commit()
+		}
+	}()
+	if err = a.store.Workflow().Update(tx, data); err != nil {
 		return errors.NewError(http.StatusInternalServerError, "更新workflow失败").WithLog(err.Error())
 	}
-	return nil
+
+	if data.Status == common.TASK_STATUS_START {
+		err = a.workflowRunner.SetPlan(data)
+	} else {
+		a.workflowRunner.DelPlan(data.ID)
+	}
+	return err
 }
 
 func (a *app) DeleteWorkflow(userID int64, workflowID int64) error {
@@ -241,8 +326,53 @@ func (a *app) DeleteWorkflow(userID int64, workflowID int64) error {
 		return err
 	}
 
-	if err = a.store.Workflow().Delete(nil, workflowID); err != nil {
+	tx := a.store.BeginTx()
+	defer func() {
+		if r := recover(); r != nil || err != nil {
+			tx.Rollback()
+		} else {
+			tx.Commit()
+		}
+	}()
+	if err = a.store.Workflow().Delete(tx, workflowID); err != nil {
 		return errors.NewError(http.StatusInternalServerError, "删除workflow失败").WithLog(err.Error())
+	}
+
+	plan := a.workflowRunner.GetPlan(workflowID)
+	if plan != nil {
+		running, err := plan.IsRunning()
+		if err != nil {
+			return err
+		}
+		if running {
+			if err = plan.Finished(ErrWorkflowKilled); err != nil {
+				return err
+			}
+		}
+	}
+
+	a.workflowRunner.DelPlan(workflowID)
+	return err
+}
+
+func killWorkflowTasks(c *clientv3.Client, killList []WorkflowTaskInfo) error {
+	ctx, _ := utils.GetContextWithTimeout()
+	// make lease to notify worker
+	// 创建一个租约 让其稍后过期并自动删除
+	leaseGrantResp, err := c.Lease.Grant(ctx, 1)
+	if err != nil {
+		return errors.NewError(http.StatusInternalServerError, "lease grant error").WithLog(err.Error())
+	}
+
+	_, err = concurrency.NewSTM(c, func(s concurrency.STM) error {
+		for _, v := range killList {
+			key := common.BuildKillKey(v.ProjectID, v.TaskID)
+			s.Put(key, "", clientv3.WithLease(leaseGrantResp.ID))
+		}
+		return nil
+	})
+	if err != nil {
+		return errors.NewError(http.StatusInternalServerError, "下发workflow全量任务停止指令失败").WithLog(err.Error())
 	}
 	return nil
 }
@@ -319,9 +449,9 @@ type WorkflowPlan struct {
 	planState *PlanState
 }
 
-func (p *WorkflowPlan) Finished(scheduleError error) error {
+func (p *WorkflowPlan) Finished(withError error) error {
 	p.planState.Status = common.TASK_STATUS_DONE_V2
-	if scheduleError != nil {
+	if withError != nil {
 		p.planState.Status = common.TASK_STATUS_FAIL_V2
 	}
 
@@ -331,6 +461,7 @@ func (p *WorkflowPlan) Finished(scheduleError error) error {
 	}
 
 	failedReason := strings.Builder{}
+	var killList []WorkflowTaskInfo
 	for _, v := range states {
 		if v.CurrentStatus == common.TASK_STATUS_FAIL_V2 {
 			p.planState.Status = common.TASK_STATUS_FAIL_V2
@@ -342,24 +473,59 @@ func (p *WorkflowPlan) Finished(scheduleError error) error {
 			}
 			failedReason.WriteString(taskDetail.Name)
 			failedReason.WriteString(" 任务执行失败\n")
+		} else if v.CurrentStatus == common.TASK_STATUS_RUNNING_V2 ||
+			v.CurrentStatus == common.TASK_STATUS_STARTING_V2 {
+			killList = append(killList, WorkflowTaskInfo{
+				ProjectID: v.ProjectID,
+				TaskID:    v.TaskID,
+			})
 		}
 	}
-	if scheduleError != nil {
-		failedReason.WriteString(scheduleError.Error() + "\n")
+	if withError != nil {
+		failedReason.WriteString(withError.Error() + "\n")
 	}
 
 	p.planState.Reason = failedReason.String()
 	p.planState.Records = states
+	p.planState.EndTime = time.Now().Unix()
 
 	result, err := json.Marshal(p.planState)
 	if err != nil {
 		return err
 	}
 
-	// workflow执行结果写入数据库
-	fmt.Println("workflow result:", string(result))
+	errList := rego.Retry(func() error {
+		return clearWorkflowKeys(p.runner.etcd.KV, p.Workflow.ID)
+	}, rego.WithPeriod(time.Second))
+	if len(errList) != 0 {
+		p.runner.app.Warning(warning.WarningData{
+			Type:     warning.WarningTypeSystem,
+			TaskName: p.Workflow.Title,
+			Data:     fmt.Sprintf("workflow: %s, 运行结束时清除运行状态失败, 失败原因: %s", p.Workflow.Title, errList.Latest().Error()),
+		})
+		return errList.Latest()
+	}
 
-	if err = clearWorkflowKeys(p.runner.etcd.KV, p.Workflow.ID); err != nil {
+	if withError != nil {
+		errList = rego.Retry(func() error {
+			return killWorkflowTasks(p.runner.etcd, killList)
+		}, rego.WithPeriod(time.Second))
+		if len(errList) != 0 {
+			p.runner.app.Warning(warning.WarningData{
+				Type:     warning.WarningTypeSystem,
+				TaskName: p.Workflow.Title,
+				Data:     fmt.Sprintf("workflow: %s, 运行结束时强杀任务失败, 失败原因: %s", p.Workflow.Title, errList.Latest().Error()),
+			})
+			return errList.Latest()
+		}
+	}
+
+	if err = p.runner.app.CreateWorkflowLog(p.planState.WorkflowID, p.planState.StartTime, p.planState.EndTime, string(result)); err != nil {
+		p.runner.app.Warning(warning.WarningData{
+			Type:     warning.WarningTypeSystem,
+			TaskName: p.Workflow.Title,
+			Data:     fmt.Sprintf("workflow: %s, 执行结果入库失败, 失败原因: %s", p.Workflow.Title, err.Error()),
+		})
 		return err
 	}
 	return nil
@@ -370,19 +536,7 @@ type taskFlowItem struct {
 	Deps []WorkflowTaskInfo
 }
 
-func (a *workflowRunner) TryStartPlan(plan *WorkflowPlan) error {
-	// 获取当前plan是否在运行中
-	// TODO lock
-	running, err := plan.IsRunning()
-	if err != nil || running {
-		// TODO latest workflow not compalete
-		return err
-	}
-
-	if err = plan.SetRunning(); err != nil {
-		return err
-	}
-
+func (a *workflowRunner) scheduleWorkflowPlan(plan *WorkflowPlan) error {
 	fmt.Println("can schedule")
 	needToScheduleTasks, finished, err := plan.CanSchedule()
 	if err != nil && err != ErrWorkflowFailed {
@@ -402,8 +556,25 @@ func (a *workflowRunner) TryStartPlan(plan *WorkflowPlan) error {
 	return nil
 }
 
+func (a *workflowRunner) TryStartPlan(plan *WorkflowPlan) error {
+	// 获取当前plan是否在运行中
+	// TODO lock
+	running, err := plan.IsRunning()
+	if err != nil || running {
+		// TODO latest workflow not compalete
+		return err
+	}
+
+	if err = plan.SetRunning(); err != nil {
+		return err
+	}
+
+	return a.scheduleWorkflowPlan(plan)
+}
+
 var (
-	ErrWorkflowFailed = errors.NewError(http.StatusInternalServerError, "workflow任务失败")
+	ErrWorkflowFailed = fmt.Errorf("workflow任务失败")
+	ErrWorkflowKilled = fmt.Errorf("人工停止workflow")
 )
 
 // 判断下一步可调度的任务
@@ -470,20 +641,20 @@ func (s *WorkflowPlan) CanSchedule() ([]WorkflowTaskInfo, bool, error) {
 			}
 			finished = false
 			readys = append(readys, task)
-			if time.Now().Unix()-taskStates.StartTime > 5 {
-				taskStates.CurrentStatus = common.TASK_STATUS_NOT_RUNNING_V2
-				latestRecord := taskStates.GetLatestScheduleRecord()
-				taskStates.ScheduleRecords = append(taskStates.ScheduleRecords, &WorkflowTaskScheduleRecord{
-					TmpID:     latestRecord.TmpID,
-					Status:    common.TASK_STATUS_NOT_RUNNING_V2,
-					EventTime: time.Now().Unix(),
-				})
-				newStates, _ := json.Marshal(taskStates)
-				ctx, _ := utils.GetContextWithTimeout()
-				if _, err = s.runner.etcd.KV.Put(ctx, common.BuildWorkflowTaskStatusKey(taskStates.WorkflowID, taskStates.ProjectID, taskStates.TaskID), string(newStates)); err != nil {
-					return nil, false, err
-				}
-			}
+			// if time.Now().Unix()-taskStates.StartTime > 5 {
+			// 	taskStates.CurrentStatus = common.TASK_STATUS_NOT_RUNNING_V2
+			// 	latestRecord := taskStates.GetLatestScheduleRecord()
+			// 	taskStates.ScheduleRecords = append(taskStates.ScheduleRecords, &WorkflowTaskScheduleRecord{
+			// 		TmpID:     latestRecord.TmpID,
+			// 		Status:    common.TASK_STATUS_NOT_RUNNING_V2,
+			// 		EventTime: time.Now().Unix(),
+			// 	})
+			// 	newStates, _ := json.Marshal(taskStates)
+			// 	ctx, _ := utils.GetContextWithTimeout()
+			// 	if _, err = s.runner.etcd.KV.Put(ctx, common.BuildWorkflowTaskStatusKey(taskStates.WorkflowID, taskStates.ProjectID, taskStates.TaskID), string(newStates)); err != nil {
+			// 		return nil, false, err
+			// 	}
+			// }
 		default:
 		}
 	}
@@ -513,46 +684,6 @@ func inverseGraph(graph map[WorkflowTaskInfo][]WorkflowTaskInfo) (igraph map[Wor
 	return igraph
 }
 
-// igraph map[任务][]依赖
-// return 执行顺序
-func kahn(igraph map[WorkflowTaskInfo][]WorkflowTaskInfo) (L []WorkflowTaskInfo, err error) {
-	var S []WorkflowTaskInfo
-	graph := inverseGraph(igraph)
-	inCountMap := make(map[WorkflowTaskInfo]int)
-	for node, incomes := range igraph {
-		inCountMap[node] = len(incomes)
-		if inCountMap[node] == 0 {
-			S = append(S, node)
-		}
-	}
-
-	for {
-		if len(S) == 0 {
-			break
-		}
-		node := S[0]
-		S = S[1:]
-		L = append(L, node)
-
-		for _, outcome := range graph[node] {
-			inCountMap[outcome]--
-			if inCountMap[outcome] == 0 {
-				S = append(S, outcome)
-			}
-		}
-	}
-
-	for node, inCount := range inCountMap {
-		if inCount != 0 {
-			err = fmt.Errorf("Invalid DAG node %v", node)
-			return
-		}
-	}
-
-	return
-
-}
-
 func (a *workflowRunner) GetPlan(id int64) *WorkflowPlan {
 	data, exist := a.plans.Load(id)
 	if !exist {
@@ -562,16 +693,25 @@ func (a *workflowRunner) GetPlan(id int64) *WorkflowPlan {
 }
 
 func (a *workflowRunner) SetPlan(data common.Workflow) error {
-	atomic.AddInt64(&a.planCounter, 1)
+	plan := a.GetPlan(data.ID)
+	if plan != nil {
+		running, err := plan.IsRunning()
+		if err != nil {
+			return err
+		}
+		if running {
+			return errors.NewError(http.StatusBadRequest, "该workflow正在运行中，请稍后再试")
+		}
+	} else {
+		atomic.AddInt64(&a.planCounter, 1)
+	}
 
 	tasks, err := a.app.GetWorkflowTasks(data.ID)
 	if err != nil {
 		return err
 	}
 
-	fmt.Println("flow tasks", tasks)
-
-	plan := &WorkflowPlan{
+	plan = &WorkflowPlan{
 		runner:   a,
 		Workflow: data,
 		Tasks:    make(map[WorkflowTaskInfo]*common.TaskInfo),
@@ -670,6 +810,16 @@ func (a *workflowRunner) TrySchedule() time.Duration {
 	return (*nearTime).Sub(now)
 }
 
+// GetWorkflowState 获取workflow当前状态，未运行时状态为空
+func (a *app) GetWorkflowState(workflowID int64) (*PlanState, error) {
+	plan := a.workflowRunner.GetPlan(workflowID)
+	err := plan.RefreshStates()
+	if err != nil {
+		return nil, errors.NewError(http.StatusInternalServerError, "获取workflow状态失败").WithLog(err.Error())
+	}
+	return plan.planState, nil
+}
+
 func (a *workflowRunner) Loop() {
 	var (
 		taskEvent     *common.TaskEvent
@@ -725,7 +875,7 @@ func (a *workflowRunner) Loop() {
 
 func (a *workflowRunner) handleTaskResultV1(data protocol.TaskFinishedQueueItemV1) error {
 	next := true
-	err := rego.Retry(func() error {
+	errList := rego.Retry(func() error {
 		_, err := concurrency.NewSTM(a.etcd, func(s concurrency.STM) error {
 			planFinished, err := setWorkFlowTaskFinished(s, data)
 			if err != nil {
@@ -744,8 +894,8 @@ func (a *workflowRunner) handleTaskResultV1(data protocol.TaskFinishedQueueItemV
 		})
 		return err
 	})
-	if err != nil {
-		return err
+	if len(errList) != 0 {
+		return errList
 	}
 
 	if !next {
@@ -756,29 +906,34 @@ func (a *workflowRunner) handleTaskResultV1(data protocol.TaskFinishedQueueItemV
 		return nil
 	}
 
-	err = rego.Retry(func() error {
-		return a.TryStartPlan(plan)
+	errList = rego.Retry(func() error {
+		return a.scheduleWorkflowPlan(plan)
 	})
-	if err != nil {
-		return err.Latest()
+	if len(errList) != 0 {
+		return errList
 	}
 	return nil
 }
 
 func (a *workflowRunner) handleTaskEvent(event *common.TaskEvent) {
-	fmt.Println("get task event", *event)
 	switch event.EventType {
 	case common.TASK_EVENT_WORKFLOW_SCHEDULE:
-		err := rego.Retry(func() error {
+		errList := rego.Retry(func() error {
 			if err := scheduleTask(a.etcd, event.Task); err != nil {
 				return err
 			}
 			return nil
-		})
-		if err != nil {
+		}, rego.WithBackoffFector(2),
+			rego.WithPeriod(time.Second),
+			rego.WithResetDuration(time.Minute),
+			rego.WithTimes(3))
+		if errList != nil {
+			if err := a.GetPlan(event.Task.FlowInfo.WorkflowID).Finished(fmt.Errorf("workflow任务(%s)调度失败", event.Task.Name)); err != nil {
+				// todo log
+			}
 			a.app.Warning(warning.WarningData{
 				Data: fmt.Sprintf("workflow任务调度失败，workflow_id: %d\n%s",
-					event.Task.FlowInfo.WorkflowID, err.Error()),
+					event.Task.FlowInfo.WorkflowID, errList.Error()),
 				Type:      warning.WarningTypeSystem,
 				TaskName:  event.Task.Name,
 				ProjectID: event.Task.ProjectID,
@@ -787,18 +942,25 @@ func (a *workflowRunner) handleTaskEvent(event *common.TaskEvent) {
 	}
 }
 
+func (p *WorkflowPlan) RefreshStates() error {
+	states, err := getWorkflowPlanState(p.runner.etcd.KV, p.Workflow.ID)
+	if err != nil {
+		return err
+	}
+
+	p.planState = states
+	return nil
+}
+
 // TODO
 func (p *WorkflowPlan) IsRunning() (bool, error) {
-	if p.planState == nil {
-		states, err := getWorkflowPlanState(p.runner.etcd.KV, p.Workflow.ID)
-		if err != nil {
-			return false, err
-		}
-		if states == nil {
-			return false, nil
-		}
-		p.planState = states
+	if err := p.RefreshStates(); err != nil {
+		return false, err
 	}
+	if p.planState == nil {
+		return false, nil
+	}
+
 	now := time.Now()
 
 	if now.Unix()-p.planState.LatestTryTime > p.Expr.Next(now).Unix()-now.Unix() {

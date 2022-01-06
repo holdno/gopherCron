@@ -40,6 +40,36 @@ func CreateWorkflow(c *gin.Context) {
 	response.APISuccess(c, nil)
 }
 
+type GetWorkflowTaskListRequest struct {
+	WorkflowID int64 `json:"workflow_id" form:"workflow_id" binding:"required"`
+}
+
+func GetWorkflowTaskList(c *gin.Context) {
+	var (
+		err error
+		req GetWorkflowTaskListRequest
+	)
+	if err = utils.BindArgsWithGin(c, &req); err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	srv := app.GetApp(c)
+	uid := utils.GetUserID(c)
+	if err = srv.GetUserWorkflowPermission(uid, req.WorkflowID); err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	tasks, err := srv.GetWorkflowTasks(req.WorkflowID)
+	if err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	response.APISuccess(c, tasks)
+}
+
 type CreateWorkflowTaskRequest struct {
 	WorkflowID int64              `json:"workflow_id" form:"workflow_id" binding:"required"`
 	Tasks      []WorkflowTaskItem `json:"tasks" form:"tasks" binding:"required"`
@@ -69,6 +99,7 @@ func CreateWorkflowTask(c *gin.Context) {
 			Dependencies:     v.Dependencies,
 		})
 	}
+
 	if err = srv.CreateWorkflowTask(uid, req.WorkflowID, args); err != nil {
 		response.APIError(c, err)
 		return
@@ -83,8 +114,13 @@ type GetWorkflowListRequest struct {
 }
 
 type GetWorkflowListResponse struct {
-	Total int               `json:"total"`
-	List  []common.Workflow `json:"list"`
+	Total int                 `json:"total"`
+	List  []WorkflowWithState `json:"list"`
+}
+
+type WorkflowWithState struct {
+	common.Workflow
+	State *app.PlanState `json:"state"`
 }
 
 func GetWorkflowList(c *gin.Context) {
@@ -113,9 +149,22 @@ func GetWorkflowList(c *gin.Context) {
 		return
 	}
 
+	var listWithState []WorkflowWithState
+	for _, v := range list {
+		state, err := srv.GetWorkflowState(v.ID)
+		if err != nil {
+			response.APIError(c, err)
+			return
+		}
+		listWithState = append(listWithState, WorkflowWithState{
+			v,
+			state,
+		})
+	}
+
 	response.APISuccess(c, GetWorkflowListResponse{
 		Total: total,
-		List:  list,
+		List:  listWithState,
 	})
 }
 
@@ -176,4 +225,73 @@ func UpdateWorkflow(c *gin.Context) {
 	}
 
 	response.APISuccess(c, nil)
+}
+
+type ClearWorkflowLogRequest struct {
+	WorkflowID int64 `json:"workflow_id" form:"workflow_id" binding:"required"`
+}
+
+func ClearWorkflowLog(c *gin.Context) {
+	var (
+		err error
+		req ClearWorkflowLogRequest
+	)
+	if err = utils.BindArgsWithGin(c, &req); err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	srv := app.GetApp(c)
+	uid := utils.GetUserID(c)
+	if err = srv.GetUserWorkflowPermission(uid, req.WorkflowID); err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	if err = srv.ClearWorkflowLog(req.WorkflowID); err != nil {
+		response.APIError(c, err)
+		return
+	}
+	response.APISuccess(c, nil)
+}
+
+type GetWorkflowLogListRequest struct {
+	WorkflowID int64  `json:"workflow_id" form:"workflow_id" binding:"required"`
+	Page       uint64 `json:"page" form:"page" binding:"required"`
+	Pagesize   uint64 `json:"pagesize" form:"pagesize" binding:"required"`
+}
+
+type GetWorkflowLogListResponse struct {
+	List  []common.WorkflowLog `json:"list"`
+	Total int                  `json:"total"`
+}
+
+func GetWorkflowLogList(c *gin.Context) {
+	var (
+		err error
+		req GetWorkflowLogListRequest
+	)
+	if err = utils.BindArgsWithGin(c, &req); err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	srv := app.GetApp(c)
+	uid := utils.GetUserID(c)
+
+	if err = srv.GetUserWorkflowPermission(uid, req.WorkflowID); err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	list, total, err := srv.GetWorkflowLogList(req.WorkflowID, req.Page, req.Pagesize)
+	if err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	response.APISuccess(c, GetWorkflowLogListResponse{
+		List:  list,
+		Total: total,
+	})
 }

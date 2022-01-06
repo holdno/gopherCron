@@ -82,6 +82,11 @@ type App interface {
 	GetWorkflowList(opts common.GetWorkflowListOptions, page, pagesize uint64) ([]common.Workflow, int, error)
 	GetUserWorkflows(userID int64) ([]int64, error)
 	GetWorkflowTasks(workflowID int64) ([]common.WorkflowTask, error)
+	GetUserWorkflowPermission(userID, workflowID int64) error
+	GetWorkflowLogList(workflowID int64, page, pagesize uint64) ([]common.WorkflowLog, int, error)
+	CreateWorkflowLog(workflowID int64, startTime, endTime int64, result string) error
+	ClearWorkflowLog(workflowID int64) error
+	GetWorkflowState(workflowID int64) (*PlanState, error)
 
 	BeginTx() *gorm.DB
 	Close()
@@ -104,6 +109,8 @@ type app struct {
 	closeCh    chan struct{}
 	isClose    bool
 	localip    string
+
+	workflowRunner *workflowRunner
 
 	cfg *config.ServiceConfig
 
@@ -211,6 +218,7 @@ func NewApp(configPath string, opts ...AppOptions) App {
 	}
 
 	app.Go(workflow.Loop)
+	app.workflowRunner = workflow
 
 	return app
 }
@@ -376,6 +384,12 @@ func (a *app) GetTaskLogList(pid int64, tid string, page, pagesize int) ([]*comm
 		errObj.Msg = "获取日志列表失败"
 		errObj.Log = err.Error()
 		return nil, errObj
+	}
+
+	for _, v := range list {
+		if len(v.Result) > 255 {
+			v.Result = v.Result[:255]
+		}
 	}
 
 	return list, nil

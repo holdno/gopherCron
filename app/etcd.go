@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"sort"
 
+	"github.com/holdno/gocommons/selection"
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/errors"
 	"github.com/holdno/gopherCron/utils"
+	"github.com/jinzhu/gorm"
 
 	"github.com/coreos/etcd/clientv3"
 	"github.com/coreos/etcd/mvcc/mvccpb"
@@ -60,15 +63,21 @@ func (a *app) GetTaskList(projectID int64) ([]*common.TaskInfo, error) {
 	// init array space
 	taskList = make([]*common.TaskInfo, 0)
 	taskStatus := make(map[string]string)
+	relevanceWorkflow := make(map[string]int64)
+	var workflowTaskIndex []string
 
 	// range list to unmarshal
 	for _, kvPair = range getResp.Kvs {
 		if common.IsTemporaryKey(string(kvPair.Key)) {
 			continue
 		}
+		if common.IsAckKey(string(kvPair.Key)) {
+			continue
+		}
+
 		if common.IsStatusKey(string(kvPair.Key)) {
 			pid, tid := common.PatchProjectIDTaskIDFromStatusKey(string(kvPair.Key))
-			taskStatus[fmt.Sprintf("%s%s", pid, tid)] = string(kvPair.Value)
+			taskStatus[fmt.Sprintf("%s_%s", pid, tid)] = string(kvPair.Value)
 			continue
 		}
 
@@ -78,10 +87,21 @@ func (a *app) GetTaskList(projectID int64) ([]*common.TaskInfo, error) {
 		}
 
 		taskList = append(taskList, task)
+		workflowTaskIndex = append(workflowTaskIndex, common.BuildWorkflowIndex(task.ProjectID, task.TaskID))
+	}
+
+	if len(workflowTaskIndex) > 0 {
+		list, err := a.store.WorkflowTask().GetTaskWorkflowIDs(workflowTaskIndex)
+		if err != nil && err != gorm.ErrRecordNotFound {
+			return nil, errors.NewError(http.StatusInternalServerError, "获取任务关联workflow失败").WithLog(err.Error())
+		}
+		for _, v := range list {
+			relevanceWorkflow[v.ProjectTaskIndex] = v.WorkflowID
+		}
 	}
 
 	for _, v := range taskList {
-		status := taskStatus[fmt.Sprintf("%d%s", v.ProjectID, v.TaskID)]
+		status := taskStatus[fmt.Sprintf("%d_%s", v.ProjectID, v.TaskID)]
 		var taskRuningInfo common.TaskRunningInfo
 		if err = json.Unmarshal([]byte(status), &taskRuningInfo); err == nil {
 			status = taskRuningInfo.Status
@@ -91,6 +111,13 @@ func (a *app) GetTaskList(projectID int64) ([]*common.TaskInfo, error) {
 			v.IsRunning = common.TASK_STATUS_RUNNING
 		default:
 			v.IsRunning = common.TASK_STATUS_NOT_RUNNING
+		}
+
+		workflowID := relevanceWorkflow[common.BuildWorkflowIndex(task.ProjectID, task.TaskID)]
+		if workflowID != 0 {
+			v.FlowInfo = &common.WorkflowInfo{
+				WorkflowID: workflowID,
+			}
 		}
 	}
 
@@ -225,6 +252,16 @@ func (a *app) DeleteTask(projectID int64, taskID string) (*common.TaskInfo, erro
 		errObj    errors.Error
 		err       error
 	)
+
+	counter, err := a.store.WorkflowTask().GetTotal(selection.NewSelector(
+		selection.NewRequirement("task_id", selection.Equals, taskID),
+		selection.NewRequirement("project_id", selection.Equals, projectID)))
+	if err != nil {
+		return nil, errors.NewError(http.StatusInternalServerError, "检查任务是否关联workflow失败").WithLog(err.Error())
+	}
+	if counter > 0 {
+		return nil, errors.NewError(http.StatusBadRequest, "该任务已绑定workflow，请从workflow中移除该任务后再删除")
+	}
 
 	// build etcd delete key
 	deleteKey = common.BuildKey(projectID, taskID)

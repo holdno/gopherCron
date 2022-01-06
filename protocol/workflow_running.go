@@ -38,7 +38,7 @@ func (d *workflowRunningManager) SetTaskRunning(kv clientv3.KV, plan *common.Tas
 	// todo ack
 	ackKey := common.BuildWorkflowAckKey(plan.Task.FlowInfo.WorkflowID, plan.Task.ProjectID, plan.Task.TaskID, plan.TmpID)
 	data, _ := json.Marshal(common.AckResponseV1{
-		ClientIP: "",
+		ClientIP: plan.Task.ClientIP,
 		Type:     "success",
 		TmpID:    plan.TmpID,
 	})
@@ -92,10 +92,15 @@ func (d *workflowRunningManager) SetTaskNotRunning(kv clientv3.KV, plan *common.
 		status = common.TASK_STATUS_DONE_V2
 	}
 
+	if result == nil {
+		result = &common.TaskExecuteResult{}
+	}
+
 	err := d.queue[plan.Task.ProjectID].Enqueue(generateTaskFinishedResultV1(TaskFinishedQueueItemV1{
 		ProjectID:  plan.Task.ProjectID,
 		TaskID:     plan.Task.TaskID,
 		WorkflowID: plan.Task.FlowInfo.WorkflowID,
+		TmpID:      plan.Task.TmpID,
 		Status:     status,
 		StartTime:  result.StartTime.Unix(),
 		EndTime:    result.EndTime.Unix(),
