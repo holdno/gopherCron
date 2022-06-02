@@ -80,7 +80,7 @@ func (a *app) transportWebhookEvent(watchEvent *clientv3.Event) {
 		}).Error("failed to parse project id, not int")
 		return
 	}
-	lock := a.etcd.GetLocker(fmt.Sprintf("center_webhook_watcher_%d_%s", projectID, taskID))
+	lock := a.etcd.GetLocker(fmt.Sprintf("%s/lock/center_webhook_watcher_%d_%s", common.ETCD_PREFIX, projectID, taskID))
 	if err = lock.TryLock(); err != nil {
 		a.logger.WithFields(logrus.Fields{
 			"project_id": projectID,

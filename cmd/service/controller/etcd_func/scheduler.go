@@ -61,8 +61,8 @@ func TmpExecute(c *gin.Context) {
 
 // ExecuteTask 手动调用任务的请求参数
 type ExecuteTaskRequest struct {
-	ProjectID int64  `form:"project_id" binding:"required"`
-	TaskID    string `form:"task_id" binding:"required"`
+	ProjectID int64  `form:"project_id" json:"project_id" binding:"required"`
+	TaskID    string `form:"task_id" json:"task_id" binding:"required"`
 }
 
 // ExecuteTask 立即执行某个任务

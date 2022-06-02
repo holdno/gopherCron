@@ -11,6 +11,7 @@ import (
 	"github.com/holdno/gopherCron/utils"
 
 	"github.com/coreos/etcd/clientv3"
+	"github.com/coreos/etcd/clientv3/concurrency"
 	recipe "github.com/coreos/etcd/contrib/recipes"
 )
 
@@ -30,11 +31,8 @@ type comm struct {
 }
 
 type CommonInterface interface {
-	SetTaskRunning(plan *common.TaskSchedulePlan) error
-	SetTaskNotRunning(plan *common.TaskSchedulePlan, result *common.TaskExecuteResult) error
 	SaveTask(task *common.TaskInfo, opts ...clientv3.OpOption) (*common.TaskInfo, error)
 	GetTask(projectID int64, taskID string) (*common.TaskInfo, error)
-	TemporarySchedulerTask(task *common.TaskInfo) error
 	GetVersion() string
 }
 
@@ -43,8 +41,6 @@ func NewComm(etcd EtcdManager) CommonInterface {
 }
 
 type ClientEtcdManager interface {
-	SetTaskRunning(plan *common.TaskSchedulePlan) error
-	SetTaskNotRunning(plan *common.TaskSchedulePlan, result *common.TaskExecuteResult) error
 	TemporarySchedulerTask(task *common.TaskInfo) error
 	GetVersion() string
 }
@@ -53,7 +49,7 @@ func NewClientEtcdManager(etcd EtcdManager, projects []int64) ClientEtcdManager 
 	m := &comm{etcd: etcd, queueMap: make(map[int64]*recipe.Queue)}
 
 	for _, v := range projects {
-		m.queueMap[v] = recipe.NewQueue(etcd.Client(), common.BuildWorkflowQueueProjectKey(v))
+		m.queueMap[v] = recipe.NewQueue(etcd.Client(), common.BuildTaskResultQueueProjectKey(v))
 	}
 
 	InitRunningManager(m.queueMap)
@@ -62,8 +58,8 @@ func NewClientEtcdManager(etcd EtcdManager, projects []int64) ClientEtcdManager 
 }
 
 type RunningManager interface {
-	SetTaskRunning(kv clientv3.KV, plan *common.TaskSchedulePlan) error
-	SetTaskNotRunning(kv clientv3.KV, plan *common.TaskSchedulePlan, result *common.TaskExecuteResult) error
+	SetTaskRunning(s *concurrency.Session, plan *common.TaskExecutingInfo) error
+	SetTaskNotRunning(s *concurrency.Session, plan *common.TaskExecutingInfo, result *common.TaskExecuteResult) error
 }
 
 var runningManager = make(map[common.PlanType]RunningManager)
@@ -77,20 +73,20 @@ func InitRunningManager(queue map[int64]*recipe.Queue) {
 	}
 }
 
-func (a *comm) SetTaskRunning(plan *common.TaskSchedulePlan) error {
-	rm, exist := runningManager[plan.Type]
+func SetTaskRunning(session *concurrency.Session, execInfo *common.TaskExecutingInfo) error {
+	rm, exist := runningManager[execInfo.PlanType]
 	if !exist {
 		rm = runningManager[common.NormalPlan]
 	}
-	return rm.SetTaskRunning(a.etcd.KV(), plan)
+	return rm.SetTaskRunning(session, execInfo)
 }
 
-func (a *comm) SetTaskNotRunning(plan *common.TaskSchedulePlan, result *common.TaskExecuteResult) error {
-	rm, exist := runningManager[plan.Type]
+func SetTaskNotRunning(s *concurrency.Session, execInfo *common.TaskExecutingInfo, result *common.TaskExecuteResult) error {
+	rm, exist := runningManager[execInfo.PlanType]
 	if !exist {
 		rm = runningManager[common.NormalPlan]
 	}
-	return rm.SetTaskNotRunning(a.etcd.KV(), plan, result)
+	return rm.SetTaskNotRunning(s, execInfo, result)
 }
 
 // SaveTask save task to etcd
@@ -168,6 +164,9 @@ func (a *comm) TemporarySchedulerTask(task *common.TaskInfo) error {
 		err            error
 	)
 
+	// reset task create time as schedule time
+	task.CreateTime = time.Now().Unix()
+
 	// task to json
 	if saveByte, err = json.Marshal(task); err != nil {
 		errObj = errors.ErrInternalError
@@ -198,6 +197,8 @@ func (a *comm) TemporarySchedulerTask(task *common.TaskInfo) error {
 		errObj.Log = "[Etcd - TemporarySchedulerTask] etcd client kv put error:" + err.Error()
 		return errObj
 	}
+
+	// wait agent execute
 
 	return nil
 }
@@ -243,7 +244,7 @@ func (a *comm) GetTask(projectID int64, taskID string) (*common.TaskInfo, error)
 }
 
 const (
-	version = "v1.10.12"
+	version = "v2.0.0"
 )
 
 func (a *comm) GetVersion() string {

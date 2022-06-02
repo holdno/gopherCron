@@ -8,9 +8,11 @@ import (
 
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/pkg/warning"
+	"github.com/holdno/gopherCron/protocol"
 	"github.com/holdno/gopherCron/utils"
 	"github.com/holdno/rego"
 
+	"github.com/coreos/etcd/clientv3/concurrency"
 	"github.com/sirupsen/logrus"
 )
 
@@ -241,7 +243,6 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) {
 	var (
 		taskExecuteInfo *common.TaskExecutingInfo
 		taskExecuting   bool
-		err             error
 	)
 
 	if taskExecuteInfo, taskExecuting = a.scheduler.CheckTaskExecuting(plan.Task.SchedulerKey()); taskExecuting {
@@ -270,6 +271,7 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) {
 					plan.Task.TaskID, err)
 				return
 			}
+
 			defer func() {
 				// 任务执行后锁最少保持5s
 				// 防止分布式部署下多台机器共同执行
@@ -280,14 +282,33 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) {
 			}()
 		}
 
+		etcdSession, err := concurrency.NewSession(a.etcd.Client(), concurrency.WithContext(taskExecuteInfo.CancelCtx), concurrency.WithTTL(10))
+		if err != nil {
+			a.Warning(warning.WarningData{
+				Type:      warning.WarningTypeSystem,
+				AgentIP:   a.localip,
+				TaskName:  plan.Task.Name,
+				ProjectID: plan.Task.ProjectID,
+				Data:      "任务启动时生成新的etcd session失败",
+			})
+			a.logger.Errorf("task: %s, id: %s, failed to build new etcd session, error: %v",
+				plan.Task.Name, plan.Task.TaskID, err)
+			return
+		}
+
 		a.scheduler.SetExecutingTask(plan.Task.SchedulerKey(), taskExecuteInfo)
 		var result *common.TaskExecuteResult
 		defer func() {
+			if err != nil && err == protocol.ErrScheduleTimeout {
+				return
+			}
+			etcdSession.Close()
+
 			// 删除任务的正在执行状态
 			a.scheduler.DeleteExecutingTask(plan.Task.SchedulerKey())
 			if errList := rego.Retry(func() error {
-				return a.SetTaskNotRunning(plan, result)
-			}); errList != nil {
+				return protocol.SetTaskNotRunning(etcdSession, taskExecuteInfo, result)
+			}, rego.WithTimes(3)); len(errList) == 3 {
 				a.Warning(warning.WarningData{
 					Type:      warning.WarningTypeTask,
 					AgentIP:   a.localip,
@@ -296,13 +317,13 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) {
 					Data:      "变更任务运行状态失败",
 				})
 				a.logger.Errorf("task: %s, id: %s, failed to change running status, the task is finished, error: %v",
-					plan.Task.Name, plan.Task.TaskID, errList)
+					plan.Task.Name, plan.Task.TaskID, errList.Latest())
 			}
 		}()
 
 		if errList := rego.Retry(func() error {
-			return a.SetTaskRunning(plan)
-		}); errList != nil {
+			return protocol.SetTaskRunning(etcdSession, taskExecuteInfo)
+		}, rego.WithTimes(3)); len(errList) == 3 {
 			a.Warning(warning.WarningData{
 				Type:      warning.WarningTypeTask,
 				AgentIP:   a.localip,
@@ -311,7 +332,7 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) {
 				Data:      "设置任务运行状态失败",
 			})
 			a.logger.Warnf("task: %s, id: %s, change running status error, %v", plan.Task.Name,
-				plan.Task.TaskID, err)
+				plan.Task.TaskID, errList.Latest())
 			return
 		}
 

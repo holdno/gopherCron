@@ -55,8 +55,8 @@ func NewError(code int, msg string) *Error {
 }
 
 const (
-	// CodeInvalIDArgument 无效的请求参数
-	CodeInvalIDArgument = 400
+	// CodeInvalidArgument 无效的请求参数
+	CodeInvalidArgument = 400
 	// CodeUnauthorized  Unauthorized，access token没有传递、无效响应这个状态码
 	CodeUnauthorized  = 401
 	CodeAuthorExpired = 401
@@ -88,7 +88,7 @@ const (
 
 var (
 	// ErrInvalidArgument 参数无效错误
-	ErrInvalidArgument = Error{Code: CodeInvalIDArgument, Msg: "请求失败（错误码：400）", MsgEn: "Request failed (Error code: 400)", Log: "参数无效"}
+	ErrInvalidArgument = Error{Code: CodeInvalidArgument, Msg: "请求失败（错误码：400）", MsgEn: "Request failed (Error code: 400)", Log: "参数无效"}
 	// ErrUnauthorized 身份认证失败请重新登录错误
 	ErrUnauthorized = Error{Code: CodeUnauthorized, Msg: "身份认证失败,请重新登录", MsgEn: "Unauthorized", Log: "请求未授权"}
 	// ErrAuthorExpired

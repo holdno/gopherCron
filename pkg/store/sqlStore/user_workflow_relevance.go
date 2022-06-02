@@ -38,11 +38,40 @@ func (s *userWorkflowRelevanceStore) Create(tx *gorm.DB, data *common.UserWorkfl
 func (s *userWorkflowRelevanceStore) GetUserWorkflows(userID int64) ([]common.UserWorkflowRelevance, error) {
 	var list []common.UserWorkflowRelevance
 	err := s.GetReplica().Table(s.GetTable()).Where("user_id = ?", userID).Find(&list).Error
-	return list, err
+	if err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
+func (s *userWorkflowRelevanceStore) GetWorkflowUsers(workflowID int64) ([]common.UserWorkflowRelevance, error) {
+	var list []common.UserWorkflowRelevance
+	err := s.GetReplica().Table(s.GetTable()).Where("workflow_id = ?", workflowID).Find(&list).Error
+	if err != nil {
+		return nil, err
+	}
+	return list, nil
 }
 
 func (s *userWorkflowRelevanceStore) GetUserWorkflowRelevance(userID int64, workflowID int64) (*common.UserWorkflowRelevance, error) {
 	var result common.UserWorkflowRelevance
 	err := s.GetReplica().Table(s.GetTable()).Where("user_id = ? AND workflow_id = ?", userID, workflowID).First(&result).Error
-	return &result, err
+	if err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (s *userWorkflowRelevanceStore) DeleteWorkflowAllUserRelevance(tx *gorm.DB, workflowID int64) error {
+	if tx == nil {
+		tx = s.GetMaster()
+	}
+	return tx.Table(s.GetTable()).Where("workflow_id = ?", workflowID).Delete(nil).Error
+}
+
+func (s *userWorkflowRelevanceStore) DeleteUserWorkflowRelevance(tx *gorm.DB, workflowID, userID int64) error {
+	if tx == nil {
+		tx = s.GetMaster()
+	}
+	return tx.Table(s.GetTable()).Where("workflow_id = ? AND user_id = ?", workflowID, userID).Delete(nil).Error
 }

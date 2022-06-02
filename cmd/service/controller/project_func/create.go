@@ -1,6 +1,8 @@
 package project_func
 
 import (
+	"time"
+
 	"github.com/holdno/gopherCron/app"
 	"github.com/holdno/gopherCron/cmd/service/response"
 	"github.com/holdno/gopherCron/common"
@@ -65,5 +67,41 @@ func Create(c *gin.Context) {
 		return
 	}
 
+	response.APISuccess(c, nil)
+}
+
+type CreateProjectWorkflowTaskRequest struct {
+	ProjectID int64  `json:"project_id" form:"project_id" binding:"required"`
+	TaskName  string `json:"task_name" form:"task_name" binding:"required"`
+	Command   string `json:"command" form:"command" binding:"required"`
+	Remark    string `json:"remark" form:"remark"`
+	Timeout   int    `json:"timeout" form:"timeout" binding:"required"`
+}
+
+func CreateProjectWorkflowTask(c *gin.Context) {
+	var (
+		err error
+		req CreateProjectWorkflowTaskRequest
+	)
+	if err = utils.BindArgsWithGin(c, &req); err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	srv := app.GetApp(c)
+	uid := utils.GetUserID(c)
+
+	err = srv.CreateWorkflowTask(uid, common.WorkflowTask{
+		ProjectID:  req.ProjectID,
+		TaskName:   req.TaskName,
+		Command:    req.Command,
+		Remark:     req.Remark,
+		Timeout:    req.Timeout,
+		CreateTime: time.Now().Unix(),
+	})
+	if err != nil {
+		response.APIError(c, err)
+		return
+	}
 	response.APISuccess(c, nil)
 }

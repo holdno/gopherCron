@@ -11,8 +11,8 @@ import (
 )
 
 type DeleteTaskRequest struct {
-	ProjectID int64  `form:"project_id" binding:"required"`
-	TaskID    string `form:"task_id" binding:"required"`
+	ProjectID int64  `form:"project_id" json:"project_id" binding:"required"`
+	TaskID    string `form:"task_id" json:"task_id" binding:"required"`
 }
 
 // DeleteTask delete task from etcd

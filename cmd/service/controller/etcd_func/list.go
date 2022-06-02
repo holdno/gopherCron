@@ -14,13 +14,13 @@ import (
 
 // GetTaskListRequest 获取任务列表请求参数
 type GetTaskListRequest struct {
-	ProjectID int64 `form:"project_id" binding:"required"`
+	ProjectID int64 `json:"project_id" form:"project_id" binding:"required"`
 }
 
 // GetList 获取任务列表
 func GetTaskList(c *gin.Context) {
 	var (
-		taskList []*common.TaskInfo
+		taskList []*common.TaskListItemWithWorkflows
 		errObj   errors.Error
 		err      error
 		req      GetTaskListRequest
@@ -52,7 +52,7 @@ func GetTaskList(c *gin.Context) {
 
 // GetWorkerListRequest 获取节点的请求参数
 type GetClientListRequest struct {
-	ProjectID int64 `form:"project_id" binding:"required"`
+	ProjectID int64 `json:"project_id" form:"project_id" binding:"required"`
 }
 
 // GetWorkerList 获取节点
@@ -107,7 +107,7 @@ func GetClientList(c *gin.Context) {
 // 通过多个projectID来获取所有workerlist
 // GetWorkerListInfoRequest 获取节点的请求参数
 type GetWorkerListInfoRequest struct {
-	ProjectIDs string `form:"project_ids"`
+	ProjectIDs string `json:"project_ids" form:"project_ids"`
 }
 
 type GetWorkerListInfoResponse struct {
@@ -171,8 +171,7 @@ func GetWorkerListInfo(c *gin.Context) {
 }
 
 type ReloadConfigRequest struct {
-	ClientIP  string `json:"client_ip" form:"client_ip" binding:"required"`
-	ProjectID int64  `json:"project_id" form:"project_id" binding:"required"`
+	ClientIP string `json:"client_ip" form:"client_ip" binding:"required"`
 }
 
 func ReloadConfig(c *gin.Context) {
@@ -181,7 +180,6 @@ func ReloadConfig(c *gin.Context) {
 		req ReloadConfigRequest
 		srv = app.GetApp(c)
 		uid = utils.GetUserID(c)
-		ok  bool
 	)
 
 	if err = utils.BindArgsWithGin(c, &req); err != nil {
@@ -196,26 +194,28 @@ func ReloadConfig(c *gin.Context) {
 	}
 
 	if !isAdmin {
-		if ok, err = srv.CheckUserIsInProject(req.ProjectID, uid); err != nil {
-			response.APIError(c, err)
-			return
-		}
-
-		if !ok {
-			response.APIError(c, errors.ErrUnauthorized)
-			return
-		}
-	}
-
-	if ok, err = srv.CheckProjectWorkerExist(req.ProjectID, req.ClientIP); err != nil {
-		response.APIError(c, err)
-		return
-	}
-
-	if !ok {
 		response.APIError(c, errors.ErrUnauthorized)
 		return
+		// if ok, err = srv.CheckUserIsInProject(req.ProjectID, uid); err != nil {
+		// 	response.APIError(c, err)
+		// 	return
+		// }
+
+		// if !ok {
+		// 	response.APIError(c, errors.ErrUnauthorized)
+		// 	return
+		// }
 	}
+
+	// if ok, err = srv.CheckProjectWorkerExist(req.ProjectID, req.ClientIP); err != nil {
+	// 	response.APIError(c, err)
+	// 	return
+	// }
+
+	// if !ok {
+	// 	response.APIError(c, errors.ErrUnauthorized)
+	// 	return
+	// }
 
 	if err = srv.ReloadWorkerConfig(req.ClientIP); err != nil {
 		response.APIError(c, err)

@@ -61,3 +61,28 @@ func DeleteOne(c *gin.Context) {
 
 	response.APISuccess(c, nil)
 }
+
+type DeleteProjectWorkflowTaskRequest struct {
+	ProjectID int64  `json:"project_id" form:"project_id" binding:"required"`
+	TaskID    string `json:"task_id" form:"task_id" binding:"required"`
+}
+
+func DeleteProjectWorkflowTask(c *gin.Context) {
+	var (
+		err error
+		req DeleteProjectWorkflowTaskRequest
+	)
+	if err = utils.BindArgsWithGin(c, &req); err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	srv := app.GetApp(c)
+	uid := utils.GetUserID(c)
+	if err = srv.DeleteWorkflowTask(uid, req.ProjectID, req.TaskID); err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	response.APISuccess(c, nil)
+}

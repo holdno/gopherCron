@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -17,9 +19,13 @@ import (
 	"github.com/holdno/gopherCron/pkg/warning"
 	"github.com/holdno/gopherCron/protocol"
 	"github.com/holdno/gopherCron/utils"
+	"github.com/holdno/rego"
 
 	"github.com/coreos/etcd/clientv3"
+	"github.com/coreos/etcd/clientv3/concurrency"
+	recipe "github.com/coreos/etcd/contrib/recipes"
 	"github.com/gin-gonic/gin"
+	"github.com/holdno/firetower/service/gateway"
 	"github.com/holdno/gocommons/selection"
 	"github.com/jinzhu/gorm"
 	"github.com/sirupsen/logrus"
@@ -42,8 +48,8 @@ type App interface {
 	CheckProjectWorkerExist(projectID int64, host string) (bool, error)
 	ReloadWorkerConfig(host string) error
 	GetProjectTaskCount(projectID int64) (int64, error)
-	GetTaskList(projectID int64) ([]*common.TaskInfo, error)
-	GetTask(projectID int64, nameID string) (*common.TaskInfo, error)
+	GetTaskList(projectID int64) ([]*common.TaskListItemWithWorkflows, error)
+	GetTask(projectID int64, taskID string) (*common.TaskInfo, error)
 	GetMonitor(ip string) (*common.MonitorInfo, error)
 	TemporarySchedulerTask(task *common.TaskInfo) error
 	GetTaskLogList(pid int64, tid string, page, pagesize int) ([]*common.TaskLog, error)
@@ -73,20 +79,35 @@ type App interface {
 	DeleteWebHook(tx *gorm.DB, projectID int64, types string) error
 	DeleteAllWebHook(tx *gorm.DB, projectID int64) error
 	CheckPermissions(projectID, uid int64) error
-	GetErrorLogs(pids []int64, page, pagesize int) ([]*common.TaskLog, error)
+	GetErrorLogs(pids []int64, page, pagesize int) ([]*common.TaskLog, int, error)
 	// workflow
 	CreateWorkflow(userID int64, data common.Workflow) error
 	DeleteWorkflow(userID int64, workflowID int64) error
 	UpdateWorkflow(userID int64, data common.Workflow) error
-	CreateWorkflowTask(userID int64, workflowID int64, taskList []CreateWorkflowTaskArgs) error
+	CreateWorkflowTask(userID int64, data common.WorkflowTask) error
+	CreateWorkflowSchedulePlan(userID int64, workflowID int64, taskList []CreateWorkflowSchedulePlanArgs) error
 	GetWorkflowList(opts common.GetWorkflowListOptions, page, pagesize uint64) ([]common.Workflow, int, error)
+	GetWorkflow(id int64) (*common.Workflow, error)
+	GetWorkflowTask(projectID int64, taskID string) (*common.WorkflowTask, error)
+	GetProjectWorkflowTask(projectID int64) ([]common.WorkflowTask, error)
 	GetUserWorkflows(userID int64) ([]int64, error)
-	GetWorkflowTasks(workflowID int64) ([]common.WorkflowTask, error)
+	GetWorkflowScheduleTasks(workflowID int64) ([]common.WorkflowSchedulePlan, error)
 	GetUserWorkflowPermission(userID, workflowID int64) error
 	GetWorkflowLogList(workflowID int64, page, pagesize uint64) ([]common.WorkflowLog, int, error)
 	CreateWorkflowLog(workflowID int64, startTime, endTime int64, result string) error
 	ClearWorkflowLog(workflowID int64) error
 	GetWorkflowState(workflowID int64) (*PlanState, error)
+	GetWorkflowAllTaskStates(workflowID int64) ([]*WorkflowTaskStates, error)
+	GetMultiWorkflowTaskList(taskIDs []string) ([]common.WorkflowTask, error)
+	StartWorkflow(workflowID int64) error
+	KillWorkflow(workflowID int64) error
+	UpdateWorkflowTask(userID int64, data common.WorkflowTask) error
+	DeleteWorkflowTask(userID, projectID int64, taskID string) error
+	WorkflowRemoveUser(workflowID, userID int64) error
+	WorkflowAddUser(workflowID, userID int64) error
+	GetWorkflowRelevanceUsers(workflowID int64) ([]common.UserWorkflowRelevance, error)
+	// web sockets
+	PublishMessage(data PublishData)
 
 	BeginTx() *gorm.DB
 	Close()
@@ -102,6 +123,7 @@ func GetApp(c *gin.Context) App {
 }
 
 type app struct {
+	clusterID  int64
 	httpClient *http.Client
 	store      sqlStore.SqlStore
 	logger     *logrus.Logger
@@ -110,13 +132,23 @@ type app struct {
 	isClose    bool
 	localip    string
 
-	workflowRunner *workflowRunner
+	workflowRunner  *workflowRunner
+	messageChan     chan PublishData
+	messageCounter  int64
+	taskResultQueue *recipe.Queue
+	taskResultChan  chan string
 
 	cfg *config.ServiceConfig
 
 	panicgroup.PanicGroup
 	protocol.CommonInterface
 	warning.Warner
+
+	webPusher gateway.ServicePusher
+}
+
+type WebClientPusher interface {
+	Publish(messageId, source, topic string, data json.RawMessage) error
 }
 
 func (a *app) GetEtcdClient() *clientv3.Client {
@@ -128,6 +160,25 @@ type AppOptions func(a *app)
 func WithWarning(w warning.Warner) AppOptions {
 	return func(a *app) {
 		a.Warner = w
+	}
+}
+
+func WithFiretower(configPath string) AppOptions {
+	return func(a *app) {
+		if configPath == "" {
+			return
+		}
+		gateway.ClusterId = a.clusterID
+		gateway.DefaultConfigPath = configPath
+		gateway.Init()
+
+		a.messageChan = make(chan PublishData, 1000)
+		a.Go(func() {
+			for {
+				res := <-a.messageChan
+				a.publishEventToWebClient(res)
+			}
+		})
 	}
 }
 
@@ -143,6 +194,38 @@ func NewApp(configPath string, opts ...AppOptions) App {
 		Timeout: time.Second * 5,
 	}
 
+	app.logger.Info("start to connect etcd ...")
+	if app.etcd, err = etcd.Connect(conf.Etcd); err != nil {
+		panic(err)
+	}
+
+	{
+		app.taskResultChan = make(chan string, 100)
+		app.taskResultQueue = recipe.NewQueue(app.etcd.Client(), common.BuildTaskResultQueuePrefixKey())
+	}
+
+	app.logger.Info("connected to etcd")
+	app.CommonInterface = protocol.NewComm(app.etcd)
+
+	clusterID, err := app.etcd.Inc(conf.Etcd.Prefix + common.CLUSTER_AUTO_INDEX)
+	if err != nil {
+		panic(err)
+	}
+
+	app.clusterID = clusterID % 1024
+	app.PanicGroup = panicgroup.NewPanicGroup(func(err error) {
+		reserr := app.Warning(warning.WarningData{
+			Data:    err.Error(),
+			Type:    warning.WarningTypeSystem,
+			AgentIP: app.localip,
+		})
+		if reserr != nil {
+			app.logger.WithFields(logrus.Fields{
+				"desc":         reserr,
+				"source_error": err,
+			}).Error("panicgroup: failed to warning panic error")
+		}
+	})
 	for _, opt := range opts {
 		opt(app)
 	}
@@ -157,33 +240,8 @@ func NewApp(configPath string, opts ...AppOptions) App {
 
 	jwt.InitJWT(conf.JWT)
 
-	app.logger.Info("start to connect etcd ...")
-	if app.etcd, err = etcd.Connect(conf.Etcd); err != nil {
-		panic(err)
-	}
-	app.logger.Info("connected to etcd")
-	app.CommonInterface = protocol.NewComm(app.etcd)
-
-	clusterID, err := app.etcd.Inc(conf.Etcd.Prefix + common.CLUSTER_AUTO_INDEX)
-	if err != nil {
-		panic(err)
-	}
-
 	// why 1024. view https://github.com/holdno/snowFlakeByGo
-	utils.InitIDWorker(clusterID % 1024)
-	app.PanicGroup = panicgroup.NewPanicGroup(func(err error) {
-		reserr := app.Warning(warning.WarningData{
-			Data:    err.Error(),
-			Type:    warning.WarningTypeSystem,
-			AgentIP: app.localip,
-		})
-		if reserr != nil {
-			app.logger.WithFields(logrus.Fields{
-				"desc":         reserr,
-				"source_error": err,
-			}).Error("panicgroup: failed to warning panic error")
-		}
-	})
+	utils.InitIDWorker(app.clusterID)
 	app.Go(func() {
 		for {
 			select {
@@ -204,6 +262,31 @@ func NewApp(configPath string, opts ...AppOptions) App {
 			select {
 			case <-t.C:
 				app.AutoCleanLogs()
+			case executeResult := <-app.taskResultChan:
+				var execResult protocol.TaskFinishedQueueContent
+				_ = json.Unmarshal([]byte(executeResult), &execResult)
+				switch execResult.Version {
+				case protocol.QueueItemV1:
+
+					var result protocol.TaskFinishedQueueItemV1
+					_ = json.Unmarshal(execResult.Data, &result)
+					if result.TaskType == common.WorkflowPlan {
+						if err := app.workflowRunner.handleTaskResultV1(result); err != nil {
+							if err = app.taskResultQueue.Enqueue(executeResult); err != nil {
+								app.Warning(warning.WarningData{
+									Type:      warning.WarningTypeSystem,
+									Data:      fmt.Sprintf("任务结果消费出错，重新入队失败, %s", err.Error()),
+									TaskName:  result.TaskID,
+									ProjectID: result.ProjectID,
+								})
+							}
+						}
+					} else {
+						// normal task
+						app.PublishMessage(messageTaskStatusChanged(result.ProjectID, result.TaskID, result.Status))
+					}
+
+				}
 			case <-app.closeCh:
 				t.Stop()
 				// app.etcd.Lock(nil).CloseAll()
@@ -217,10 +300,66 @@ func NewApp(configPath string, opts ...AppOptions) App {
 		panic(err)
 	}
 
-	app.Go(workflow.Loop)
+	app.Go(func() {
+		for {
+			// 同一时间只需要有一个service的Loop运行即可
+			s, err := concurrency.NewSession(app.etcd.Client(), concurrency.WithTTL(9))
+			if err != nil {
+				fmt.Println(err)
+				continue
+			}
+			e := concurrency.NewElection(s, common.BuildWorkflowMasterKey())
+			ctx, _ := utils.GetContextWithTimeout()
+			err = e.Campaign(ctx, app.GetIP())
+			if err != nil {
+				switch {
+				case err == context.Canceled:
+					return
+				default:
+					continue
+				}
+			}
+			fmt.Println("new workflow leader")
+			list, _, err := app.GetWorkflowList(common.GetWorkflowListOptions{}, 1, 1000)
+			if err != nil {
+				app.logger.Error("failed to refresh workflow list", err.Error())
+				continue
+			}
+
+			for _, v := range list {
+				workflow.SetPlan(v)
+			}
+			workflow.Loop()
+		}
+
+	})
 	app.workflowRunner = workflow
 
+	app.Go(func() {
+		for {
+			errList := rego.Retry(func() error {
+				result, err := app.taskResultQueue.Dequeue()
+				if err != nil {
+					return err
+				}
+				app.taskResultChan <- result
+				return nil
+			}, rego.WithTimes(5), rego.WithPeriod(time.Second))
+			if len(errList) == 5 {
+				// todo warning?
+			}
+		}
+	})
+
 	return app
+}
+
+func (a *app) PublishMessage(data PublishData) {
+	if a.messageChan == nil || len(a.messageChan) == 1000 {
+		// todo
+		return
+	}
+	a.messageChan <- data
 }
 
 func (a *app) GetConfig() *config.ServiceConfig {
@@ -386,16 +525,10 @@ func (a *app) GetTaskLogList(pid int64, tid string, page, pagesize int) ([]*comm
 		return nil, errObj
 	}
 
-	for _, v := range list {
-		if len(v.Result) > 255 {
-			v.Result = v.Result[:255]
-		}
-	}
-
 	return list, nil
 }
 
-func (a *app) GetErrorLogs(pids []int64, page, pagesize int) ([]*common.TaskLog, error) {
+func (a *app) GetErrorLogs(pids []int64, page, pagesize int) ([]*common.TaskLog, int, error) {
 	opt := selection.NewSelector(selection.NewRequirement("with_error", selection.Equals, common.ErrorLog))
 	if len(pids) > 0 {
 		opt.AddQuery(selection.NewRequirement("project_id", selection.In, pids))
@@ -406,13 +539,15 @@ func (a *app) GetErrorLogs(pids []int64, page, pagesize int) ([]*common.TaskLog,
 
 	list, err := a.store.TaskLog().GetList(opt)
 	if err != nil && err != gorm.ErrRecordNotFound {
-		errObj := errors.ErrInternalError
-		errObj.Msg = "获取日志列表失败"
-		errObj.Log = err.Error()
-		return nil, errObj
+		return nil, 0, errors.NewError(http.StatusInternalServerError, "获取日志列表失败").WithLog(err.Error())
 	}
 
-	return list, nil
+	total, err := a.store.TaskLog().GetTotal(opt)
+	if err != nil && err != gorm.ErrRecordNotFound {
+		return nil, 0, errors.NewError(http.StatusInternalServerError, "获取日志列表总数失败").WithLog(err.Error())
+	}
+
+	return list, total, nil
 }
 
 func (a *app) GetTaskLogTotal(pid int64, tid string) (int, error) {

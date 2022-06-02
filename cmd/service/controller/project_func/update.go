@@ -1,6 +1,8 @@
 package project_func
 
 import (
+	"time"
+
 	"github.com/holdno/gopherCron/app"
 	"github.com/holdno/gopherCron/cmd/service/response"
 	"github.com/holdno/gopherCron/common"
@@ -52,8 +54,8 @@ func Update(c *gin.Context) {
 }
 
 type RemoveUserRequest struct {
-	UserID    int64 `form:"user_id" binding:"required"`
-	ProjectID int64 `form:"project_id" binding:"required"`
+	UserID    int64 `json:"user_id" form:"user_id" binding:"required"`
+	ProjectID int64 `json:"project_id" form:"project_id" binding:"required"`
 }
 
 func RemoveUser(c *gin.Context) {
@@ -91,8 +93,8 @@ func RemoveUser(c *gin.Context) {
 }
 
 type AddUserRequest struct {
-	ProjectID   int64  `form:"project_id" binding:"required"`
-	UserAccount string `form:"user_account" binding:"required"`
+	ProjectID   int64  `json:"project_id" form:"project_id" binding:"required"`
+	UserAccount string `json:"user_account" form:"user_account" binding:"required"`
 }
 
 func AddUser(c *gin.Context) {
@@ -137,5 +139,43 @@ func AddUser(c *gin.Context) {
 		return
 	}
 
+	response.APISuccess(c, nil)
+}
+
+type UpdateProjectWorkflowTaskRequest struct {
+	TaskID    string `json:"task_id" form:"task_id" binding:"required"`
+	ProjectID int64  `json:"project_id" form:"project_id" binding:"required"`
+	TaskName  string `json:"task_name" form:"task_name" binding:"required"`
+	Command   string `json:"command" form:"command" binding:"required"`
+	Remark    string `json:"remark" form:"remark"`
+	Timeout   int    `json:"timeout" form:"timeout" binding:"required"`
+}
+
+func UpdateProjectWorkflowTask(c *gin.Context) {
+	var (
+		err error
+		req UpdateProjectWorkflowTaskRequest
+	)
+	if err = utils.BindArgsWithGin(c, &req); err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	uid := utils.GetUserID(c)
+	srv := app.GetApp(c)
+
+	err = srv.UpdateWorkflowTask(uid, common.WorkflowTask{
+		TaskID:     req.TaskID,
+		ProjectID:  req.ProjectID,
+		TaskName:   req.TaskName,
+		Command:    req.Command,
+		Remark:     req.Remark,
+		Timeout:    req.Timeout,
+		CreateTime: time.Now().Unix(),
+	})
+	if err != nil {
+		response.APIError(c, err)
+		return
+	}
 	response.APISuccess(c, nil)
 }

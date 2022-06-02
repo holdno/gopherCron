@@ -1,8 +1,11 @@
 package router
 
 import (
+	"fmt"
 	"net/http"
 
+	"github.com/gorilla/websocket"
+	"github.com/holdno/firetower/service/gateway"
 	"github.com/holdno/gopherCron/cmd/service/controller"
 	"github.com/holdno/gopherCron/cmd/service/controller/etcd_func"
 	"github.com/holdno/gopherCron/cmd/service/controller/log_func"
@@ -11,6 +14,7 @@ import (
 	"github.com/holdno/gopherCron/cmd/service/controller/user_func"
 	"github.com/holdno/gopherCron/cmd/service/middleware"
 	"github.com/holdno/gopherCron/config"
+	"github.com/holdno/gopherCron/utils"
 
 	"github.com/gin-gonic/gin"
 )
@@ -22,6 +26,7 @@ func SetupRoute(r *gin.Engine, conf *config.DeployConf) {
 
 	api := r.Group("/api/v1")
 	{
+		api.GET("/ws", Websocket)
 		api.GET("/version", system.GetVersion)
 		user := api.Group("/user")
 		{
@@ -65,11 +70,26 @@ func SetupRoute(r *gin.Engine, conf *config.DeployConf) {
 			workflow.POST("/create", controller.CreateWorkflow)
 			workflow.POST("/delete", controller.DeleteWorkflow)
 			workflow.POST("/update", controller.UpdateWorkflow)
-			workflow.POST("/task/create", controller.CreateWorkflowTask)
-			workflow.GET("/task/list", controller.GetWorkflowTaskList)
 			workflow.GET("/list", controller.GetWorkflowList)
-			workflow.GET("/log/list", controller.GetWorkflowLogList)
-			workflow.POST("/log/clear", controller.ClearWorkflowLog)
+			workflow.GET("/detail", controller.GetWorkflow)
+			workflow.POST("/start", controller.StartWorkflow)
+			workflow.POST("/kill", controller.KillWorkflow)
+			manage := workflow.Group("/manage")
+			{
+				manage.POST("/add_user", controller.WorkflowAddUser)
+				manage.POST("/remove_user", controller.WorkflowRemoveUser)
+				manage.GET("/users", controller.GetUsersByWorkflow)
+			}
+			task := workflow.Group("/task")
+			{
+				task.POST("/schedule/create", controller.CreateWorkflowSchedulePlan)
+				task.GET("/list", controller.GetWorkflowTaskList)
+			}
+			log := workflow.Group("/log")
+			{
+				log.GET("/list", controller.GetWorkflowLogList)
+				log.POST("/clear", controller.ClearWorkflowLog)
+			}
 		}
 
 		worker := api.Group("/client")
@@ -89,6 +109,13 @@ func SetupRoute(r *gin.Engine, conf *config.DeployConf) {
 			project.GET("/users", user_func.GetUsersUnderTheProject)
 			project.POST("/remove_user", project_func.RemoveUser)
 			project.POST("/add_user", project_func.AddUser)
+			workflow := project.Group("/workflow")
+			{
+				workflow.GET("/task/list", project_func.GetProjectWorkflowTasks)
+				workflow.POST("/task/create", project_func.CreateProjectWorkflowTask)
+				workflow.POST("/task/delete", project_func.DeleteProjectWorkflowTask)
+				workflow.POST("/task/update", project_func.UpdateProjectWorkflowTask)
+			}
 		}
 
 		log := api.Group("/log")
@@ -110,4 +137,54 @@ func SetupRoute(r *gin.Engine, conf *config.DeployConf) {
 	}
 	r.StaticFS("/admin", http.Dir(conf.ViewPath))
 	r.StaticFile("/favicon.ico", conf.ViewPath+"/favicon.ico")
+
+}
+
+var upgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool {
+		return true
+	},
+}
+
+// Websocket http转websocket连接 并实例化firetower
+func Websocket(c *gin.Context) {
+	// 做用户身份验证
+
+	// 验证成功才升级连接
+	ws, _ := upgrader.Upgrade(c.Writer, c.Request, nil)
+
+	tower := gateway.BuildTower(ws, utils.GetStrID())
+
+	tower.SetReadHandler(func(fire *gateway.FireInfo) bool {
+		// 做发送验证
+		// 判断发送方是否有权限向到达方发送内容
+		tower.Publish(fire)
+		return true
+	})
+
+	tower.SetSubscribeHandler(func(context *gateway.FireLife, topic []string) bool {
+		for _, v := range topic {
+			num := tower.GetConnectNum(v)
+			// 继承订阅消息的context
+			var pushmsg = gateway.NewFireInfo(tower, context)
+			pushmsg.Message.Topic = v
+			pushmsg.Message.Data = []byte(fmt.Sprintf("{\"type\":\"onSubscribe\",\"data\":%d}", num))
+			tower.Publish(pushmsg)
+		}
+		return true
+	})
+
+	tower.SetUnSubscribeHandler(func(context *gateway.FireLife, topic []string) bool {
+		for _, v := range topic {
+			num := tower.GetConnectNum(v)
+			var pushmsg = gateway.NewFireInfo(tower, context)
+			pushmsg.Message.Topic = v
+			pushmsg.Message.Data = []byte(fmt.Sprintf("{\"type\":\"onUnsubscribe\",\"data\":%d}", num))
+			fmt.Println(pushmsg)
+			tower.Publish(pushmsg)
+		}
+		return true
+	})
+
+	tower.Run()
 }

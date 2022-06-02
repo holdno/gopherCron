@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/errors"
 	"github.com/holdno/gopherCron/utils"
 
 	"github.com/coreos/etcd/clientv3"
+	"github.com/coreos/etcd/clientv3/concurrency"
 	recipe "github.com/coreos/etcd/contrib/recipes"
 )
 
@@ -34,19 +36,22 @@ type WorkflowTaskScheduleRecord struct {
 	EndTime   int64
 }
 
-func (d *workflowRunningManager) SetTaskRunning(kv clientv3.KV, plan *common.TaskSchedulePlan) error {
+func (d *workflowRunningManager) SetTaskRunning(s *concurrency.Session, execInfo *common.TaskExecutingInfo) error {
+	if time.Now().Sub(time.Unix(execInfo.Task.CreateTime, 0)).Seconds() > 5 {
+		return ErrScheduleTimeout
+	}
 	// todo ack
-	ackKey := common.BuildWorkflowAckKey(plan.Task.FlowInfo.WorkflowID, plan.Task.ProjectID, plan.Task.TaskID, plan.TmpID)
+	ackKey := common.BuildWorkflowAckKey(execInfo.Task.FlowInfo.WorkflowID, execInfo.Task.ProjectID, execInfo.Task.TaskID, execInfo.TmpID)
 	data, _ := json.Marshal(common.AckResponseV1{
-		ClientIP: plan.Task.ClientIP,
+		ClientIP: execInfo.Task.ClientIP,
 		Type:     "success",
-		TmpID:    plan.TmpID,
+		TmpID:    execInfo.TmpID,
 	})
 	ackData, _ := json.Marshal(common.AckResponse{
 		Version: common.ACK_RESPONSE_V1,
 		Data:    data,
 	})
-	if _, err := kv.Put(context.TODO(), ackKey, string(ackData)); err != nil {
+	if _, err := s.Client().Put(context.TODO(), ackKey, string(ackData)); err != nil {
 		return err
 	}
 	// todo warning
@@ -58,6 +63,10 @@ func (d *workflowRunningManager) SetTaskRunning(kv clientv3.KV, plan *common.Tas
 	// })
 	return nil
 }
+
+var (
+	ErrScheduleTimeout = fmt.Errorf("task schedule timeout")
+)
 
 func GetWorkflowTaskStates(kv clientv3.KV, key string) (*WorkflowTaskStates, error) {
 	ctx, _ := utils.GetContextWithTimeout()
@@ -82,8 +91,7 @@ func GetWorkflowTaskStates(kv clientv3.KV, key string) (*WorkflowTaskStates, err
 	return &workflowTaskStates, nil
 }
 
-func (d *workflowRunningManager) SetTaskNotRunning(kv clientv3.KV, plan *common.TaskSchedulePlan, result *common.TaskExecuteResult) error {
-	fmt.Println("result", *result)
+func (d *workflowRunningManager) SetTaskNotRunning(s *concurrency.Session, execInfo *common.TaskExecutingInfo, result *common.TaskExecuteResult) error {
 	var status string
 	if result == nil || result.Err != "" {
 		// 未执行，发生未知错误
@@ -96,11 +104,11 @@ func (d *workflowRunningManager) SetTaskNotRunning(kv clientv3.KV, plan *common.
 		result = &common.TaskExecuteResult{}
 	}
 
-	err := d.queue[plan.Task.ProjectID].Enqueue(generateTaskFinishedResultV1(TaskFinishedQueueItemV1{
-		ProjectID:  plan.Task.ProjectID,
-		TaskID:     plan.Task.TaskID,
-		WorkflowID: plan.Task.FlowInfo.WorkflowID,
-		TmpID:      plan.Task.TmpID,
+	err := d.queue[execInfo.Task.ProjectID].Enqueue(generateTaskFinishedResultV1(TaskFinishedQueueItemV1{
+		ProjectID:  execInfo.Task.ProjectID,
+		TaskID:     execInfo.Task.TaskID,
+		WorkflowID: execInfo.Task.FlowInfo.WorkflowID,
+		TmpID:      execInfo.Task.TmpID,
 		Status:     status,
 		StartTime:  result.StartTime.Unix(),
 		EndTime:    result.EndTime.Unix(),

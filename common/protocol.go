@@ -30,6 +30,23 @@ type TaskInfo struct {
 	FlowInfo   *WorkflowInfo `json:"flow_info,omitempty"`
 }
 
+type TaskListItemWithWorkflows struct {
+	TaskID    string `json:"task_id"`
+	Name      string `json:"name"`
+	ProjectID int64  `json:"project_id"`
+
+	Command    string  `json:"command"`
+	Cron       string  `json:"cron"`
+	Remark     string  `json:"remark"`
+	Timeout    int     `json:"timeout"` // 任务超时时间 单位 秒(s)
+	CreateTime int64   `json:"create_time"`
+	Status     int     `json:"status"`
+	IsRunning  int     `json:"is_running"`
+	Noseize    int     `json:"noseize"`
+	Exclusion  int     `json:"exclusion"` // 互斥规则
+	Workflows  []int64 `json:"workflows,omitempty"`
+}
+
 type WorkflowInfo struct {
 	WorkflowID int64  `json:"workflow_id"`
 	TmpID      string `json:"tmp_id"`
@@ -61,6 +78,7 @@ const (
 type TaskExecutingInfo struct {
 	Task     *TaskInfo `json:"task"`
 	PlanTime time.Time `json:"plan_time"` // 理论上的调度时间
+	PlanType PlanType  `json:"plan_type"`
 	RealTime time.Time `json:"real_time"` // 实际调度时间
 	TmpID    string    `json:"tmp_id"`
 
@@ -86,11 +104,12 @@ type TaskResultLog struct {
 
 // ETCD_PREFIX topic prefix  default: /cron
 var (
-	ETCD_PREFIX  = "/cron"
-	TEMPORARY    = "t_scheduler"
-	WORKFLOW     = "t_flow"
-	WORKFLOW_ACK = "t_flow_ack"
-	STATUS       = "t_status"
+	ETCD_PREFIX     = "/cron"
+	TEMPORARY       = "t_scheduler"
+	WORKFLOW        = "t_flow"
+	WORKFLOW_ACK    = "t_flow_ack"
+	WORKFLOW_MASTER = "t_flow_master"
+	STATUS          = "t_status"
 )
 
 // BuildTaskUpdateKey 任务更新锁的key
@@ -101,6 +120,14 @@ func BuildTaskUpdateKey(projectID int64, taskID string) string {
 // BuildKey etcd 保存任务的key
 func BuildKey(projectID int64, taskID string) string {
 	return fmt.Sprintf("%s/%d/%s", ETCD_PREFIX, projectID, taskID)
+}
+
+func BuildWorkflowAddUserLockKey(workflowID, userID int64) string {
+	return fmt.Sprintf("%s/lock/workflow_user_%d_%d", ETCD_PREFIX, workflowID, userID)
+}
+
+func BuildWorkflowMasterKey() string {
+	return fmt.Sprintf("%s/%s", ETCD_PREFIX, WORKFLOW_MASTER)
 }
 
 func GetTaskStatusPrefixKey() string {
@@ -144,12 +171,12 @@ func BuildWorkflowAckKey(workflowID, projectID int64, taskID, tmpID string) stri
 	return fmt.Sprintf("%s/%d/%s/%d/%s/%s", ETCD_PREFIX, projectID, WORKFLOW_ACK, workflowID, taskID, tmpID)
 }
 
-func BuildWorkflowQueuePrefixKey() string {
-	return fmt.Sprintf("%s/%s/%s/", ETCD_PREFIX, "queue", WORKFLOW)
+func BuildTaskResultQueuePrefixKey() string {
+	return fmt.Sprintf("%s/%s/%s/", ETCD_PREFIX, "queue", "task_result")
 }
 
-func BuildWorkflowQueueProjectKey(projectID int64) string {
-	return fmt.Sprintf("%s%d/", BuildWorkflowQueuePrefixKey(), projectID)
+func BuildTaskResultQueueProjectKey(projectID int64) string {
+	return fmt.Sprintf("%s%d/", BuildTaskResultQueuePrefixKey(), projectID)
 }
 
 // IsTemporaryKey 检测是否为临时调度key
@@ -252,7 +279,6 @@ type TaskEvent struct {
 }
 
 func BuildTaskEvent(eventType int, task *TaskInfo) *TaskEvent {
-	fmt.Println(eventType, "build task event", *task)
 	return &TaskEvent{
 		EventType: eventType,
 		Task:      task,
@@ -292,7 +318,8 @@ func BuildTaskExecuteInfo(plan *TaskSchedulePlan) *TaskExecutingInfo {
 	info := &TaskExecutingInfo{
 		Task:     plan.Task,
 		PlanTime: plan.NextTime, // 计划调度时间
-		RealTime: time.Now(),    // 真实执行时间
+		PlanType: plan.Type,
+		RealTime: time.Now(), // 真实执行时间
 		TmpID:    plan.TmpID,
 	}
 

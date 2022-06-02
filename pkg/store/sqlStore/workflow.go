@@ -40,7 +40,8 @@ func (s *workflowStore) Update(tx *gorm.DB, data common.Workflow) error {
 	if tx == nil {
 		tx = s.GetMaster()
 	}
-	return tx.Table(s.GetTable()).Update(data).Error
+
+	return tx.Table(s.GetTable()).Where("id = ?", data.ID).Update(data).Error
 }
 
 func (s *workflowStore) GetOne(id int64) (*common.Workflow, error) {

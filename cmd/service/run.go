@@ -82,7 +82,7 @@ func resolveServerAddress(addr []string) string {
 
 func Run(opts *SetupOptions) error {
 	// 加载配置
-	srv := app.NewApp(opts.ConfigPath)
+	srv := app.NewApp(opts.ConfigPath, app.WithFiretower(opts.FiretowerConfigPath))
 
 	defer func() {
 		if r := recover(); r != nil {

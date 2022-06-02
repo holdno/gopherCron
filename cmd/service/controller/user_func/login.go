@@ -21,6 +21,7 @@ type LoginRequest struct {
 type LoginResponse struct {
 	ID         int64  `json:"id"`
 	Name       string `json:"name"`
+	Account    string `json:"account"`
 	Permission string `json:"permission"`
 	Token      string `json:"token"`
 	TTL        int64  `json:"ttl"`
@@ -61,6 +62,7 @@ func Login(c *gin.Context) {
 	response.APISuccess(c, &LoginResponse{
 		ID:         user.ID,
 		Name:       user.Name,
+		Account:    user.Account,
 		Permission: user.Permission,
 		Token:      jwt.Build(user.ID),
 		TTL:        time.Now().Add(time.Duration(srv.GetConfig().JWT.Exp) * time.Second).Unix(),

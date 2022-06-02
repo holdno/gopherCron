@@ -11,10 +11,10 @@ import (
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/errors"
 	"github.com/holdno/gopherCron/utils"
-	"github.com/jinzhu/gorm"
 
 	"github.com/coreos/etcd/clientv3"
 	"github.com/coreos/etcd/mvcc/mvccpb"
+	"github.com/jinzhu/gorm"
 )
 
 func getTaskDetail(kv clientv3.KV, projectID int64, taskID string) (*common.TaskInfo, error) {
@@ -37,12 +37,11 @@ func getTaskDetail(kv clientv3.KV, projectID int64, taskID string) (*common.Task
 }
 
 // GetTaskList 获取任务列表
-func (a *app) GetTaskList(projectID int64) ([]*common.TaskInfo, error) {
+func (a *app) GetTaskList(projectID int64) ([]*common.TaskListItemWithWorkflows, error) {
 	var (
 		preKey   string
 		getResp  *clientv3.GetResponse
-		taskList []*common.TaskInfo
-		task     *common.TaskInfo
+		taskList []*common.TaskListItemWithWorkflows
 		kvPair   *mvccpb.KeyValue
 		ctx      context.Context
 		errObj   errors.Error
@@ -61,9 +60,8 @@ func (a *app) GetTaskList(projectID int64) ([]*common.TaskInfo, error) {
 	}
 
 	// init array space
-	taskList = make([]*common.TaskInfo, 0)
 	taskStatus := make(map[string]string)
-	relevanceWorkflow := make(map[string]int64)
+	relevanceWorkflow := make(map[string][]int64)
 	var workflowTaskIndex []string
 
 	// range list to unmarshal
@@ -81,22 +79,22 @@ func (a *app) GetTaskList(projectID int64) ([]*common.TaskInfo, error) {
 			continue
 		}
 
-		task = &common.TaskInfo{}
+		task := &common.TaskListItemWithWorkflows{}
 		if err = json.Unmarshal(kvPair.Value, task); err != nil {
 			continue
 		}
 
 		taskList = append(taskList, task)
-		workflowTaskIndex = append(workflowTaskIndex, common.BuildWorkflowIndex(task.ProjectID, task.TaskID))
+		workflowTaskIndex = append(workflowTaskIndex, common.BuildWorkflowTaskIndex(task.ProjectID, task.TaskID))
 	}
 
 	if len(workflowTaskIndex) > 0 {
-		list, err := a.store.WorkflowTask().GetTaskWorkflowIDs(workflowTaskIndex)
+		list, err := a.store.WorkflowSchedulePlan().GetTaskWorkflowIDs(workflowTaskIndex)
 		if err != nil && err != gorm.ErrRecordNotFound {
 			return nil, errors.NewError(http.StatusInternalServerError, "获取任务关联workflow失败").WithLog(err.Error())
 		}
 		for _, v := range list {
-			relevanceWorkflow[v.ProjectTaskIndex] = v.WorkflowID
+			relevanceWorkflow[v.ProjectTaskIndex] = append(relevanceWorkflow[v.ProjectTaskIndex], v.WorkflowID)
 		}
 	}
 
@@ -113,11 +111,9 @@ func (a *app) GetTaskList(projectID int64) ([]*common.TaskInfo, error) {
 			v.IsRunning = common.TASK_STATUS_NOT_RUNNING
 		}
 
-		workflowID := relevanceWorkflow[common.BuildWorkflowIndex(task.ProjectID, task.TaskID)]
-		if workflowID != 0 {
-			v.FlowInfo = &common.WorkflowInfo{
-				WorkflowID: workflowID,
-			}
+		workflowIDs := relevanceWorkflow[common.BuildWorkflowTaskIndex(v.ProjectID, v.TaskID)]
+		if len(workflowIDs) > 0 {
+			v.Workflows = workflowIDs
 		}
 	}
 
@@ -253,9 +249,12 @@ func (a *app) DeleteTask(projectID int64, taskID string) (*common.TaskInfo, erro
 		err       error
 	)
 
-	counter, err := a.store.WorkflowTask().GetTotal(selection.NewSelector(
-		selection.NewRequirement("task_id", selection.Equals, taskID),
-		selection.NewRequirement("project_id", selection.Equals, projectID)))
+	selector := selection.NewSelector(
+		selection.NewRequirement("project_id", selection.Equals, projectID))
+	if taskID != "" {
+		selector.AddQuery(selection.NewRequirement("task_id", selection.Equals, taskID))
+	}
+	counter, err := a.store.WorkflowTask().GetTotal(selector)
 	if err != nil {
 		return nil, errors.NewError(http.StatusInternalServerError, "检查任务是否关联workflow失败").WithLog(err.Error())
 	}

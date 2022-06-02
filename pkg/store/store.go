@@ -55,15 +55,29 @@ type UserWorkflowRelevanceStore interface {
 	Create(tx *gorm.DB, data *common.UserWorkflowRelevance) error
 	GetUserWorkflows(userID int64) ([]common.UserWorkflowRelevance, error)
 	GetUserWorkflowRelevance(userID int64, workflowID int64) (*common.UserWorkflowRelevance, error)
+	DeleteWorkflowAllUserRelevance(tx *gorm.DB, workflowID int64) error
+	DeleteUserWorkflowRelevance(tx *gorm.DB, workflowID, userID int64) error
+	GetWorkflowUsers(workflowID int64) ([]common.UserWorkflowRelevance, error)
+}
+
+type WorkflowSchedulePlanStore interface {
+	Commons
+	Create(tx *gorm.DB, data *common.WorkflowSchedulePlan) error
+	GetList(workflowID int64) ([]common.WorkflowSchedulePlan, error)
+	GetTaskWorkflowIDs(index []string) ([]common.WorkflowSchedulePlan, error)
+	Delete(tx *gorm.DB, id int64) error
+	DeleteAllWorkflowSchedulePlan(tx *gorm.DB, workflowID int64) error
+	DeleteList(tx *gorm.DB, ids []int64) error
 }
 
 type WorkflowTaskStore interface {
 	Commons
 	Create(tx *gorm.DB, data *common.WorkflowTask) error
-	GetList(workflowID int64) ([]common.WorkflowTask, error)
-	GetTaskWorkflowIDs(index []string) ([]common.WorkflowTask, error)
-	Delete(tx *gorm.DB, id int64) error
-	DeleteList(tx *gorm.DB, ids []int64) error
+	GetList(projectID int64) ([]common.WorkflowTask, error)
+	GetOne(projectID int64, taskID string) (*common.WorkflowTask, error)
+	Save(tx *gorm.DB, data *common.WorkflowTask) error
+	Delete(tx *gorm.DB, projectID int64, taskID string) error
+	GetMultiList(taskIDs []string) ([]common.WorkflowTask, error)
 }
 
 type WorkflowStore interface {

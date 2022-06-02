@@ -14,8 +14,8 @@ import (
 )
 
 type KillTaskRequest struct {
-	ProjectID int64  `form:"project_id" binding:"required"`
-	TaskID    string `form:"task_id" binding:"required"`
+	ProjectID int64  `json:"project_id" form:"project_id" binding:"required"`
+	TaskID    string `json:"task_id" form:"task_id" binding:"required"`
 }
 
 // KillTask kill task from etcd

@@ -13,8 +13,13 @@ import (
 )
 
 type GetErrorLogsRequest struct {
-	Page     int `form:"page" binding:"required"`
-	Pagesize int `form:"pagesize" binding:"required"`
+	Page     int `json:"page" form:"page" binding:"required"`
+	Pagesize int `json:"pagesize" form:"pagesize" binding:"required"`
+}
+
+type GetErrorLogsResponse struct {
+	List  []*common.TaskLog `json:"list"`
+	Total int               `json:"total"`
 }
 
 // GetErrorLogs 获取用户相关项目的最新错误日志
@@ -51,13 +56,16 @@ func GetErrorLogs(c *gin.Context) {
 		}
 	}
 
-	logs, err := srv.GetErrorLogs(projectIDs, req.Page, req.Pagesize)
+	logs, total, err := srv.GetErrorLogs(projectIDs, req.Page, req.Pagesize)
 	if err != nil {
 		response.APIError(c, err)
 		return
 	}
 
-	response.APISuccess(c, logs)
+	response.APISuccess(c, GetErrorLogsResponse{
+		List:  logs,
+		Total: total,
+	})
 }
 
 // GetListRequest 获取任务执行日志

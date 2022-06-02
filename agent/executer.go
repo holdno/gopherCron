@@ -2,10 +2,10 @@ package agent
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os/exec"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/holdno/gopherCron/common"
@@ -67,8 +67,11 @@ func (a *client) ExecuteTask(info *common.TaskExecutingInfo) *common.TaskExecute
 	}
 
 	if err = cmd.Wait(); err != nil {
-		if strings.Contains(cmd.ProcessState.String(), syscall.SIGKILL.String()) {
+		ctxErr := info.CancelCtx.Err()
+		if ctxErr == context.DeadlineExceeded {
 			result.Err = "timeout"
+		} else if ctxErr == context.Canceled {
+			result.Err = "cancel"
 		} else {
 			switch cmd.ProcessState.ExitCode() {
 			case 1:

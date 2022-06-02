@@ -62,9 +62,10 @@ type SqlProviderStores struct {
 	TaskLog               store.TaskLogStore
 	WebHook               store.TaskWebHookStore
 	Workflow              store.WorkflowStore
-	WorkflowTask          store.WorkflowTaskStore
+	WorkflowSchedulePlan  store.WorkflowSchedulePlanStore
 	UserWorkflowRelevance store.UserWorkflowRelevanceStore
 	WorkflowLog           store.WorkflowLogStore
+	WorkflowTask          store.WorkflowTaskStore
 }
 
 func MustSetup(conf *config.MysqlConf, logger *logrus.Logger, install bool) SqlStore {
@@ -81,6 +82,7 @@ func MustSetup(conf *config.MysqlConf, logger *logrus.Logger, install bool) SqlS
 	provider.stores.ProjectRelevance = NewProjectRelevanceStore(provider)
 	provider.stores.WebHook = NewWebHookStore(provider)
 	provider.stores.Workflow = NewWorkflowStore(provider)
+	provider.stores.WorkflowSchedulePlan = NewWorkflowSchedulePlanStore(provider)
 	provider.stores.WorkflowTask = NewWorkflowTaskStore(provider)
 	provider.stores.UserWorkflowRelevance = NewUserWorkflowRelevanceStore(provider)
 	provider.stores.WorkflowLog = NewWorkflowLogStore(provider)
@@ -122,7 +124,9 @@ func (s *SqlProvider) UserWorkflowRelevance() store.UserWorkflowRelevanceStore {
 func (s *SqlProvider) Workflow() store.WorkflowStore {
 	return s.stores.Workflow
 }
-
+func (s *SqlProvider) WorkflowSchedulePlan() store.WorkflowSchedulePlanStore {
+	return s.stores.WorkflowSchedulePlan
+}
 func (s *SqlProvider) WorkflowTask() store.WorkflowTaskStore {
 	return s.stores.WorkflowTask
 }
@@ -193,6 +197,7 @@ type SqlStore interface {
 	TaskLog() store.TaskLogStore
 	WebHook() store.TaskWebHookStore
 	Workflow() store.WorkflowStore
+	WorkflowSchedulePlan() store.WorkflowSchedulePlanStore
 	WorkflowTask() store.WorkflowTaskStore
 	UserWorkflowRelevance() store.UserWorkflowRelevanceStore
 	WorkflowLog() store.WorkflowLogStore
