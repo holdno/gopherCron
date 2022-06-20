@@ -148,5 +148,6 @@ type TemporaryTask struct {
 	ScheduleTime   int64  `json:"schedule_time" gorm:"column:schedule_time;type:int(11);index:schedule_time;not null;comment:'调度时间'"`
 	ScheduleStatus int32  `json:"schedule_status" gorm:"column:schedule_status;type:int(1);index:schedule_status;not null;comment:'调度状态'"`
 	UserID         int64  `json:"user_id" gorm:"column:user_id;type:int(11);not null;index:user_id;comment:'关联用户id'"`
+	Command        string `json:"command" gorm:"column:command;type:varchar(255);not null;comment:'任务指令'"`
 	CreateTime     int64  `json:"create_time" gorm:"column:create_time;type:int(11);not null;comment:'创建时间'"`
 }

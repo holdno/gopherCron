@@ -53,7 +53,7 @@ func (s *temporaryTaskStore) GetList(selector selection.Selector) ([]*common.Tem
 
 	db := parseSelector(s.GetReplica(), selector, true)
 
-	if err = db.Table(s.GetTable()).Find(&res).Error; err != nil {
+	if err = db.Table(s.GetTable()).Order("id DESC").Find(&res).Error; err != nil {
 		return nil, err
 	}
 	return res, nil

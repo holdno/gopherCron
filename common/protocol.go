@@ -104,12 +104,13 @@ type TaskResultLog struct {
 
 // ETCD_PREFIX topic prefix  default: /cron
 var (
-	ETCD_PREFIX     = "/cron"
-	TEMPORARY       = "t_scheduler"
-	WORKFLOW        = "t_flow"
-	WORKFLOW_ACK    = "t_flow_ack"
-	WORKFLOW_MASTER = "t_flow_master"
-	STATUS          = "t_status"
+	ETCD_PREFIX      = "/cron"
+	TEMPORARY        = "t_scheduler"
+	WORKFLOW         = "t_flow"
+	WORKFLOW_ACK     = "t_flow_ack"
+	WORKFLOW_MASTER  = "t_flow_master"
+	TEMPORARY_MASTER = "t_temporary_master"
+	STATUS           = "t_status"
 )
 
 // BuildTaskUpdateKey 任务更新锁的key
@@ -128,6 +129,10 @@ func BuildWorkflowAddUserLockKey(workflowID, userID int64) string {
 
 func BuildWorkflowMasterKey() string {
 	return fmt.Sprintf("%s/%s", ETCD_PREFIX, WORKFLOW_MASTER)
+}
+
+func BuildTemporaryMasterKey() string {
+	return fmt.Sprintf("%s/%s", ETCD_PREFIX, TEMPORARY_MASTER)
 }
 
 func GetTaskStatusPrefixKey() string {

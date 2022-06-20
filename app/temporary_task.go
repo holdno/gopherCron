@@ -28,7 +28,8 @@ func (a *app) CreateTemporaryTask(data common.TemporaryTask) error {
 func (a *app) GetNeedToScheduleTemporaryTask(t time.Time) ([]*common.TemporaryTask, error) {
 	truncateTime := t.Truncate(time.Minute)
 	selector := selection.NewSelector(
-		selection.NewRequirement("schedule_time", selection.LessThanEqual, truncateTime.Add(time.Minute)),
+		selection.NewRequirement("schedule_time", selection.LessThanEqual, truncateTime.Add(time.Minute).Unix()),
+		selection.NewRequirement("schedule_status", selection.Equals, common.TEMPORARY_TASK_SCHEDULE_STATUS_WAITING),
 	)
 	list, err := a.store.TemporaryTask().GetList(selector)
 	if err != nil && err != gorm.ErrRecordNotFound {
@@ -39,8 +40,7 @@ func (a *app) GetNeedToScheduleTemporaryTask(t time.Time) ([]*common.TemporaryTa
 
 func (a *app) GetTemporaryTaskList(projectID int64) ([]*common.TemporaryTask, error) {
 	selector := selection.NewSelector(
-		selection.NewRequirement("project_id", selection.Equals, projectID),
-		selection.NewRequirement("schedule_status", selection.Equals, common.TEMPORARY_TASK_SCHEDULE_STATUS_WAITING))
+		selection.NewRequirement("project_id", selection.Equals, projectID))
 	list, err := a.store.TemporaryTask().GetList(selector)
 	if err != nil && err != gorm.ErrRecordNotFound {
 		return nil, errors.NewError(http.StatusInternalServerError, "获取临时调度任务列表失败").WithLog(err.Error())
@@ -91,10 +91,14 @@ func (a *app) GetTemporaryTaskListWithUser(projectID int64) ([]TemporaryTaskList
 	return result, nil
 }
 
-func (a *app) TemporaryTaskSchedule(projectID int64, taskID string) error {
+func (a *app) TemporaryTaskSchedule(projectID int64, taskID string, realCommand string) error {
 	task, err := a.GetTask(projectID, taskID)
 	if err != nil {
 		return err
+	}
+
+	if realCommand != "" {
+		task.Command = realCommand
 	}
 
 	tx := a.store.BeginTx()

@@ -13,6 +13,7 @@ type CreateTemporaryTaskReq struct {
 	ProjectID    int64  `json:"project_id" form:"project_id" binding:"required"`
 	TaskID       string `json:"task_id" form:"task_id" binding:"required"`
 	ScheduleTime int64  `json:"schedule_time" form:"schedule_time" binding:"required"`
+	Command      string `json:"command" form:"command" binding:"required"`
 }
 
 func CreateTemporaryTask(c *gin.Context) {
@@ -33,6 +34,7 @@ func CreateTemporaryTask(c *gin.Context) {
 		TaskID:         req.TaskID,
 		UserID:         uid,
 		ScheduleTime:   req.ScheduleTime,
+		Command:        req.Command,
 		ScheduleStatus: common.TEMPORARY_TASK_SCHEDULE_STATUS_WAITING,
 	}); err != nil {
 		response.APIError(c, err)
