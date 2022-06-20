@@ -726,29 +726,29 @@ func (p *WorkflowPlan) Finished(withError error) error {
 	}
 
 	// 一定要先清理workflow相关的key，这样在kill过程中，任务就不会写入新的状态
-	errList := rego.Retry(func() error {
+	err = rego.Retry(func() error {
 		return clearWorkflowKeys(p.runner.etcd.KV, p.Workflow.ID)
-	}, rego.WithPeriod(time.Second), rego.WithTimes(3))
-	if len(errList) == 3 {
+	}, rego.WithPeriod(time.Second), rego.WithTimes(3), rego.WithLatestError())
+	if err != nil {
 		p.runner.app.Warning(warning.WarningData{
 			Type:     warning.WarningTypeSystem,
 			TaskName: p.Workflow.Title,
-			Data:     fmt.Sprintf("workflow: %s, 运行结束时清除运行状态失败, 失败原因: %s", p.Workflow.Title, errList.Latest().Error()),
+			Data:     fmt.Sprintf("workflow: %s, 运行结束时清除运行状态失败, 失败原因: %s", p.Workflow.Title, err.Error()),
 		})
-		return errList.Latest()
+		return err
 	}
 
 	if withError != nil {
-		errList = rego.Retry(func() error {
+		err = rego.Retry(func() error {
 			return killWorkflowTasks(p.runner.etcd, killList)
-		}, rego.WithPeriod(time.Second), rego.WithTimes(3))
-		if len(errList) == 3 {
+		}, rego.WithPeriod(time.Second), rego.WithTimes(3), rego.WithLatestError())
+		if err != nil {
 			p.runner.app.Warning(warning.WarningData{
 				Type:     warning.WarningTypeSystem,
 				TaskName: p.Workflow.Title,
-				Data:     fmt.Sprintf("workflow: %s, 运行结束时强杀任务失败, 失败原因: %s", p.Workflow.Title, errList.Latest().Error()),
+				Data:     fmt.Sprintf("workflow: %s, 运行结束时强杀任务失败, 失败原因: %s", p.Workflow.Title, err.Error()),
 			})
-			return errList.Latest()
+			return err
 		}
 	}
 
@@ -1122,7 +1122,7 @@ func (a *workflowRunner) handleTaskResultV1(data protocol.TaskFinishedQueueItemV
 		planFinished bool
 		err          error
 	)
-	errList := rego.Retry(func() error {
+	err = rego.Retry(func() error {
 		_, err := concurrency.NewSTM(a.etcd, func(s concurrency.STM) error {
 			planFinished, err = setWorkFlowTaskFinished(s, data)
 			if err != nil {
@@ -1131,9 +1131,9 @@ func (a *workflowRunner) handleTaskResultV1(data protocol.TaskFinishedQueueItemV
 			return nil
 		})
 		return err
-	}, rego.WithTimes(3), rego.WithPeriod(time.Second))
-	if len(errList) == 3 {
-		return errList.Latest()
+	}, rego.WithTimes(3), rego.WithPeriod(time.Second), rego.WithLatestError())
+	if err != nil {
+		return err
 	}
 
 	a.app.PublishMessage(messageWorkflowTaskStatusChanged(data.WorkflowID, data.ProjectID, data.TaskID, data.Status))
@@ -1155,11 +1155,11 @@ func (a *workflowRunner) handleTaskResultV1(data protocol.TaskFinishedQueueItemV
 		return nil
 	}
 
-	errList = rego.Retry(func() error {
+	err = rego.Retry(func() error {
 		return a.scheduleWorkflowPlan(plan)
-	})
-	if len(errList) != 0 {
-		return errList
+	}, rego.WithLatestError())
+	if err != nil {
+		return err
 	}
 	return nil
 }
@@ -1167,7 +1167,7 @@ func (a *workflowRunner) handleTaskResultV1(data protocol.TaskFinishedQueueItemV
 func (a *workflowRunner) handleTaskEvent(event *common.TaskEvent) {
 	switch event.EventType {
 	case common.TASK_EVENT_WORKFLOW_SCHEDULE:
-		errList := rego.Retry(func() error {
+		err := rego.Retry(func() error {
 			plan := a.GetPlan(event.Task.FlowInfo.WorkflowID)
 			if plan == nil {
 				return fmt.Errorf("nil plan")
@@ -1180,15 +1180,16 @@ func (a *workflowRunner) handleTaskEvent(event *common.TaskEvent) {
 			return nil
 		}, rego.WithPeriod(time.Second),
 			rego.WithResetDuration(time.Minute),
-			rego.WithTimes(3))
-		if len(errList) == 3 {
+			rego.WithTimes(3),
+			rego.WithLatestError())
+		if err != nil {
 			if err := a.GetPlan(event.Task.FlowInfo.WorkflowID).Finished(fmt.Errorf("workflow任务(%s)调度失败", event.Task.Name)); err != nil {
 				// todo log
 				fmt.Println("finished error", err.Error())
 			}
 			a.app.Warning(warning.WarningData{
 				Data: fmt.Sprintf("workflow任务调度失败，workflow_id: %d\n%s",
-					event.Task.FlowInfo.WorkflowID, errList.Error()),
+					event.Task.FlowInfo.WorkflowID, err.Error()),
 				Type:      warning.WarningTypeSystem,
 				TaskName:  event.Task.Name,
 				ProjectID: event.Task.ProjectID,

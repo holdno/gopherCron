@@ -108,6 +108,11 @@ type App interface {
 	GetWorkflowRelevanceUsers(workflowID int64) ([]common.UserWorkflowRelevance, error)
 	// web sockets
 	PublishMessage(data PublishData)
+	// temporary task
+	CreateTemporaryTask(data common.TemporaryTask) error
+	GetTemporaryTaskListWithUser(projectID int64) ([]TemporaryTaskListWithUser, error)
+	TemporaryTaskSchedule(projectID int64, taskID string) error
+	AutoCleanScheduledTemporaryTask()
 
 	BeginTx() *gorm.DB
 	Close()
@@ -262,6 +267,7 @@ func NewApp(configPath string, opts ...AppOptions) App {
 			select {
 			case <-t.C:
 				app.AutoCleanLogs()
+				app.AutoCleanScheduledTemporaryTask()
 			case executeResult := <-app.taskResultChan:
 				var execResult protocol.TaskFinishedQueueContent
 				_ = json.Unmarshal([]byte(executeResult), &execResult)
@@ -316,6 +322,7 @@ func NewApp(configPath string, opts ...AppOptions) App {
 				case err == context.Canceled:
 					return
 				default:
+					time.Sleep(time.Second * 5)
 					continue
 				}
 			}
@@ -331,13 +338,14 @@ func NewApp(configPath string, opts ...AppOptions) App {
 			}
 			workflow.Loop()
 		}
-
 	})
 	app.workflowRunner = workflow
 
+	startTemporaryTaskWorker(app)
+
 	app.Go(func() {
 		for {
-			errList := rego.Retry(func() error {
+			err := rego.Retry(func() error {
 				result, err := app.taskResultQueue.Dequeue()
 				if err != nil {
 					return err
@@ -345,13 +353,60 @@ func NewApp(configPath string, opts ...AppOptions) App {
 				app.taskResultChan <- result
 				return nil
 			}, rego.WithTimes(5), rego.WithPeriod(time.Second))
-			if len(errList) == 5 {
+			if err != nil {
 				// todo warning?
 			}
 		}
 	})
 
 	return app
+}
+
+func startTemporaryTaskWorker(app *app) {
+	app.Go(func() {
+		for {
+			// 同一时间只需要有一个service的Loop运行即可
+			s, err := concurrency.NewSession(app.etcd.Client(), concurrency.WithTTL(9))
+			if err != nil {
+				fmt.Println(err)
+				continue
+			}
+			e := concurrency.NewElection(s, common.BuildWorkflowMasterKey())
+			ctx, _ := utils.GetContextWithTimeout()
+			err = e.Campaign(ctx, app.GetIP())
+			if err != nil {
+				switch {
+				case err == context.Canceled:
+					return
+				default:
+					time.Sleep(time.Second * 5)
+					continue
+				}
+			}
+			fmt.Println("new temporary scheduler leader")
+
+			c := time.NewTicker(time.Minute)
+			for {
+				select {
+				case <-app.closeCh:
+					return
+				case <-c.C:
+				}
+
+				list, err := app.GetNeedToScheduleTemporaryTask(time.Now())
+				if err != nil {
+					app.logger.Error("failed to refresh temporary task list", err.Error())
+					continue
+				}
+
+				for _, v := range list {
+					if err = app.TemporaryTaskSchedule(v.ProjectID, v.TaskID); err != nil {
+						app.logger.Error("temporary task worker: failed to schedule task", err.Error())
+					}
+				}
+			}
+		}
+	})
 }
 
 func (a *app) PublishMessage(data PublishData) {

@@ -140,3 +140,13 @@ type WorkflowLog struct {
 	Result     string `json:"result" gorm:"column:result;type:text;not null;comment:'任务执行结果'"`
 	CreateTime int64  `json:"create_time" gorm:"column:create_time;type:int(11);not null;comment:'创建时间'"`
 }
+
+type TemporaryTask struct {
+	ID             int64  `json:"id" gorm:"column:id;primary_key;auto_increment"`
+	ProjectID      int64  `json:"project_id" gorm:"column:project_id;type:int(11);index:project_id;not null;index:project_id;comment:'project id'"`
+	TaskID         string `json:"task_id" gorm:"column:task_id;type:varchar(50);primary_key;not null;comment:'task id'"`
+	ScheduleTime   int64  `json:"schedule_time" gorm:"column:schedule_time;type:int(11);index:schedule_time;not null;comment:'调度时间'"`
+	ScheduleStatus int32  `json:"schedule_status" gorm:"column:schedule_status;type:int(1);index:schedule_status;not null;comment:'调度状态'"`
+	UserID         int64  `json:"user_id" gorm:"column:user_id;type:int(11);not null;index:user_id;comment:'关联用户id'"`
+	CreateTime     int64  `json:"create_time" gorm:"column:create_time;type:int(11);not null;comment:'创建时间'"`
+}

@@ -64,6 +64,12 @@ func SetupRoute(r *gin.Engine, conf *config.DeployConf) {
 			}
 		}
 
+		temporaryTask := api.Group("/temporary_task")
+		{
+			temporaryTask.POST("/create", controller.CreateTemporaryTask)
+			temporaryTask.GET("/list", controller.GetTemporaryTaskList)
+		}
+
 		workflow := api.Group("/workflow")
 		{
 			workflow.Use(middleware.TokenVerify())

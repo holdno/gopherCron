@@ -50,6 +50,14 @@ type TaskLogStore interface {
 	Clean(tx *gorm.DB, selector selection.Selector) error
 }
 
+type TemporaryTaskStore interface {
+	Commons
+	Create(data common.TemporaryTask) error
+	GetList(selector selection.Selector) ([]*common.TemporaryTask, error)
+	UpdateTaskScheduleStatus(tx *gorm.DB, projectID int64, taskID string, scheduleStatus int32) error
+	Clean(tx *gorm.DB, selector selection.Selector) error
+}
+
 type UserWorkflowRelevanceStore interface {
 	Commons
 	Create(tx *gorm.DB, data *common.UserWorkflowRelevance) error

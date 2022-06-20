@@ -330,14 +330,14 @@ func waitingAck(cli *clientv3.Client, ackKey string, onAck func(*clientv3.Event)
 				switch watchEvent.Type {
 				// case mvccpb.PUT: // 任务开始执行
 				case mvccpb.PUT: // 任务开始执行
-					errList := rego.Retry(func() error {
+					err := rego.Retry(func() error {
 						if ok := onAck(watchEvent); ok {
 							return nil
 						}
 						return fmt.Errorf("retry")
-					}, rego.WithTimes(3), rego.WithPeriod(time.Second))
-					if len(errList) == 3 {
-						return errList.Latest()
+					}, rego.WithTimes(3), rego.WithPeriod(time.Second), rego.WithLatestError())
+					if err != nil {
+						return err
 					}
 					return nil
 				}

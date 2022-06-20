@@ -48,6 +48,9 @@ const (
 	// Log
 	ErrorLog   = 1
 	SuccessLog = 0
+
+	TEMPORARY_TASK_SCHEDULE_STATUS_WAITING   = 1
+	TEMPORARY_TASK_SCHEDULE_STATUS_SCHEDULED = 2
 )
 
 var (
