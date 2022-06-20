@@ -306,9 +306,9 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) {
 
 			// 删除任务的正在执行状态
 			a.scheduler.DeleteExecutingTask(plan.Task.SchedulerKey())
-			if errList := rego.Retry(func() error {
+			if err := rego.Retry(func() error {
 				return protocol.SetTaskNotRunning(etcdSession, taskExecuteInfo, result)
-			}, rego.WithTimes(3)); len(errList) == 3 {
+			}, rego.WithTimes(3), rego.WithLatestError()); err != nil {
 				a.Warning(warning.WarningData{
 					Type:      warning.WarningTypeTask,
 					AgentIP:   a.localip,
@@ -317,13 +317,13 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) {
 					Data:      "变更任务运行状态失败",
 				})
 				a.logger.Errorf("task: %s, id: %s, failed to change running status, the task is finished, error: %v",
-					plan.Task.Name, plan.Task.TaskID, errList.Latest())
+					plan.Task.Name, plan.Task.TaskID, err)
 			}
 		}()
 
-		if errList := rego.Retry(func() error {
+		if err := rego.Retry(func() error {
 			return protocol.SetTaskRunning(etcdSession, taskExecuteInfo)
-		}, rego.WithTimes(3)); len(errList) == 3 {
+		}, rego.WithTimes(3), rego.WithLatestError()); err != nil {
 			a.Warning(warning.WarningData{
 				Type:      warning.WarningTypeTask,
 				AgentIP:   a.localip,
@@ -332,7 +332,7 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) {
 				Data:      "设置任务运行状态失败",
 			})
 			a.logger.Warnf("task: %s, id: %s, change running status error, %v", plan.Task.Name,
-				plan.Task.TaskID, errList.Latest())
+				plan.Task.TaskID, err)
 			return
 		}
 

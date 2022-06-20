@@ -87,6 +87,7 @@ func MustSetup(conf *config.MysqlConf, logger *logrus.Logger, install bool) SqlS
 	provider.stores.WorkflowTask = NewWorkflowTaskStore(provider)
 	provider.stores.UserWorkflowRelevance = NewUserWorkflowRelevanceStore(provider)
 	provider.stores.WorkflowLog = NewWorkflowLogStore(provider)
+	provider.stores.TemporaryTask = NewTemporaryTaskStoreStore(provider)
 
 	provider.CheckStores()
 
