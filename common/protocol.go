@@ -306,6 +306,7 @@ func BuildTaskSchedulerPlan(task *TaskInfo) (*TaskSchedulePlan, error) {
 		Expr:     expr,
 		NextTime: expr.Next(time.Now()),
 		Type:     NormalPlan,
+		TmpID:    task.TmpID,
 	}, nil
 }
 
@@ -320,6 +321,9 @@ func BuildWorkflowTaskSchedulerPlan(task *TaskInfo) (*TaskSchedulePlan, error) {
 
 // BuildTaskExecuteInfo 构建 executer
 func BuildTaskExecuteInfo(plan *TaskSchedulePlan) *TaskExecutingInfo {
+	if plan.TmpID == "" {
+		plan.TmpID = plan.Task.TmpID
+	}
 	info := &TaskExecutingInfo{
 		Task:     plan.Task,
 		PlanTime: plan.NextTime, // 计划调度时间

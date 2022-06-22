@@ -111,7 +111,7 @@ type App interface {
 	// temporary task
 	CreateTemporaryTask(data common.TemporaryTask) error
 	GetTemporaryTaskListWithUser(projectID int64) ([]TemporaryTaskListWithUser, error)
-	TemporaryTaskSchedule(projectID int64, taskID string, realCommand string) error
+	TemporaryTaskSchedule(tmpTask common.TemporaryTask) error
 	AutoCleanScheduledTemporaryTask()
 
 	BeginTx() *gorm.DB
@@ -289,7 +289,7 @@ func NewApp(configPath string, opts ...AppOptions) App {
 						}
 					} else {
 						// normal task
-						app.PublishMessage(messageTaskStatusChanged(result.ProjectID, result.TaskID, result.Status))
+						app.PublishMessage(messageTaskStatusChanged(result.ProjectID, result.TaskID, result.TmpID, result.Status))
 					}
 
 				}
@@ -401,7 +401,7 @@ func startTemporaryTaskWorker(app *app) {
 				}
 
 				for _, v := range list {
-					if err = app.TemporaryTaskSchedule(v.ProjectID, v.TaskID, v.Command); err != nil {
+					if err = app.TemporaryTaskSchedule(*v); err != nil {
 						app.logger.Error("temporary task worker: failed to schedule task", err.Error())
 					}
 				}

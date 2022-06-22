@@ -19,13 +19,14 @@ type PublishData struct {
 	Data  interface{}
 }
 
-func messageTaskStatusChanged(projectID int64, taskID string, status string) PublishData {
+func messageTaskStatusChanged(projectID int64, taskID, tmpID, status string) PublishData {
 	return PublishData{
 		Topic: "/task/status",
 		Data: map[string]interface{}{
 			"status":     status,
 			"project_id": projectID,
 			"task_id":    taskID,
+			"tmp_id":     tmpID,
 		},
 	}
 }

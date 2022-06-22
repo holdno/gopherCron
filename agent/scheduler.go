@@ -365,6 +365,7 @@ func (a *client) handleTaskResult(result *common.TaskExecuteResult) {
 	}
 
 	err = utils.RetryFunc(10, func() error {
+		fmt.Println("result report", result.ExecuteInfo.TmpID)
 		err := a.ResultReport(result)
 		return err
 	})

@@ -68,6 +68,32 @@ func GetErrorLogs(c *gin.Context) {
 	})
 }
 
+type GetLogDetailRequest struct {
+	ProjectID int64  `json:"project_id" form:"project_id" binding:"required"`
+	TaskID    string `json:"task_id" form:"task_id" binding:"required"`
+	TmpID     string `json:"tmp_id" form:"tmp_id" binding:"required"`
+}
+
+func GetLogDetail(c *gin.Context) {
+	var (
+		err error
+		req GetLogDetailRequest
+	)
+	if err = utils.BindArgsWithGin(c, &req); err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	a := app.GetApp(c)
+	detail, err := a.GetTaskLogDetail(req.ProjectID, req.TaskID, req.TmpID)
+	if err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	response.APISuccess(c, detail)
+}
+
 // GetListRequest 获取任务执行日志
 type GetListRequest struct {
 	Page      int    `form:"page" binding:"required"`

@@ -129,6 +129,7 @@ func SetupRoute(r *gin.Engine, conf *config.DeployConf) {
 		{
 			log.Use(middleware.TokenVerify())
 			log.GET("/list", log_func.GetList)
+			log.GET("/detail", log_func.GetLogDetail)
 			log.POST("/clean", log_func.CleanLogs)
 			log.GET("/recent", log_func.GetRecentLogCount)
 			log.GET("/errors", log_func.GetErrorLogs)

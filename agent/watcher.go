@@ -39,7 +39,7 @@ func (a *client) newWatchHandle() func(resp clientv3.WatchResponse, projectID in
 			switch watchEvent.Type {
 			case mvccpb.PUT: // 任务保存
 				// 反序列化task
-				fmt.Println("get key", string(watchEvent.Kv.Key))
+				fmt.Println("get key", string(watchEvent.Kv.Key), string(watchEvent.Kv.Value))
 				if task, err = common.Unmarshal(watchEvent.Kv.Value); err != nil {
 					continue
 				}

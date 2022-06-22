@@ -565,6 +565,7 @@ func (a *app) TemporarySchedulerTask(task *common.TaskInfo) error {
 		a.PublishMessage(messageTaskStatusChanged(
 			task.ProjectID,
 			task.TaskID,
+			task.TmpID,
 			ack.Status))
 
 		return true

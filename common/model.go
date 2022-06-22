@@ -149,5 +149,9 @@ type TemporaryTask struct {
 	ScheduleStatus int32  `json:"schedule_status" gorm:"column:schedule_status;type:int(1);index:schedule_status;not null;comment:'调度状态'"`
 	UserID         int64  `json:"user_id" gorm:"column:user_id;type:int(11);not null;index:user_id;comment:'关联用户id'"`
 	Command        string `json:"command" gorm:"column:command;type:varchar(255);not null;comment:'任务指令'"`
+	Noseize        int    `json:"noseize" gorm:"column:noseize;type:tinyint(1);not null;comment:'不抢占'"`
+	TmpID          string `json:"tmp_id" gorm:"column:tmp_id;type:varchar(50);not null;comment:'临时任务id'"` // 每次任务执行的唯一标识
+	Timeout        int    `json:"timeout" gorm:"column:timeout;type:int(11);not null;comment:'超时时间'"`     // 每次任务执行的唯一标识 // 任务超时时间 单位 秒(s)
+	Remark         string `json:"remark" gorm:"column:remark;type:varchar(255);not null;comment:'任务备注'"`
 	CreateTime     int64  `json:"create_time" gorm:"column:create_time;type:int(11);not null;comment:'创建时间'"`
 }

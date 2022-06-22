@@ -1,17 +1,20 @@
 package app
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
 
+	"github.com/coreos/etcd/clientv3"
 	"github.com/holdno/gocommons/selection"
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/errors"
 	"github.com/holdno/gopherCron/pkg/warning"
-	"github.com/sirupsen/logrus"
+	"github.com/holdno/gopherCron/utils"
 
 	"github.com/jinzhu/gorm"
+	"github.com/sirupsen/logrus"
 )
 
 func (a *app) CreateTemporaryTask(data common.TemporaryTask) error {
@@ -19,6 +22,7 @@ func (a *app) CreateTemporaryTask(data common.TemporaryTask) error {
 		return errors.NewError(http.StatusBadRequest, "任务调度时间已过，请重新设置调度时间")
 	}
 	data.CreateTime = time.Now().Unix()
+	data.TmpID = utils.GetStrID()
 	if err := a.store.TemporaryTask().Create(data); err != nil {
 		return errors.NewError(http.StatusInternalServerError, "创建临时调度任务失败").WithLog(err.Error())
 	}
@@ -50,7 +54,8 @@ func (a *app) GetTemporaryTaskList(projectID int64) ([]*common.TemporaryTask, er
 
 type TemporaryTaskListWithUser struct {
 	*common.TemporaryTask
-	UserName string `json:"user_name"`
+	UserName  string `json:"user_name"`
+	IsRunning int    `json:"is_running"`
 }
 
 func (a *app) GetTemporaryTaskListWithUser(projectID int64) ([]TemporaryTaskListWithUser, error) {
@@ -73,33 +78,63 @@ func (a *app) GetTemporaryTaskListWithUser(projectID int64) ([]TemporaryTaskList
 		userMap[v.ID] = v
 	}
 
+	// build etcd pre key
+	preKey := common.BuildKey(projectID, "")
+	ctx, _ := utils.GetContextWithTimeout()
+	getResp, err := a.etcd.KV().Get(ctx, preKey, clientv3.WithPrefix())
+	if err != nil {
+		return nil, errors.NewError(http.StatusInternalServerError, "获取任务状态失败").WithLog(err.Error())
+	}
+
+	taskStatus := make(map[string]string)
+	for _, kvPair := range getResp.Kvs {
+		if common.IsStatusKey(string(kvPair.Key)) {
+			pid, tid := common.PatchProjectIDTaskIDFromStatusKey(string(kvPair.Key))
+			taskStatus[fmt.Sprintf("%s_%s", pid, tid)] = string(kvPair.Value)
+		}
+	}
+
 	var result []TemporaryTaskListWithUser
 	for _, v := range list {
-		var (
-			u    = userMap[v.UserID]
-			name = "-"
-		)
-		if u != nil {
-			name = u.Name
-		}
-		result = append(result, TemporaryTaskListWithUser{
+
+		item := TemporaryTaskListWithUser{
 			TemporaryTask: v,
-			UserName:      name,
-		})
+			UserName:      "-",
+		}
+
+		if u, exist := userMap[v.UserID]; exist {
+			item.UserName = u.Name
+		}
+
+		status, exist := taskStatus[fmt.Sprintf("%d_%s", v.ProjectID, v.TaskID)]
+		if exist {
+			var taskRuningInfo common.TaskRunningInfo
+			if err = json.Unmarshal([]byte(status), &taskRuningInfo); err == nil && taskRuningInfo.TmpID == v.TmpID {
+				switch taskRuningInfo.Status {
+				case common.TASK_STATUS_RUNNING_V2:
+					item.IsRunning = common.TASK_STATUS_RUNNING
+				default:
+					item.IsRunning = common.TASK_STATUS_NOT_RUNNING
+				}
+			}
+		}
+
+		result = append(result, item)
 	}
 
 	return result, nil
 }
 
-func (a *app) TemporaryTaskSchedule(projectID int64, taskID string, realCommand string) error {
-	task, err := a.GetTask(projectID, taskID)
+func (a *app) TemporaryTaskSchedule(tmpTask common.TemporaryTask) error {
+	task, err := a.GetTask(tmpTask.ProjectID, tmpTask.TaskID)
 	if err != nil {
 		return err
 	}
 
-	if realCommand != "" {
-		task.Command = realCommand
+	if tmpTask.Command != "" {
+		task.Command = tmpTask.Command
 	}
+	task.TmpID = tmpTask.TmpID
 
 	tx := a.store.BeginTx()
 	defer func() {
@@ -111,14 +146,14 @@ func (a *app) TemporaryTaskSchedule(projectID int64, taskID string, realCommand 
 				Type:      warning.WarningTypeSystem,
 				Data:      fmt.Sprintf("临时任务调度/执行失败, %s, DB Rollback", err.Error()),
 				TaskName:  task.Name,
-				ProjectID: projectID,
+				ProjectID: tmpTask.ProjectID,
 			})
 			tx.Rollback()
 		} else {
 			tx.Commit()
 		}
 	}()
-	err = a.store.TemporaryTask().UpdateTaskScheduleStatus(tx, projectID, taskID, common.TEMPORARY_TASK_SCHEDULE_STATUS_SCHEDULED)
+	err = a.store.TemporaryTask().UpdateTaskScheduleStatus(tx, tmpTask.ProjectID, tmpTask.TaskID, common.TEMPORARY_TASK_SCHEDULE_STATUS_SCHEDULED)
 	if err != nil {
 		return errors.NewError(http.StatusInternalServerError, "更新临时任务调度状态失败").WithLog(err.Error())
 	}

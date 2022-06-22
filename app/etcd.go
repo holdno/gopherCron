@@ -99,16 +99,20 @@ func (a *app) GetTaskList(projectID int64) ([]*common.TaskListItemWithWorkflows,
 	}
 
 	for _, v := range taskList {
-		status := taskStatus[fmt.Sprintf("%d_%s", v.ProjectID, v.TaskID)]
-		var taskRuningInfo common.TaskRunningInfo
-		if err = json.Unmarshal([]byte(status), &taskRuningInfo); err == nil {
-			status = taskRuningInfo.Status
-		}
-		switch status {
-		case common.TASK_STATUS_RUNNING_V2:
-			v.IsRunning = common.TASK_STATUS_RUNNING
-		default:
-			v.IsRunning = common.TASK_STATUS_NOT_RUNNING
+		status, exist := taskStatus[fmt.Sprintf("%d_%s", v.ProjectID, v.TaskID)]
+		if exist {
+			var taskRuningInfo common.TaskRunningInfo
+			if err = json.Unmarshal([]byte(status), &taskRuningInfo); err == nil {
+				status = taskRuningInfo.Status
+			}
+
+			switch status {
+			case common.TASK_STATUS_RUNNING_V2:
+				v.IsRunning = common.TASK_STATUS_RUNNING
+			default:
+				v.IsRunning = common.TASK_STATUS_NOT_RUNNING
+			}
+
 		}
 
 		workflowIDs := relevanceWorkflow[common.BuildWorkflowTaskIndex(v.ProjectID, v.TaskID)]
