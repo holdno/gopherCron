@@ -635,7 +635,7 @@ func NewWorkflowRunner(app App, cli *clientv3.Client) (*workflowRunner, error) {
 		scheduleEventChan: make(chan *common.TaskEvent, 100),
 	}
 
-	list, _, err := app.GetWorkflowList(common.GetWorkflowListOptions{}, 1, 1000)
+	list, _, err := app.GetWorkflowList(common.GetWorkflowListOptions{}, 1, 100000)
 	if err != nil {
 		return nil, err
 	}
@@ -706,10 +706,13 @@ func (p *WorkflowPlan) Finished(withError error) error {
 				ProjectID: v.ProjectID,
 				TaskID:    v.TaskID,
 			})
+			failedReason.WriteString("任务启动失败失败")
 		}
 	}
 	if withError != nil {
-		failedReason.WriteString("，")
+		if failedReason.Len() > 0 {
+			failedReason.WriteString("，")
+		}
 		failedReason.WriteString(withError.Error())
 	}
 
@@ -770,7 +773,7 @@ type taskFlowItem struct {
 }
 
 func (a *workflowRunner) scheduleWorkflowPlan(plan *WorkflowPlan) error {
-	needToScheduleTasks, finished, err := plan.CanSchedule()
+	needToScheduleTasks, finished, err := plan.CanSchedule(a)
 	if err != nil && err != ErrWorkflowFailed {
 		return err
 	}
@@ -859,7 +862,7 @@ var (
 )
 
 // CanSchedule 判断下一步可调度的任务
-func (s *WorkflowPlan) CanSchedule() ([]WorkflowTaskInfo, bool, error) {
+func (s *WorkflowPlan) CanSchedule(runner *workflowRunner) ([]WorkflowTaskInfo, bool, error) {
 	s.locker.Lock()
 	defer s.locker.Unlock()
 
@@ -922,22 +925,32 @@ func (s *WorkflowPlan) CanSchedule() ([]WorkflowTaskInfo, bool, error) {
 			if taskStates.ScheduleCount >= common.WORKFLOW_SCHEDULE_LIMIT {
 				return nil, true, ErrWorkflowFailed
 			}
+			// 查看是否由于系统异常导致任务string后没有waiting到running的ack
+			{
+				latestAckKey := common.BuildWorkflowAckKey(s.Workflow.ID, task.ProjectID, task.TaskID, taskStates.GetLatestScheduleRecord().TmpID)
+				ctx, _ := utils.GetContextWithTimeout()
+				resp, err := runner.etcd.Get(ctx, latestAckKey)
+				if err != nil {
+					return nil, false, errors.NewError(errors.ErrInternalError.Code, "starting 状态的任务兜底机制获取ack key失败").
+						WithLog(fmt.Sprintf("workflow_i: %d, project_id: %d, task_id: %s, error: %s", s.Workflow.ID, task.ProjectID, task.TaskID, err.Error()))
+				}
+
+				if len(resp.Kvs) > 0 {
+					task := s.Tasks[task]
+					if runner.getAckForTaskRunning(WorkflowRunningTaskInfo{
+						TaskID:     task.TaskID,
+						ProjectID:  task.ProjectID,
+						TaskName:   task.TaskName,
+						TmpID:      taskStates.GetLatestScheduleRecord().TmpID,
+						WorkflowID: s.Workflow.ID,
+					}, resp.Kvs[0].Key, resp.Kvs[0].Value) {
+						return nil, false, nil
+					}
+				}
+			}
+
 			finished = false
 			readys = append(readys, task)
-			// if time.Now().Unix()-taskStates.StartTime > 5 {
-			// 	taskStates.CurrentStatus = common.TASK_STATUS_NOT_RUNNING_V2
-			// 	latestRecord := taskStates.GetLatestScheduleRecord()
-			// 	taskStates.ScheduleRecords = append(taskStates.ScheduleRecords, &WorkflowTaskScheduleRecord{
-			// 		TmpID:     latestRecord.TmpID,
-			// 		Status:    common.TASK_STATUS_NOT_RUNNING_V2,
-			// 		EventTime: time.Now().Unix(),
-			// 	})
-			// 	newStates, _ := json.Marshal(taskStates)
-			// 	ctx, _ := utils.GetContextWithTimeout()
-			// 	if _, err = s.runner.etcd.KV.Put(ctx, common.BuildWorkflowTaskStatusKey(taskStates.WorkflowID, taskStates.ProjectID, taskStates.TaskID), string(newStates)); err != nil {
-			// 		return nil, false, err
-			// 	}
-			// }
 		default:
 		}
 	}
@@ -1183,7 +1196,7 @@ func (a *workflowRunner) handleTaskEvent(event *common.TaskEvent) {
 			rego.WithTimes(3),
 			rego.WithLatestError())
 		if err != nil {
-			if err := a.GetPlan(event.Task.FlowInfo.WorkflowID).Finished(fmt.Errorf("workflow任务(%s)调度失败", event.Task.Name)); err != nil {
+			if err := a.GetPlan(event.Task.FlowInfo.WorkflowID).Finished(fmt.Errorf("workflow任务(%s)调度失败, %w", event.Task.Name, err)); err != nil {
 				// todo log
 				fmt.Println("finished error", err.Error())
 			}

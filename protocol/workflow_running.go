@@ -51,7 +51,8 @@ func (d *workflowRunningManager) SetTaskRunning(s *concurrency.Session, execInfo
 		Version: common.ACK_RESPONSE_V1,
 		Data:    data,
 	})
-	if _, err := s.Client().Put(context.TODO(), ackKey, string(ackData)); err != nil {
+
+	if _, err := s.Client().Put(context.TODO(), ackKey, string(ackData), clientv3.WithLease(s.Lease())); err != nil {
 		return err
 	}
 	// todo warning

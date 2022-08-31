@@ -15,7 +15,7 @@ type CreateTemporaryTaskReq struct {
 	ScheduleTime int64  `json:"schedule_time" form:"schedule_time" binding:"required"`
 	Command      string `json:"command" form:"command" binding:"required"`
 	Timeout      int    `json:"timeout" form:"timeout" binding:"required"`
-	Remark       string `json:"remark" form:"remark"`
+	Remark       string `json:"remark" form:"remark" binding:"required"`
 	Noseize      int    `json:"noseize" form:"noseize"`
 }
 

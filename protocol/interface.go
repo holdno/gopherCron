@@ -244,7 +244,7 @@ func (a *comm) GetTask(projectID int64, taskID string) (*common.TaskInfo, error)
 }
 
 const (
-	version = "v2.0.0"
+	version = "v2.0.3-beta"
 )
 
 func (a *comm) GetVersion() string {

@@ -32,6 +32,7 @@ import (
 )
 
 type App interface {
+	Log() *logrus.Logger
 	CreateProject(tx *gorm.DB, p common.Project) (int64, error)
 	GetProject(pid int64) (*common.Project, error)
 	GetUserProjects(uid int64) ([]*common.Project, error)
@@ -191,6 +192,7 @@ func NewApp(configPath string, opts ...AppOptions) App {
 	var err error
 
 	conf := config.InitServiceConfig(configPath)
+
 	app := new(app)
 	app.cfg = conf
 	app.logger = logger.MustSetup(conf.LogLevel)
@@ -328,7 +330,7 @@ func NewApp(configPath string, opts ...AppOptions) App {
 				}
 			}
 			fmt.Println("new workflow leader")
-			list, _, err := app.GetWorkflowList(common.GetWorkflowListOptions{}, 1, 1000)
+			list, _, err := app.GetWorkflowList(common.GetWorkflowListOptions{}, 1, 100000)
 			if err != nil {
 				app.logger.Error("failed to refresh workflow list", err.Error())
 				continue
@@ -408,6 +410,10 @@ func startTemporaryTaskWorker(app *app) {
 			}
 		}
 	})
+}
+
+func (a *app) Log() *logrus.Logger {
+	return a.logger
 }
 
 func (a *app) PublishMessage(data PublishData) {
@@ -556,7 +562,7 @@ func (a *app) CleanLog(tx *gorm.DB, pid int64, tid string) error {
 
 func (a *app) GetTaskLogDetail(pid int64, tid string, tmpID string) (*common.TaskLog, error) {
 	res, err := a.store.TaskLog().GetOne(pid, tid, tmpID)
-	if err != nil {
+	if err != nil && err != gorm.ErrRecordNotFound {
 		errObj := errors.ErrInternalError
 		errObj.Msg = "获取日志列表失败"
 		errObj.Log = err.Error()

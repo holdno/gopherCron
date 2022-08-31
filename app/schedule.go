@@ -11,6 +11,7 @@ import (
 	"github.com/holdno/gopherCron/errors"
 	"github.com/holdno/gopherCron/protocol"
 	"github.com/holdno/gopherCron/utils"
+	"github.com/sirupsen/logrus"
 
 	"github.com/coreos/etcd/clientv3"
 	"github.com/coreos/etcd/clientv3/concurrency"
@@ -47,79 +48,131 @@ func (a *workflowRunner) scheduleTask(taskInfo *common.TaskInfo) error {
 		return nil
 	}
 
-	// 设置任务状态为启动中
-	// 调度任务至agent
-	_, err = concurrency.NewSTM(cli, func(s concurrency.STM) error {
-		if err = setWorkflowTaskStarting(s, taskInfo); err != nil {
+	err = waitingAck(cli, common.BuildWorkflowAckKey(taskInfo.FlowInfo.WorkflowID, taskInfo.ProjectID, taskInfo.TaskID, taskInfo.TmpID),
+		func() error {
+			// 设置任务状态为启动中
+			// 调度任务至agent
+			_, err = concurrency.NewSTM(cli, func(s concurrency.STM) error {
+				if err = setWorkflowTaskStarting(s, taskInfo); err != nil {
+					return err
+				}
+				ctx, _ := utils.GetContextWithTimeout()
+				// make lease to notify worker
+				// 创建一个租约 让其稍后过期并自动删除
+				leaseGrantResp, err := cli.Lease.Grant(ctx, 1)
+				if err != nil {
+					errObj := errors.ErrInternalError
+					errObj.Log = "[putSchedule] lease grant error:" + err.Error()
+					return errObj
+				}
+
+				return putSchedule(s, leaseGrantResp.ID, taskInfo)
+			})
+
+			a.app.PublishMessage(messageWorkflowTaskStatusChanged(
+				taskInfo.FlowInfo.WorkflowID,
+				taskInfo.ProjectID,
+				taskInfo.TaskID,
+				common.TASK_STATUS_STARTING_V2))
+
 			return err
-		}
-		ctx, _ := utils.GetContextWithTimeout()
-		// make lease to notify worker
-		// 创建一个租约 让其稍后过期并自动删除
-		leaseGrantResp, err := cli.Lease.Grant(ctx, 1)
-		if err != nil {
-			errObj := errors.ErrInternalError
-			errObj.Log = "[putSchedule] lease grant error:" + err.Error()
-			return errObj
-		}
-
-		return putSchedule(s, leaseGrantResp.ID, taskInfo)
-	})
-	if err != nil {
-		return err
-	}
-
-	a.app.PublishMessage(messageWorkflowTaskStatusChanged(
-		taskInfo.FlowInfo.WorkflowID,
-		taskInfo.ProjectID,
-		taskInfo.TaskID,
-		common.TASK_STATUS_STARTING_V2))
-
-	err = waitingAck(cli, common.BuildWorkflowAckKey(taskInfo.FlowInfo.WorkflowID, taskInfo.ProjectID, taskInfo.TaskID, taskInfo.TmpID), func(e *clientv3.Event) bool {
-		var ack common.AckResponse
-		if err := json.Unmarshal(e.Kv.Value, &ack); err != nil {
-			// log
-			return false
-		}
-
-		switch ack.Version {
-		case common.ACK_RESPONSE_V1:
-			var v1 common.AckResponseV1
-			if err := json.Unmarshal(ack.Data, &v1); err != nil {
-				// log
-				fmt.Println("unmarshal ack data error", err.Error())
-				return false
-			}
-		default:
-			return false
-		}
-
-		_, err = concurrency.NewSTM(cli, func(s concurrency.STM) error {
-			if err = setWorkflowTaskRunning(s, taskInfo); err != nil {
-				return err
-			}
-			s.Del(string(e.Kv.Key))
-			return nil
+		},
+		func(e *clientv3.Event) bool {
+			return a.getAckForTaskRunning(WorkflowRunningTaskInfo{
+				TaskID:     taskInfo.TaskID,
+				TaskName:   taskInfo.Name,
+				ProjectID:  taskInfo.ProjectID,
+				WorkflowID: taskInfo.FlowInfo.WorkflowID,
+				TmpID:      taskInfo.TmpID,
+			}, e.Kv.Key, e.Kv.Value)
 		})
-		if err != nil {
-			// log
-			fmt.Println("delete ack key error", err.Error())
-			return false
-		}
-
-		a.app.PublishMessage(messageWorkflowTaskStatusChanged(
-			taskInfo.FlowInfo.WorkflowID,
-			taskInfo.ProjectID,
-			taskInfo.TaskID,
-			common.TASK_STATUS_RUNNING_V2))
-
-		return true
-	})
-
 	if err != nil {
+		a.app.Log().WithFields(logrus.Fields{
+			"workflow_id": taskInfo.FlowInfo.WorkflowID,
+			"project_id":  taskInfo.ProjectID,
+			"task_id":     taskInfo.TaskID,
+			"tmp_id":      taskInfo.TmpID,
+			"error":       err.Error(),
+		}).Error("waiting workflow task ack error")
 		return err
 	}
 	return nil
+}
+
+type WorkflowRunningTaskInfo struct {
+	WorkflowID int64
+	TmpID      string
+	TaskID     string
+	TaskName   string
+	ProjectID  int64
+}
+
+func (a *workflowRunner) getAckForTaskRunning(taskInfo WorkflowRunningTaskInfo, k, v []byte) bool {
+	var ack common.AckResponse
+	if err := json.Unmarshal(v, &ack); err != nil {
+		a.app.Log().WithFields(logrus.Fields{
+			"workflow_id": taskInfo.WorkflowID,
+			"project_id":  taskInfo.ProjectID,
+			"task_name":   taskInfo.TaskName,
+			"task_id":     taskInfo.TaskID,
+			"tmp_id":      taskInfo.TmpID,
+			"error":       err.Error(),
+		}).Error("failed to json.Unmarshal ack response")
+		return false
+	}
+
+	switch ack.Version {
+	case common.ACK_RESPONSE_V1:
+		var v1 common.AckResponseV1
+		if err := json.Unmarshal(ack.Data, &v1); err != nil {
+			a.app.Log().WithFields(logrus.Fields{
+				"workflow_id": taskInfo.WorkflowID,
+				"project_id":  taskInfo.ProjectID,
+				"task_name":   taskInfo.TaskName,
+				"task_id":     taskInfo.TaskID,
+				"tmp_id":      taskInfo.TmpID,
+				"error":       err.Error(),
+			}).Error("failed to json.Unmarshal ack data")
+			return false
+		}
+	default:
+		a.app.Log().WithFields(logrus.Fields{
+			"workflow_id": taskInfo.WorkflowID,
+			"project_id":  taskInfo.ProjectID,
+			"task_name":   taskInfo.TaskName,
+			"task_id":     taskInfo.TaskID,
+			"tmp_id":      taskInfo.TmpID,
+			"ack_version": ack.Version,
+		}).Error("unknown ack response version")
+		return false
+	}
+
+	_, err := concurrency.NewSTM(a.etcd, func(s concurrency.STM) error {
+		if err := setWorkflowTaskRunning(s, taskInfo); err != nil {
+			return err
+		}
+		// 删除 ack key
+		s.Del(string(k))
+		return nil
+	})
+	if err != nil {
+		a.app.Log().WithFields(logrus.Fields{
+			"workflow_id": taskInfo.WorkflowID,
+			"project_id":  taskInfo.ProjectID,
+			"task_name":   taskInfo.TaskName,
+			"task_id":     taskInfo.TaskID,
+			"tmp_id":      taskInfo.TmpID,
+			"error":       err.Error(),
+		}).Error("failed to delete ack key")
+		return false
+	}
+
+	a.app.PublishMessage(messageWorkflowTaskStatusChanged(
+		taskInfo.WorkflowID,
+		taskInfo.ProjectID,
+		taskInfo.TaskID,
+		common.TASK_STATUS_RUNNING_V2))
+	return true
 }
 
 type WorkflowTaskScheduleRecord struct {
@@ -224,8 +277,8 @@ func setWorkflowTaskNotRunning(kv concurrency.STM, taskInfo *common.TaskInfo) er
 	return nil
 }
 
-func setWorkflowTaskRunning(kv concurrency.STM, taskInfo *common.TaskInfo) error {
-	key := common.BuildWorkflowTaskStatusKey(taskInfo.FlowInfo.WorkflowID, taskInfo.ProjectID, taskInfo.TaskID)
+func setWorkflowTaskRunning(kv concurrency.STM, taskInfo WorkflowRunningTaskInfo) error {
+	key := common.BuildWorkflowTaskStatusKey(taskInfo.WorkflowID, taskInfo.ProjectID, taskInfo.TaskID)
 	states := kv.Get(key)
 
 	if states == "" {
@@ -299,9 +352,7 @@ func putSchedule(kv concurrency.STM, leaseID clientv3.LeaseID, taskInfo *common.
 	// task to json
 	saveByte, err := json.Marshal(taskInfo)
 	if err != nil {
-		errObj := errors.ErrInternalError
-		errObj.Log = "[putSchedule] json.mashal task error:" + err.Error()
-		return errObj
+		return errors.NewError(http.StatusInternalServerError, "[putSchedule] json.mashal task error").WithLog(err.Error())
 	}
 
 	// save to etcd
@@ -309,17 +360,32 @@ func putSchedule(kv concurrency.STM, leaseID clientv3.LeaseID, taskInfo *common.
 	return nil
 }
 
-func waitingAck(cli *clientv3.Client, ackKey string, onAck func(*clientv3.Event) bool) error {
+func waitingAck(cli *clientv3.Client, ackKey string, waitingFor func() error, onAck func(*clientv3.Event) bool) error {
 	// ackKey := common.BuildWorkflowAckKey(taskInfo.FlowInfo.WorkflowID, taskInfo.ProjectID, taskInfo.TaskID, taskInfo.TmpID)
-	ctx, _ := utils.GetContextWithTimeout()
+	ctx, cancel := utils.GetContextWithTimeout()
 	// 开始监听
-	watchChan := cli.Watcher.Watch(ctx, ackKey, clientv3.WithPrefix(), clientv3.WithRev(0))
+	watchChan := cli.Watcher.Watch(ctx, ackKey, clientv3.WithPrefix())
 
+	waitingChan := make(chan error, 1)
+	defer close(waitingChan)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				waitingChan <- fmt.Errorf("waiting got a panic, %v", r)
+			}
+		}()
+		if err := waitingFor(); err != nil {
+			waitingChan <- err
+		}
+	}()
 	for {
 		select {
+		case err := <-waitingChan:
+			cancel()
+			return err
 		case w, ok := <-watchChan:
 			if !ok {
-				return errors.NewError(http.StatusBadRequest, "任务调度超时，agent无响应").WithLog(ctx.Err().Error())
+				return fmt.Errorf("任务调度超时，agent无响应, ack key: %s, %w", ackKey, ctx.Err())
 			}
 
 			if w.Err() != nil {
@@ -334,7 +400,7 @@ func waitingAck(cli *clientv3.Client, ackKey string, onAck func(*clientv3.Event)
 						if ok := onAck(watchEvent); ok {
 							return nil
 						}
-						return fmt.Errorf("retry")
+						return fmt.Errorf("failed to retry onAck, ack key: %s", ackKey)
 					}, rego.WithTimes(3), rego.WithPeriod(time.Second), rego.WithLatestError())
 					if err != nil {
 						return err
@@ -546,30 +612,36 @@ func (a *app) TemporarySchedulerTask(task *common.TaskInfo) error {
 		return errObj
 	}
 
-	ctx, _ = utils.GetContextWithTimeout()
-	// save to etcd
-	if _, err = a.etcd.KV().Put(ctx, schedulerKey, string(saveByte), clientv3.WithLease(leaseGrantResp.ID)); err != nil {
-		errObj = errors.ErrInternalError
-		errObj.Log = "[Etcd - TemporarySchedulerTask] etcd client kv put error:" + err.Error()
-		return errObj
-	}
-
 	// wait agent execute
-	err = waitingAck(a.etcd.Client(), common.BuildTaskStatusKey(task.ProjectID, task.TaskID), func(e *clientv3.Event) bool {
-		var ack common.TaskRunningInfo
-		if err := json.Unmarshal(e.Kv.Value, &ack); err != nil {
-			// log
-			return false
-		}
+	err = waitingAck(a.etcd.Client(), common.BuildTaskStatusKey(task.ProjectID, task.TaskID),
+		func() error {
+			ctx, _ = utils.GetContextWithTimeout()
+			// save to etcd
+			if _, err = a.etcd.KV().Put(ctx, schedulerKey, string(saveByte), clientv3.WithLease(leaseGrantResp.ID)); err != nil {
+				errObj = errors.ErrInternalError
+				errObj.Log = "[Etcd - TemporarySchedulerTask] etcd client kv put error:" + err.Error()
+				return errObj
+			}
+			return nil
+		},
+		func(e *clientv3.Event) bool {
+			var ack common.TaskRunningInfo
+			if err := json.Unmarshal(e.Kv.Value, &ack); err != nil {
+				a.Log().WithFields(logrus.Fields{
+					"project_id": task.ProjectID,
+					"task_id":    task.TaskID,
+				}).Error("failed to json.Unmarshal task running info")
+				return false
+			}
 
-		a.PublishMessage(messageTaskStatusChanged(
-			task.ProjectID,
-			task.TaskID,
-			task.TmpID,
-			ack.Status))
+			a.PublishMessage(messageTaskStatusChanged(
+				task.ProjectID,
+				task.TaskID,
+				task.TmpID,
+				ack.Status))
 
-		return true
-	})
+			return true
+		})
 
 	return err
 }

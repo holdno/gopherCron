@@ -44,16 +44,16 @@ func (d *defaultRunningManager) SetTaskNotRunning(s *concurrency.Session, execIn
 	}
 
 	// do not need to delete task-status-key, lease closed before this func
-	ctx, _ := utils.GetContextWithTimeout()
+	// ctx, _ := utils.GetContextWithTimeout()
 
-	_, err := s.Client().Delete(ctx, common.BuildTaskStatusKey(execInfo.Task.ProjectID, execInfo.Task.TaskID))
-	if err != nil {
-		errObj := errors.ErrInternalError
-		errObj.Log = "[Etcd - SetTaskNotRunning] etcd client kv put error:" + err.Error()
-		return errObj
-	}
+	// _, err := s.Client().Delete(ctx, common.BuildTaskStatusKey(execInfo.Task.ProjectID, execInfo.Task.TaskID))
+	// if err != nil {
+	// 	errObj := errors.ErrInternalError
+	// 	errObj.Log = "[Etcd - SetTaskNotRunning] etcd client kv put error:" + err.Error()
+	// 	return errObj
+	// }
 
-	err = d.queue[execInfo.Task.ProjectID].Enqueue(generateTaskFinishedResultV1(TaskFinishedQueueItemV1{
+	err := d.queue[execInfo.Task.ProjectID].Enqueue(generateTaskFinishedResultV1(TaskFinishedQueueItemV1{
 		ProjectID: execInfo.Task.ProjectID,
 		TaskID:    execInfo.Task.TaskID,
 		Status:    status,

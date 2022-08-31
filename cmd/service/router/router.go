@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/gorilla/websocket"
 	"github.com/holdno/firetower/service/gateway"
 	"github.com/holdno/gopherCron/cmd/service/controller"
 	"github.com/holdno/gopherCron/cmd/service/controller/etcd_func"
@@ -17,6 +16,7 @@ import (
 	"github.com/holdno/gopherCron/utils"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gorilla/websocket"
 )
 
 func SetupRoute(r *gin.Engine, conf *config.DeployConf) {
@@ -188,7 +188,6 @@ func Websocket(c *gin.Context) {
 			var pushmsg = gateway.NewFireInfo(tower, context)
 			pushmsg.Message.Topic = v
 			pushmsg.Message.Data = []byte(fmt.Sprintf("{\"type\":\"onUnsubscribe\",\"data\":%d}", num))
-			fmt.Println(pushmsg)
 			tower.Publish(pushmsg)
 		}
 		return true

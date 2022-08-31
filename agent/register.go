@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"time"
 
 	"github.com/holdno/gopherCron/common"
@@ -69,9 +68,7 @@ func (a *client) startRegister(projectID int64, clientinfo string) {
 
 // Register 注册agent
 func (a *client) Register(projects []int64) {
-	//if len(projects) == 0 {
-	//	return
-	//}
+
 	a.localip, _ = utils.GetLocalIP()
 
 	if a.localip == "" {
@@ -82,8 +79,6 @@ func (a *client) Register(projects []int64) {
 		ClientIP: a.localip,
 		Version:  a.GetVersion(),
 	})
-
-	fmt.Println(string(clientinfo))
 
 	for _, projectID := range projects {
 		a.startRegister(projectID, string(clientinfo))

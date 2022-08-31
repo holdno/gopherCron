@@ -22,17 +22,19 @@ func (p *panicgroup) Close() {
 func (p *panicgroup) Go(f func()) {
 
 	go func() {
-		wait := &sync.WaitGroup{}
 		for {
-			wait.Add(1)
-			defer func() {
-				if r := recover(); r != nil {
-					p.err <- fmt.Errorf("%+v", r)
-				}
-				wait.Done()
+			wait := &sync.WaitGroup{}
+			func() {
+				wait.Add(1)
+				defer func() {
+					if r := recover(); r != nil {
+						p.err <- fmt.Errorf("%+v", r)
+					}
+					wait.Done()
+				}()
+				f()
+				wait.Wait()
 			}()
-			f()
-			wait.Wait()
 			if p.close {
 				return
 			}

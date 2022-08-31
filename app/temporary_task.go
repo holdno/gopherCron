@@ -45,6 +45,8 @@ func (a *app) GetNeedToScheduleTemporaryTask(t time.Time) ([]*common.TemporaryTa
 func (a *app) GetTemporaryTaskList(projectID int64) ([]*common.TemporaryTask, error) {
 	selector := selection.NewSelector(
 		selection.NewRequirement("project_id", selection.Equals, projectID))
+
+	selector.OrderBy = "schedule_status ASC,schedule_time DESC"
 	list, err := a.store.TemporaryTask().GetList(selector)
 	if err != nil && err != gorm.ErrRecordNotFound {
 		return nil, errors.NewError(http.StatusInternalServerError, "获取临时调度任务列表失败").WithLog(err.Error())
@@ -68,6 +70,7 @@ func (a *app) GetTemporaryTaskListWithUser(projectID int64) ([]TemporaryTaskList
 	for _, v := range list {
 		userIDs = append(userIDs, v.UserID)
 	}
+
 	userList, err := a.store.User().GetUsers(selection.NewSelector(selection.NewRequirement("id", selection.In, userIDs)))
 	if err != nil && err != gorm.ErrRecordNotFound {
 		return nil, errors.NewError(http.StatusInternalServerError, "获取任务创建人信息失败").WithLog(err.Error())
@@ -135,6 +138,8 @@ func (a *app) TemporaryTaskSchedule(tmpTask common.TemporaryTask) error {
 		task.Command = tmpTask.Command
 	}
 	task.TmpID = tmpTask.TmpID
+	task.Timeout = tmpTask.Timeout
+	task.Noseize = tmpTask.Noseize
 
 	tx := a.store.BeginTx()
 	defer func() {

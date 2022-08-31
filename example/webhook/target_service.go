@@ -31,13 +31,10 @@ func main() {
 			return
 		}
 
-		fmt.Println("body:", req)
 		sign := req.Sign
 		req.Sign = ""
 
 		newSign := utils.MakeSign(req, "123123")
-		fmt.Println("new sign:", newSign)
-		fmt.Println("sign:", sign)
 		if sign != newSign || time.Now().Unix()-5 > req.RequestTime {
 			c.String(http.StatusUnauthorized, "unauthorized")
 			return
