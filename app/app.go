@@ -19,14 +19,15 @@ import (
 	"github.com/holdno/gopherCron/pkg/warning"
 	"github.com/holdno/gopherCron/protocol"
 	"github.com/holdno/gopherCron/utils"
-	"github.com/holdno/rego"
 
 	"github.com/coreos/etcd/clientv3"
 	"github.com/coreos/etcd/clientv3/concurrency"
 	recipe "github.com/coreos/etcd/contrib/recipes"
 	"github.com/gin-gonic/gin"
-	"github.com/holdno/firetower/service/gateway"
+	towerconfig "github.com/holdno/firetower/config"
+	"github.com/holdno/firetower/service/tower"
 	"github.com/holdno/gocommons/selection"
+	"github.com/holdno/rego"
 	"github.com/jinzhu/gorm"
 	"github.com/sirupsen/logrus"
 )
@@ -150,7 +151,8 @@ type app struct {
 	protocol.CommonInterface
 	warning.Warner
 
-	webPusher gateway.ServicePusher
+	firetower tower.Manager
+	pusher    *SystemPusher
 }
 
 type WebClientPusher interface {
@@ -169,14 +171,27 @@ func WithWarning(w warning.Warner) AppOptions {
 	}
 }
 
-func WithFiretower(configPath string) AppOptions {
+func WithFiretower() AppOptions {
 	return func(a *app) {
-		if configPath == "" {
-			return
+		var err error
+		a.firetower, err = tower.Setup(towerconfig.FireTowerConfig{
+			ChanLens:    1000,
+			Heartbeat:   30,
+			ServiceMode: towerconfig.SingleMode,
+			Bucket: towerconfig.BucketConfig{
+				Num:              4,
+				CentralChanCount: 100000,
+				BuffChanCount:    1000,
+				ConsumerNum:      1,
+			},
+		})
+		if err != nil {
+			panic(err)
 		}
-		gateway.ClusterId = a.clusterID
-		gateway.DefaultConfigPath = configPath
-		gateway.Init()
+
+		a.pusher = &SystemPusher{
+			clientID: "system",
+		}
 
 		a.messageChan = make(chan PublishData, 1000)
 		a.Go(func() {

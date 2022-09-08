@@ -3,8 +3,8 @@ package app
 import (
 	"encoding/json"
 
-	"github.com/holdno/firetower/service/gateway"
-	"github.com/holdno/gopherCron/utils"
+	"github.com/holdno/firetower/protocol"
+	"github.com/holdno/firetower/service/tower"
 )
 
 type WebClientEvent struct {
@@ -53,12 +53,26 @@ func messageWorkflowTaskStatusChanged(workflowID, projectID int64, taskID, statu
 	}
 }
 
-func (a *app) publishEventToWebClient(data PublishData) {
-	m := gateway.GetTopicManage()
-	if !m.IsReady() {
-		return
-	}
+type SystemPusher struct {
+	clientID string
+}
 
-	body, _ := json.Marshal(data.Data)
-	m.Publish(utils.GetStrID(), publishSource, data.Topic, body)
+func (s *SystemPusher) UserID() string {
+	return "system"
+}
+func (s *SystemPusher) ClientID() string {
+	return s.clientID
+}
+
+func (a *app) publishEventToWebClient(data PublishData) {
+	f := tower.NewFire(protocol.SourceSystem, a.pusher)
+	msgBody := map[string]interface{}{
+		"topic": data.Topic,
+		"data":  data.Data,
+	}
+	body, _ := json.Marshal(msgBody)
+	f.Message.Topic = data.Topic
+	f.Message.Type = protocol.PublishKey
+	f.Message.Data = body
+	a.firetower.Publish(f)
 }

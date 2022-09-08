@@ -10,17 +10,17 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/coreos/etcd/clientv3"
-	"github.com/coreos/etcd/clientv3/concurrency"
-	"github.com/gorhill/cronexpr"
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/errors"
 	"github.com/holdno/gopherCron/pkg/warning"
 	"github.com/holdno/gopherCron/protocol"
 	"github.com/holdno/gopherCron/utils"
-	"github.com/holdno/rego"
 
+	"github.com/coreos/etcd/clientv3"
+	"github.com/coreos/etcd/clientv3/concurrency"
+	"github.com/gorhill/cronexpr"
 	"github.com/holdno/gocommons/selection"
+	"github.com/holdno/rego"
 	"github.com/jinzhu/gorm"
 )
 
@@ -911,6 +911,32 @@ func (s *WorkflowPlan) CanSchedule(runner *workflowRunner) ([]WorkflowTaskInfo, 
 
 		switch taskStates.CurrentStatus {
 		case common.TASK_STATUS_RUNNING_V2:
+			latestAckKey := common.BuildWorkflowAckKey(s.Workflow.ID, task.ProjectID, task.TaskID, taskStates.GetLatestScheduleRecord().TmpID)
+			ctx, _ := utils.GetContextWithTimeout()
+			resp, err := runner.etcd.Get(ctx, latestAckKey)
+			if err != nil {
+				return nil, false, errors.NewError(errors.ErrInternalError.Code, "running 状态的任务兜底机制获取ack key失败").
+					WithLog(fmt.Sprintf("workflow_id: %d, project_id: %d, task_id: %s, error: %s", s.Workflow.ID, task.ProjectID, task.TaskID, err.Error()))
+			}
+
+			if len(resp.Kvs) < 1 {
+				// running状态 但是没有ack key
+				// 有两种情况，一种是done状态还在队列中没有被workflow消费，另一种是agent直接断电，导致agent任务异常终止，没有上报任何状态
+				// 添加re-run标记，待下一次尝试调度时重新拉起任务
+				_, err = concurrency.NewSTM(s.runner.etcd, func(stm concurrency.STM) error {
+					task := s.Tasks[task]
+					if err := setWorkflowTaskNotRunning(stm, WorkflowRunningTaskInfo{
+						TaskID:     task.TaskID,
+						ProjectID:  task.ProjectID,
+						TaskName:   task.TaskName,
+						TmpID:      taskStates.GetLatestScheduleRecord().TmpID,
+						WorkflowID: s.Workflow.ID,
+					}, "waiting re-run"); err != nil {
+						return err
+					}
+					return nil
+				})
+			}
 			finished = false
 		case common.TASK_STATUS_FAIL_V2:
 			// 判断是否已经重复跑3次
@@ -932,11 +958,12 @@ func (s *WorkflowPlan) CanSchedule(runner *workflowRunner) ([]WorkflowTaskInfo, 
 				resp, err := runner.etcd.Get(ctx, latestAckKey)
 				if err != nil {
 					return nil, false, errors.NewError(errors.ErrInternalError.Code, "starting 状态的任务兜底机制获取ack key失败").
-						WithLog(fmt.Sprintf("workflow_i: %d, project_id: %d, task_id: %s, error: %s", s.Workflow.ID, task.ProjectID, task.TaskID, err.Error()))
+						WithLog(fmt.Sprintf("workflow_id: %d, project_id: %d, task_id: %s, error: %s", s.Workflow.ID, task.ProjectID, task.TaskID, err.Error()))
 				}
 
 				if len(resp.Kvs) > 0 {
 					task := s.Tasks[task]
+					// 设置running状态
 					if runner.getAckForTaskRunning(WorkflowRunningTaskInfo{
 						TaskID:     task.TaskID,
 						ProjectID:  task.ProjectID,

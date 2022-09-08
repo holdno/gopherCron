@@ -11,9 +11,9 @@ import (
 	"github.com/holdno/gopherCron/pkg/warning"
 	"github.com/holdno/gopherCron/protocol"
 	"github.com/holdno/gopherCron/utils"
-	"github.com/holdno/rego"
 
 	"github.com/coreos/etcd/clientv3/concurrency"
+	"github.com/holdno/rego"
 	"github.com/sirupsen/logrus"
 )
 

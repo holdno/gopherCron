@@ -6,9 +6,9 @@ import (
 
 // SetupOptions init api options
 type SetupOptions struct {
-	LogLevel            string
-	ConfigPath          string
-	FiretowerConfigPath string
+	LogLevel   string
+	ConfigPath string
+	Firetower  bool
 }
 
 // New a function to return a inited SetupOptions
@@ -21,5 +21,5 @@ func (o *SetupOptions) AddFlags(flagSet *pflag.FlagSet) {
 	// Add flags for generic options
 	flagSet.StringVarP(&o.LogLevel, "log-level", "l", "INFO", "log print level")
 	flagSet.StringVarP(&o.ConfigPath, "config", "c", "./cmd/service/conf/config-dev.toml", "init api by given config")
-	flagSet.StringVar(&o.FiretowerConfigPath, "firetower-config", "", "web sockets 配置文件")
+	flagSet.BoolVar(&o.Firetower, "firetower", false, "web sockets")
 }

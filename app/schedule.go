@@ -152,7 +152,8 @@ func (a *workflowRunner) getAckForTaskRunning(taskInfo WorkflowRunningTaskInfo, 
 			return err
 		}
 		// 删除 ack key
-		s.Del(string(k))
+		// 2022-09-07: 获取到ack状态后不删除，用ack状态标识agent上的任务正在运行中，当做一个运行时状态，agent任务结束后会通过lease的结束自动清理该key
+		// s.Del(string(k))
 		return nil
 	})
 	if err != nil {
@@ -250,8 +251,8 @@ func setWorkFlowTaskFinished(kv concurrency.STM, queueData protocol.TaskFinished
 	return planFinished, nil
 }
 
-func setWorkflowTaskNotRunning(kv concurrency.STM, taskInfo *common.TaskInfo) error {
-	key := common.BuildWorkflowTaskStatusKey(taskInfo.FlowInfo.WorkflowID, taskInfo.ProjectID, taskInfo.TaskID)
+func setWorkflowTaskNotRunning(kv concurrency.STM, taskInfo WorkflowRunningTaskInfo, reason string) error {
+	key := common.BuildWorkflowTaskStatusKey(taskInfo.WorkflowID, taskInfo.ProjectID, taskInfo.TaskID)
 	states := kv.Get(key)
 
 	if states == "" {
@@ -269,6 +270,7 @@ func setWorkflowTaskNotRunning(kv concurrency.STM, taskInfo *common.TaskInfo) er
 	workflowTaskStates.ScheduleRecords = append(workflowTaskStates.ScheduleRecords, &WorkflowTaskScheduleRecord{
 		TmpID:     taskInfo.TmpID,
 		Status:    common.TASK_STATUS_NOT_RUNNING_V2,
+		Result:    reason,
 		EventTime: time.Now().Unix(),
 	})
 

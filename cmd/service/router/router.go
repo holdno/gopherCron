@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/holdno/firetower/service/gateway"
 	"github.com/holdno/gopherCron/cmd/service/controller"
 	"github.com/holdno/gopherCron/cmd/service/controller/etcd_func"
 	"github.com/holdno/gopherCron/cmd/service/controller/log_func"
@@ -17,6 +16,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	"github.com/holdno/firetower/protocol"
+	"github.com/holdno/firetower/service/tower"
 )
 
 func SetupRoute(r *gin.Engine, conf *config.DeployConf) {
@@ -161,37 +162,38 @@ func Websocket(c *gin.Context) {
 	// 验证成功才升级连接
 	ws, _ := upgrader.Upgrade(c.Writer, c.Request, nil)
 
-	tower := gateway.BuildTower(ws, utils.GetStrID())
+	towerSvc := tower.BuildTower(ws, utils.GetStrID())
 
-	tower.SetReadHandler(func(fire *gateway.FireInfo) bool {
+	towerSvc.SetReadHandler(func(fire *protocol.FireInfo) bool {
+		return false // 禁止客户端与socket通信，仅做接收方
 		// 做发送验证
 		// 判断发送方是否有权限向到达方发送内容
-		tower.Publish(fire)
+		towerSvc.Publish(fire)
 		return true
 	})
 
-	tower.SetSubscribeHandler(func(context *gateway.FireLife, topic []string) bool {
+	towerSvc.SetSubscribeHandler(func(context protocol.FireLife, topic []string) bool {
 		for _, v := range topic {
-			num := tower.GetConnectNum(v)
+			num := towerSvc.GetConnectNum(v)
 			// 继承订阅消息的context
-			var pushmsg = gateway.NewFireInfo(tower, context)
+			var pushmsg = tower.NewFire("system", towerSvc)
 			pushmsg.Message.Topic = v
 			pushmsg.Message.Data = []byte(fmt.Sprintf("{\"type\":\"onSubscribe\",\"data\":%d}", num))
-			tower.Publish(pushmsg)
+			towerSvc.Publish(pushmsg)
 		}
 		return true
 	})
 
-	tower.SetUnSubscribeHandler(func(context *gateway.FireLife, topic []string) bool {
+	towerSvc.SetUnSubscribeHandler(func(context protocol.FireLife, topic []string) bool {
 		for _, v := range topic {
-			num := tower.GetConnectNum(v)
-			var pushmsg = gateway.NewFireInfo(tower, context)
+			num := towerSvc.GetConnectNum(v)
+			var pushmsg = tower.NewFire("system", towerSvc)
 			pushmsg.Message.Topic = v
 			pushmsg.Message.Data = []byte(fmt.Sprintf("{\"type\":\"onUnsubscribe\",\"data\":%d}", num))
-			tower.Publish(pushmsg)
+			towerSvc.Publish(pushmsg)
 		}
 		return true
 	})
 
-	tower.Run()
+	towerSvc.Run()
 }
