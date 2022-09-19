@@ -620,9 +620,20 @@ type workflowRunner struct {
 	nextWorkflow      common.Workflow
 	scheduleEventChan chan *common.TaskEvent
 
+	processRecord sync.Map
+
 	ctx        context.Context
 	cancelFunc context.CancelFunc
 	isClose    bool
+}
+
+func (r *workflowRunner) InProcess(taskID string) bool {
+	_, ok := r.processRecord.LoadOrStore(taskID, struct{}{})
+	return ok
+}
+
+func (r *workflowRunner) ProcessDone(taskID string) {
+	r.processRecord.Delete(taskID)
 }
 
 func NewWorkflowRunner(app App, cli *clientv3.Client) (*workflowRunner, error) {

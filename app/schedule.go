@@ -20,6 +20,10 @@ import (
 )
 
 func (a *workflowRunner) scheduleTask(taskInfo *common.TaskInfo) error {
+	if a.InProcess(taskInfo.TaskID) {
+		return nil
+	}
+	defer a.ProcessDone(taskInfo.TaskID)
 	plan := a.GetPlan(taskInfo.FlowInfo.WorkflowID)
 	if plan == nil {
 		return nil
@@ -387,7 +391,7 @@ func waitingAck(cli *clientv3.Client, ackKey string, waitingFor func() error, on
 			return err
 		case w, ok := <-watchChan:
 			if !ok {
-				return fmt.Errorf("任务调度超时，agent无响应, ack key: %s, %w", ackKey, ctx.Err())
+				return fmt.Errorf("任务调度超时, agent无响应, ack key: %s, %w", ackKey, ctx.Err())
 			}
 
 			if w.Err() != nil {
