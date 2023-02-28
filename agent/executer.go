@@ -20,7 +20,6 @@ func (a *client) ExecuteTask(info *common.TaskExecutingInfo) *common.TaskExecute
 		result *common.TaskExecuteResult
 		err    error
 	)
-	defer info.CancelFunc()
 
 	result = &common.TaskExecuteResult{
 		ExecuteInfo: info,

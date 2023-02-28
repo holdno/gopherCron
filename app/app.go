@@ -222,7 +222,7 @@ func NewApp(configPath string, opts ...AppOptions) App {
 	}
 
 	{
-		app.taskResultChan = make(chan string, 100)
+		app.taskResultChan = make(chan string, 1000)
 		app.taskResultQueue = recipe.NewQueue(app.etcd.Client(), common.BuildTaskResultQueuePrefixKey())
 	}
 
@@ -290,25 +290,36 @@ func NewApp(configPath string, opts ...AppOptions) App {
 				_ = json.Unmarshal([]byte(executeResult), &execResult)
 				switch execResult.Version {
 				case protocol.QueueItemV1:
-
 					var result protocol.TaskFinishedQueueItemV1
 					_ = json.Unmarshal(execResult.Data, &result)
-					if result.TaskType == common.WorkflowPlan {
-						if err := app.workflowRunner.handleTaskResultV1(result); err != nil {
-							if err = app.taskResultQueue.Enqueue(executeResult); err != nil {
+					go func(result protocol.TaskFinishedQueueItemV1) {
+						defer func() {
+							if r := recover(); r != nil {
 								app.Warning(warning.WarningData{
 									Type:      warning.WarningTypeSystem,
-									Data:      fmt.Sprintf("任务结果消费出错，重新入队失败, %s", err.Error()),
+									Data:      fmt.Sprintf("任务结果消费出错 panic, %v", r),
 									TaskName:  result.TaskID,
 									ProjectID: result.ProjectID,
 								})
 							}
-						}
-					} else {
-						// normal task
-						app.PublishMessage(messageTaskStatusChanged(result.ProjectID, result.TaskID, result.TmpID, result.Status))
-					}
+						}()
 
+						if result.TaskType == common.WorkflowPlan {
+							if err := app.workflowRunner.handleTaskResultV1(result); err != nil {
+								if err = app.taskResultQueue.Enqueue(executeResult); err != nil {
+									app.Warning(warning.WarningData{
+										Type:      warning.WarningTypeSystem,
+										Data:      fmt.Sprintf("任务结果消费出错，重新入队失败, %s", err.Error()),
+										TaskName:  result.TaskID,
+										ProjectID: result.ProjectID,
+									})
+								}
+							}
+						} else {
+							// normal task
+							app.PublishMessage(messageTaskStatusChanged(result.ProjectID, result.TaskID, result.TmpID, result.Status))
+						}
+					}(result)
 				}
 			case <-app.closeCh:
 				t.Stop()

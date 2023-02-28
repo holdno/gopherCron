@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/holdno/gopherCron/common"
+	"github.com/holdno/gopherCron/config"
 	"github.com/holdno/gopherCron/errors"
 	"github.com/holdno/gopherCron/protocol"
 	"github.com/holdno/gopherCron/utils"
@@ -38,9 +39,9 @@ func (a *workflowRunner) scheduleTask(taskInfo *common.TaskInfo) error {
 	if !running {
 		return nil
 	}
+
 	cli := a.etcd
 	taskInfo.TmpID = utils.GetStrID()
-	taskInfo.CreateTime = time.Now().Unix()
 	taskStates, err := getWorkflowTaskStates(cli.KV, common.BuildWorkflowTaskStatusKey(taskInfo.FlowInfo.WorkflowID, taskInfo.ProjectID, taskInfo.TaskID))
 	if err != nil {
 		return err
@@ -69,15 +70,17 @@ func (a *workflowRunner) scheduleTask(taskInfo *common.TaskInfo) error {
 					errObj.Log = "[putSchedule] lease grant error:" + err.Error()
 					return errObj
 				}
-
+				taskInfo.CreateTime = time.Now().Unix()
 				return putSchedule(s, leaseGrantResp.ID, taskInfo)
 			})
 
-			a.app.PublishMessage(messageWorkflowTaskStatusChanged(
-				taskInfo.FlowInfo.WorkflowID,
-				taskInfo.ProjectID,
-				taskInfo.TaskID,
-				common.TASK_STATUS_STARTING_V2))
+			if err == nil {
+				a.app.PublishMessage(messageWorkflowTaskStatusChanged(
+					taskInfo.FlowInfo.WorkflowID,
+					taskInfo.ProjectID,
+					taskInfo.TaskID,
+					common.TASK_STATUS_STARTING_V2))
+			}
 
 			return err
 		},
@@ -335,8 +338,14 @@ func setWorkflowTaskStarting(kv concurrency.STM, taskInfo *common.TaskInfo) erro
 		if err := json.Unmarshal([]byte(value), &workflowTaskStates); err != nil {
 			errObj := errors.ErrInternalError
 			errObj.Log = "[setWorkflowTaskStarting] json unmarshal workflow task running result error:" + err.Error()
-			return nil
+			return errObj
 		}
+
+		// if workflowTaskStates.CurrentStatus == common.TASK_STATUS_STARTING_V2 {
+		// 	errObj := errors.ErrLockAlreadyRequired
+		// 	errObj.Log = "[setWorkflowTaskStarting] the workflow task current status is already string, can not strating again"
+		// 	return errObj
+		// }
 
 		workflowTaskStates.CurrentStatus = common.TASK_STATUS_STARTING_V2
 		workflowTaskStates.ScheduleCount += 1
@@ -368,10 +377,11 @@ func putSchedule(kv concurrency.STM, leaseID clientv3.LeaseID, taskInfo *common.
 
 func waitingAck(cli *clientv3.Client, ackKey string, waitingFor func() error, onAck func(*clientv3.Event) bool) error {
 	// ackKey := common.BuildWorkflowAckKey(taskInfo.FlowInfo.WorkflowID, taskInfo.ProjectID, taskInfo.TaskID, taskInfo.TmpID)
-	ctx, cancel := utils.GetContextWithTimeout()
+	ctx, cancel := context.WithCancel(context.TODO())
+	defer cancel()
 	// 开始监听
 	watchChan := cli.Watcher.Watch(ctx, ackKey, clientv3.WithPrefix())
-
+	var ticker *time.Ticker
 	waitingChan := make(chan error, 1)
 	defer close(waitingChan)
 	go func() {
@@ -382,11 +392,18 @@ func waitingAck(cli *clientv3.Client, ackKey string, waitingFor func() error, on
 		}()
 		if err := waitingFor(); err != nil {
 			waitingChan <- err
+			return
 		}
+		ticker = time.NewTicker(time.Duration(config.GetServiceConfig().Deploy.Timeout+2) * time.Second)
+		<-ticker.C
+		cancel()
 	}()
 	for {
 		select {
 		case err := <-waitingChan:
+			if ticker != nil {
+				ticker.Stop()
+			}
 			cancel()
 			return err
 		case w, ok := <-watchChan:

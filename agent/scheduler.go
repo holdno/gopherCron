@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"runtime"
@@ -260,6 +261,7 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) {
 	plan.Task.ClientIP = a.localip
 
 	go func() {
+
 		defer func() {
 			if r := recover(); r != nil {
 				a.Warning(warning.WarningData{
@@ -308,7 +310,9 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) {
 		)
 		newSession := func() error {
 			var err error
-			etcdSession, err = concurrency.NewSession(a.etcd.Client(), concurrency.WithContext(taskExecuteInfo.CancelCtx))
+
+			ctx, _ := context.WithTimeout(context.Background(), time.Second*time.Duration(taskExecuteInfo.Task.Timeout+10))
+			etcdSession, err = concurrency.NewSession(a.etcd.Client(), concurrency.WithContext(ctx))
 			return err
 		}
 		if err = newSession(); err != nil {
@@ -345,10 +349,10 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) {
 					AgentIP:   a.localip,
 					TaskName:  plan.Task.Name,
 					ProjectID: plan.Task.ProjectID,
-					Data:      "变更任务运行状态失败",
+					Data:      "变更任务-运行状态失败",
 				})
-				a.logger.Errorf("task: %s, id: %s, failed to change running status, the task is finished, error: %v",
-					plan.Task.Name, plan.Task.TaskID, err)
+				a.logger.Errorf("task: %s, id: %s, tmp_id: %s, failed to change running status, the task is finished, error: %v",
+					plan.Task.Name, plan.Task.TaskID, plan.Task.TmpID, err)
 			}
 
 			etcdSession.Close()
@@ -364,8 +368,8 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) {
 				ProjectID: plan.Task.ProjectID,
 				Data:      "设置任务运行状态失败",
 			})
-			a.logger.Errorf("task: %s, id: %s, change running status error, %v", plan.Task.Name,
-				plan.Task.TaskID, err)
+			a.logger.Errorf("task: %s, id: %s, tmp_id: %s, change running status error, %v", plan.Task.Name,
+				plan.Task.TaskID, plan.Task.TmpID, err)
 			return
 		}
 
@@ -376,11 +380,16 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) {
 					select {
 					case <-etcdSession.Done():
 						for {
-							if !taskFinished {
-								newSession()
+							if !taskFinished && taskExecuteInfo.CancelCtx.Err() == nil {
+								if err = newSession(); err != nil {
+									a.logger.Errorf("task: %s, id: %s, failed to recreate etcd session, %v", plan.Task.Name,
+										plan.Task.TaskID, err)
+									time.Sleep(time.Second)
+									continue
+								}
 								err := protocol.SetTaskRunning(etcdSession, taskExecuteInfo)
 								if err != nil {
-									a.logger.Errorf("task: %s, id: %s, failed to recreate etcd session, %v", plan.Task.Name,
+									a.logger.Errorf("task: %s, id: %s, failed to reset running status, %v", plan.Task.Name,
 										plan.Task.TaskID, err)
 									time.Sleep(time.Second)
 									continue
@@ -403,7 +412,7 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) {
 
 // 处理任务结果
 func (a *client) handleTaskResult(result *common.TaskExecuteResult) {
-	err := utils.RetryFunc(10, func() error {
+	err := utils.RetryFunc(3, func() error {
 		if result.Err != "" {
 			err := a.Warning(warning.WarningData{
 				Data:      result.Err,
@@ -422,7 +431,7 @@ func (a *client) handleTaskResult(result *common.TaskExecuteResult) {
 		a.logger.WithField("desc", err).Error("task warning report error")
 	}
 
-	err = utils.RetryFunc(10, func() error {
+	err = utils.RetryFunc(3, func() error {
 		err := a.ResultReport(result)
 		return err
 	})

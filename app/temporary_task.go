@@ -140,6 +140,7 @@ func (a *app) TemporaryTaskSchedule(tmpTask common.TemporaryTask) error {
 	task.TmpID = tmpTask.TmpID
 	task.Timeout = tmpTask.Timeout
 	task.Noseize = tmpTask.Noseize
+	task.Name = tmpTask.Remark // 用于告警 / 日志
 
 	tx := a.store.BeginTx()
 	defer func() {

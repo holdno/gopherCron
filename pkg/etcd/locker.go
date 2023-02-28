@@ -97,6 +97,7 @@ func (tl *Locker) TryLock() error {
 	// 创建一个cancel context用来取消自动续租
 	cancelCtx, cancelFunc = context.WithCancel(context.TODO())
 	if keepRespChan, err = tl.lease.KeepAlive(cancelCtx, leaseGrantResp.ID); err != nil {
+		cancelFunc()
 		errObj = errors.ErrInternalError
 		errObj.Log = "[TaskLock - TryLock] lease keepalive error:" + err.Error()
 		return errObj

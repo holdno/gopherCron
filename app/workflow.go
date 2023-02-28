@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/holdno/gopherCron/common"
+	"github.com/holdno/gopherCron/config"
 	"github.com/holdno/gopherCron/errors"
 	"github.com/holdno/gopherCron/pkg/warning"
 	"github.com/holdno/gopherCron/protocol"
@@ -627,6 +628,11 @@ type workflowRunner struct {
 	isClose    bool
 }
 
+func (r *workflowRunner) IsInProcess(taskID string) bool {
+	_, ok := r.processRecord.Load(taskID)
+	return ok
+}
+
 func (r *workflowRunner) InProcess(taskID string) bool {
 	_, ok := r.processRecord.LoadOrStore(taskID, struct{}{})
 	return ok
@@ -674,6 +680,8 @@ type WorkflowPlan struct {
 	Tasks     map[WorkflowTaskInfo]*common.WorkflowTask
 	TaskFlow  map[WorkflowTaskInfo][]WorkflowTaskInfo // map[任务][]依赖
 	planState *PlanState
+
+	LatestScheduleTime time.Time
 
 	locker sync.Mutex
 }
@@ -868,13 +876,16 @@ func (s *WorkflowPlan) RefreshPlanTasks() error {
 }
 
 var (
-	ErrWorkflowFailed = fmt.Errorf("workflow任务失败")
-	ErrWorkflowKilled = fmt.Errorf("人工停止workflow")
+	ErrWorkflowFailed    = fmt.Errorf("workflow任务失败")
+	ErrWorkflowKilled    = fmt.Errorf("人工停止workflow")
+	ErrWorkflowInProcess = fmt.Errorf("workflow in process")
 )
 
 // CanSchedule 判断下一步可调度的任务
 func (s *WorkflowPlan) CanSchedule(runner *workflowRunner) ([]WorkflowTaskInfo, bool, error) {
-	s.locker.Lock()
+	if !s.locker.TryLock() {
+		return nil, false, ErrWorkflowInProcess
+	}
 	defer s.locker.Unlock()
 
 	var (
@@ -959,6 +970,15 @@ func (s *WorkflowPlan) CanSchedule(runner *workflowRunner) ([]WorkflowTaskInfo, 
 			finished = false
 			readys = append(readys, task)
 		case common.TASK_STATUS_STARTING_V2: // 异常补救
+			if runner.IsInProcess(task.TaskID) {
+				continue
+			}
+			// 任务启动的超时间隔内也先不处理
+			if len(taskStates.ScheduleRecords) > 0 &&
+				taskStates.ScheduleRecords[len(taskStates.ScheduleRecords)-1].Status == common.TASK_STATUS_STARTING_V2 &&
+				taskStates.ScheduleRecords[len(taskStates.ScheduleRecords)-1].EventTime > time.Now().Add(-time.Second*(time.Duration(config.GetServiceConfig().Deploy.Timeout)+2)).Unix() {
+				continue
+			}
 			if taskStates.ScheduleCount >= common.WORKFLOW_SCHEDULE_LIMIT {
 				return nil, true, ErrWorkflowFailed
 			}
@@ -1145,12 +1165,14 @@ func (a *workflowRunner) Loop() {
 		select {
 		case taskEvent = <-a.scheduleEventChan:
 			// 对内存中的任务进行增删改查
-			a.handleTaskEvent(taskEvent)
+			go a.handleTaskEvent(taskEvent)
 		case <-daemonTimer.C:
 			// 每10s
 			a.PlanRange(func(key int64, value *WorkflowPlan) bool {
 				if ok, _ := value.IsRunning(); ok {
-					a.scheduleWorkflowPlan(value)
+					if value.LatestScheduleTime.Before(time.Now().Add(-time.Second * 10)) {
+						a.scheduleWorkflowPlan(value)
+					}
 				}
 				return true
 			})
@@ -1216,28 +1238,30 @@ func (a *workflowRunner) handleTaskResultV1(data protocol.TaskFinishedQueueItemV
 }
 
 func (a *workflowRunner) handleTaskEvent(event *common.TaskEvent) {
+	defer func() {
+		if r := recover(); r != nil {
+			a.app.Warning(warning.WarningData{
+				Data: fmt.Sprintf("workflow任务调度失败，workflow_id: %d\n panic: %v",
+					event.Task.FlowInfo.WorkflowID, r),
+				Type:      warning.WarningTypeSystem,
+				TaskName:  event.Task.Name,
+				ProjectID: event.Task.ProjectID,
+			})
+		}
+	}()
 	switch event.EventType {
 	case common.TASK_EVENT_WORKFLOW_SCHEDULE:
-		err := rego.Retry(func() error {
-			plan := a.GetPlan(event.Task.FlowInfo.WorkflowID)
-			if plan == nil {
-				return fmt.Errorf("nil plan")
-			}
+		plan := a.GetPlan(event.Task.FlowInfo.WorkflowID)
+		if plan == nil {
+			return
+		}
 
-			if err := a.scheduleTask(event.Task); err != nil {
-				return err
-			}
-
-			return nil
-		}, rego.WithPeriod(time.Second),
-			rego.WithResetDuration(time.Minute),
-			rego.WithTimes(3),
-			rego.WithLatestError())
+		err := a.scheduleTask(event.Task)
 		if err != nil {
-			if err := a.GetPlan(event.Task.FlowInfo.WorkflowID).Finished(fmt.Errorf("workflow任务(%s)调度失败, %w", event.Task.Name, err)); err != nil {
-				// todo log
-				fmt.Println("finished error", err.Error())
-			}
+			// if err := a.GetPlan(event.Task.FlowInfo.WorkflowID).Finished(fmt.Errorf("workflow任务(%s)调度失败, %w", event.Task.Name, err)); err != nil {
+			// 	// todo log
+			// 	fmt.Println("finished error", err.Error())
+			// }
 			a.app.Warning(warning.WarningData{
 				Data: fmt.Sprintf("workflow任务调度失败，workflow_id: %d\n%s",
 					event.Task.FlowInfo.WorkflowID, err.Error()),
