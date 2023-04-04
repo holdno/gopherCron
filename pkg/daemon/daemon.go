@@ -4,13 +4,14 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/sirupsen/logrus"
+	"github.com/spacegrower/watermelon/infra/wlog"
+	"go.uber.org/zap"
 )
 
 type ProjectDaemon struct {
 	projects []int64
 	m        sync.Map
-	logger   *logrus.Logger
+	logger   wlog.Logger
 }
 
 type daemonSignal struct {
@@ -19,7 +20,7 @@ type daemonSignal struct {
 	isRemove   bool
 }
 
-func NewProjectDaemon(ids []int64, logger *logrus.Logger) *ProjectDaemon {
+func NewProjectDaemon(ids []int64, logger wlog.Logger) *ProjectDaemon {
 	pd := &ProjectDaemon{
 		projects: ids,
 		logger:   logger,
@@ -32,7 +33,7 @@ func NewProjectDaemon(ids []int64, logger *logrus.Logger) *ProjectDaemon {
 	return pd
 }
 
-func (d *ProjectDaemon) DiffProjects(ids []int64) (add, remove []int64) {
+func (d *ProjectDaemon) DiffAndAddProjects(ids []int64) (add, remove []int64) {
 	var (
 		existPM = make(map[int64]bool)
 		newPM   = make(map[int64]bool)
@@ -128,5 +129,5 @@ func (d *ProjectDaemon) RemoveProject(id int64) {
 	close(pd.removeChan)
 	d.m.Delete(id)
 
-	d.logger.WithField("project_id", id).Debug("remove project")
+	d.logger.Debug("remove project", zap.Int64("project_id", id))
 }

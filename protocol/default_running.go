@@ -7,9 +7,9 @@ import (
 	"github.com/holdno/gopherCron/errors"
 	"github.com/holdno/gopherCron/utils"
 
-	"github.com/coreos/etcd/clientv3"
-	"github.com/coreos/etcd/clientv3/concurrency"
-	recipe "github.com/coreos/etcd/contrib/recipes"
+	recipe "go.etcd.io/etcd/client/v3/experimental/recipes"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/client/v3/concurrency"
 )
 
 type defaultRunningManager struct {

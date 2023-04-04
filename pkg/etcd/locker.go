@@ -6,8 +6,9 @@ import (
 
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/errors"
+	"github.com/holdno/gopherCron/utils"
 
-	"github.com/coreos/etcd/clientv3"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 // Locker 分布式锁
@@ -150,6 +151,16 @@ func (tl *Locker) TryLock() error {
 	tl.isLocked = true
 	clientlockers.setLease(tl.leaseID, tl)
 	return nil
+}
+
+func (tl *Locker) LockExist() (bool, error) {
+	ctx, cancel := utils.GetContextWithTimeout()
+	defer cancel()
+	resp, err := tl.kv.Get(ctx, tl.key)
+	if err != nil {
+		return false, err
+	}
+	return len(resp.Kvs) > 0, nil
 }
 
 // Unlock 释放锁

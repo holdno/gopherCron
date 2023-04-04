@@ -1,0 +1,41 @@
+{"level":"INFO","time":"2023-04-04T17:42:04.287+0800","msg":"init default task log reporter, it must be used mysql config","service":"","runtime":"go1.20"}
+{"level":"INFO","time":"2023-04-04T17:42:05.068+0800","msg":"store gc_user is ok!","service":"","runtime":"go1.20"}
+{"level":"INFO","time":"2023-04-04T17:42:05.068+0800","msg":"store gc_project is ok!","service":"","runtime":"go1.20"}
+{"level":"INFO","time":"2023-04-04T17:42:05.068+0800","msg":"store gc_project_relevance is ok!","service":"","runtime":"go1.20"}
+{"level":"INFO","time":"2023-04-04T17:42:05.068+0800","msg":"store gc_task_log is ok!","service":"","runtime":"go1.20"}
+{"level":"INFO","time":"2023-04-04T17:42:05.068+0800","msg":"store gc_webhook is ok!","service":"","runtime":"go1.20"}
+{"level":"INFO","time":"2023-04-04T17:42:05.068+0800","msg":"store gc_workflow is ok!","service":"","runtime":"go1.20"}
+{"level":"INFO","time":"2023-04-04T17:42:05.068+0800","msg":"store gc_workflow_schedule_plan is ok!","service":"","runtime":"go1.20"}
+{"level":"INFO","time":"2023-04-04T17:42:05.068+0800","msg":"store gc_user_workflow is ok!","service":"","runtime":"go1.20"}
+{"level":"INFO","time":"2023-04-04T17:42:05.069+0800","msg":"store gc_workflow_log is ok!","service":"","runtime":"go1.20"}
+{"level":"INFO","time":"2023-04-04T17:42:05.069+0800","msg":"store gc_workflow_task is ok!","service":"","runtime":"go1.20"}
+{"level":"INFO","time":"2023-04-04T17:42:05.069+0800","msg":"store gc_temporary_task is ok!","service":"","runtime":"go1.20"}
+{"level":"INFO","time":"2023-04-04T17:42:05.069+0800","msg":"All stores are ready!","service":"","runtime":"go1.20"}
+{"level":"DEBUG","time":"2023-04-04T17:42:05.368+0800","msg":"diff projects","service":"","runtime":"go1.20","projects":[45]}
+{"level":"INFO","time":"2023-04-04T17:42:05.371+0800","msg":"start grpc server","service":"","runtime":"go1.20"}
+{"level":"DEBUG","time":"2023-04-04T17:42:05.472+0800","msg":"start register","service":"","runtime":"go1.20","component":"remote-register"}
+{"level":"INFO","time":"2023-04-04T17:42:05.533+0800","msg":"service registered successful","service":"","runtime":"go1.20","component":"remote-register","systems":[45],"name":"cronpb.Agent","address":"172.20.100.11:61826"}
+{"level":"DEBUG","time":"2023-04-04T17:42:05.663+0800","msg":"receive event","service":"","runtime":"go1.20","component":"remote-register","event":"remote_event_put","value":"{\"task_id\":\"639878206564560896\",\"name\":\"test\",\"project_id\":45,\"command\":\"echo 1\",\"cron\":\"0 * * * * * *\",\"remark\":\"\",\"timeout\":300,\"create_time\":1680590914,\"status\":1,\"is_running\":-1,\"noseize\":0,\"exclusion\":0,\"client_ip\":\"\",\"tmp_id\":\"\"}"}
+{"level":"DEBUG","time":"2023-04-04T17:42:05.663+0800","msg":"handle new event from center","service":"","runtime":"go1.20","event_type":"remote_event_put"}
+{"level":"DEBUG","time":"2023-04-04T17:42:15.664+0800","msg":"receive event","service":"","runtime":"go1.20","component":"remote-register","event":"heartbeat","value":"heartbeat"}
+{"level":"DEBUG","time":"2023-04-04T17:42:25.664+0800","msg":"receive event","service":"","runtime":"go1.20","component":"remote-register","event":"heartbeat","value":"heartbeat"}
+{"level":"DEBUG","time":"2023-04-04T17:42:35.664+0800","msg":"receive event","service":"","runtime":"go1.20","component":"remote-register","event":"heartbeat","value":"heartbeat"}
+{"level":"DEBUG","time":"2023-04-04T17:42:45.665+0800","msg":"receive event","service":"","runtime":"go1.20","component":"remote-register","event":"heartbeat","value":"heartbeat"}
+{"level":"DEBUG","time":"2023-04-04T17:42:55.678+0800","msg":"receive event","service":"","runtime":"go1.20","component":"remote-register","event":"heartbeat","value":"heartbeat"}
+{"level":"DEBUG","time":"2023-04-04T17:43:05.664+0800","msg":"receive event","service":"","runtime":"go1.20","component":"remote-register","event":"heartbeat","value":"heartbeat"}
+{"level":"DEBUG","time":"2023-04-04T17:43:15.665+0800","msg":"receive event","service":"","runtime":"go1.20","component":"remote-register","event":"heartbeat","value":"heartbeat"}
+{"level":"DEBUG","time":"2023-04-04T17:43:25.665+0800","msg":"receive event","service":"","runtime":"go1.20","component":"remote-register","event":"heartbeat","value":"heartbeat"}
+{"level":"DEBUG","time":"2023-04-04T17:43:35.664+0800","msg":"receive event","service":"","runtime":"go1.20","component":"remote-register","event":"heartbeat","value":"heartbeat"}
+{"level":"DEBUG","time":"2023-04-04T17:43:45.665+0800","msg":"receive event","service":"","runtime":"go1.20","component":"remote-register","event":"heartbeat","value":"heartbeat"}
+{"level":"DEBUG","time":"2023-04-04T17:43:55.666+0800","msg":"receive event","service":"","runtime":"go1.20","component":"remote-register","event":"heartbeat","value":"heartbeat"}
+{"level":"DEBUG","time":"2023-04-04T17:44:05.666+0800","msg":"receive event","service":"","runtime":"go1.20","component":"remote-register","event":"heartbeat","value":"heartbeat"}
+{"level":"DEBUG","time":"2023-04-04T17:44:15.667+0800","msg":"receive event","service":"","runtime":"go1.20","component":"remote-register","event":"heartbeat","value":"heartbeat"}
+{"level":"DEBUG","time":"2023-04-04T17:44:25.668+0800","msg":"receive event","service":"","runtime":"go1.20","component":"remote-register","event":"heartbeat","value":"heartbeat"}
+{"level":"DEBUG","time":"2023-04-04T17:44:35.668+0800","msg":"receive event","service":"","runtime":"go1.20","component":"remote-register","event":"heartbeat","value":"heartbeat"}
+{"level":"DEBUG","time":"2023-04-04T17:44:45.677+0800","msg":"receive event","service":"","runtime":"go1.20","component":"remote-register","event":"heartbeat","value":"heartbeat"}
+{"level":"DEBUG","time":"2023-04-04T17:44:55.668+0800","msg":"receive event","service":"","runtime":"go1.20","component":"remote-register","event":"heartbeat","value":"heartbeat"}
+{"level":"DEBUG","time":"2023-04-04T17:45:05.666+0800","msg":"receive event","service":"","runtime":"go1.20","component":"remote-register","event":"heartbeat","value":"heartbeat"}
+{"level":"DEBUG","time":"2023-04-04T17:45:15.670+0800","msg":"receive event","service":"","runtime":"go1.20","component":"remote-register","event":"heartbeat","value":"heartbeat"}
+{"level":"DEBUG","time":"2023-04-04T17:45:24.830+0800","msg":"remove project","service":"","runtime":"go1.20","project_id":45}
+{"level":"WARN","time":"2023-04-04T17:45:24.830+0800","msg":"recv with error","service":"","runtime":"go1.20","component":"remote-register","error":"rpc error: code = Canceled desc = context canceled"}
+{"level":"ERROR","time":"2023-04-04T17:45:24.830+0800","msg":"watermelon server is shutdown","service":"","runtime":"go1.20","error":"accept tcp 172.20.100.11:61826: use of closed network connection"}

@@ -13,16 +13,19 @@ import (
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/config"
 	"github.com/holdno/gopherCron/errors"
+	"github.com/holdno/gopherCron/pkg/cronpb"
 	"github.com/holdno/gopherCron/pkg/warning"
 	"github.com/holdno/gopherCron/protocol"
 	"github.com/holdno/gopherCron/utils"
 
-	"github.com/coreos/etcd/clientv3"
-	"github.com/coreos/etcd/clientv3/concurrency"
 	"github.com/gorhill/cronexpr"
 	"github.com/holdno/gocommons/selection"
 	"github.com/holdno/rego"
 	"github.com/jinzhu/gorm"
+	"github.com/spacegrower/watermelon/infra/wlog"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/client/v3/concurrency"
+	"go.uber.org/zap"
 )
 
 func (a *app) GetWorkflowRelevanceUsers(workflowID int64) ([]common.UserWorkflowRelevance, error) {
@@ -591,31 +594,31 @@ func (a *app) KillWorkflow(workflowID int64) error {
 	return nil
 }
 
-func killWorkflowTasks(c *clientv3.Client, killList []WorkflowTaskInfo) error {
+func (a *app) killWorkflowTasks(region string, killList []WorkflowTaskInfo) error {
 	ctx, _ := utils.GetContextWithTimeout()
-	// make lease to notify worker
-	// 创建一个租约 让其稍后过期并自动删除
-	leaseGrantResp, err := c.Lease.Grant(ctx, 1)
-	if err != nil {
-		return errors.NewError(http.StatusInternalServerError, "lease grant error").WithLog(err.Error())
-	}
 
-	_, err = concurrency.NewSTM(c, func(s concurrency.STM) error {
-		for _, v := range killList {
-			key := common.BuildKillKey(v.ProjectID, v.TaskID)
-			s.Put(key, "", clientv3.WithLease(leaseGrantResp.ID))
+	for _, v := range killList {
+		agents, err := a.FindAgents(region, v.ProjectID)
+		if err != nil {
+			return err
 		}
-		return nil
-	})
-	if err != nil {
-		return errors.NewError(http.StatusInternalServerError, "下发workflow全量任务停止指令失败").WithLog(err.Error())
+		for _, a := range agents {
+			if _, err = a.KillTask(ctx, &cronpb.KillTaskRequest{
+				ProjectId: v.ProjectID,
+				TaskId:    v.TaskID,
+			}); err != nil {
+				a.Close()
+				return errors.NewError(http.StatusInternalServerError, "停止任务请求失败, agent: "+a.addr).WithLog(err.Error())
+			}
+			a.Close()
+		}
 	}
 	return nil
 }
 
 type workflowRunner struct {
 	etcd              *clientv3.Client
-	app               App
+	app               *app
 	plans             sync.Map
 	planCounter       int64
 	nextWorkflow      common.Workflow
@@ -642,7 +645,7 @@ func (r *workflowRunner) ProcessDone(taskID string) {
 	r.processRecord.Delete(taskID)
 }
 
-func NewWorkflowRunner(app App, cli *clientv3.Client) (*workflowRunner, error) {
+func NewWorkflowRunner(app *app, cli *clientv3.Client) (*workflowRunner, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	runner := &workflowRunner{
 		app:               app,
@@ -689,13 +692,13 @@ type WorkflowPlan struct {
 func (p *WorkflowPlan) Finished(withError error) error {
 	p.locker.Lock()
 	defer p.locker.Unlock()
-
 	if err := p.RefreshStates(); err != nil {
 		return err
 	}
 	if p.planState == nil {
 		return nil
 	}
+
 	p.planState.Status = common.TASK_STATUS_DONE_V2
 	if withError != nil {
 		p.planState.Status = common.TASK_STATUS_FAIL_V2
@@ -719,13 +722,20 @@ func (p *WorkflowPlan) Finished(withError error) error {
 			}
 			failedReason.WriteString(taskDetail.TaskName)
 			failedReason.WriteString(" 任务执行失败")
-		} else if v.CurrentStatus == common.TASK_STATUS_RUNNING_V2 ||
-			v.CurrentStatus == common.TASK_STATUS_STARTING_V2 {
+		} else if v.CurrentStatus == common.TASK_STATUS_STARTING_V2 {
 			killList = append(killList, WorkflowTaskInfo{
 				ProjectID: v.ProjectID,
 				TaskID:    v.TaskID,
 			})
-			failedReason.WriteString("任务启动失败失败")
+
+			failedReason.WriteString("任务启动失败")
+		} else if v.CurrentStatus == common.TASK_STATUS_RUNNING_V2 {
+			killList = append(killList, WorkflowTaskInfo{
+				ProjectID: v.ProjectID,
+				TaskID:    v.TaskID,
+			})
+
+			failedReason.WriteString("任务执行失败")
 		}
 	}
 	if withError != nil {
@@ -762,7 +772,7 @@ func (p *WorkflowPlan) Finished(withError error) error {
 
 	if withError != nil {
 		err = rego.Retry(func() error {
-			return killWorkflowTasks(p.runner.etcd, killList)
+			return p.runner.app.killWorkflowTasks(p.runner.app.GetConfig().Micro.Region, killList)
 		}, rego.WithPeriod(time.Second), rego.WithTimes(3), rego.WithLatestError())
 		if err != nil {
 			p.runner.app.Warning(warning.WarningData{
@@ -931,35 +941,63 @@ func (s *WorkflowPlan) CanSchedule(runner *workflowRunner) ([]WorkflowTaskInfo, 
 			}
 		}
 
+		afterDebounce := func() bool {
+			if len(taskStates.ScheduleRecords) > 0 {
+				return taskStates.ScheduleRecords[len(taskStates.ScheduleRecords)-1].EventTime <= time.Now().Add(-time.Second*(time.Duration(config.GetServiceConfig().Deploy.Timeout)+2)).Unix()
+			}
+			return true
+		}
+
 		switch taskStates.CurrentStatus {
 		case common.TASK_STATUS_RUNNING_V2:
-			latestAckKey := common.BuildWorkflowAckKey(s.Workflow.ID, task.ProjectID, task.TaskID, taskStates.GetLatestScheduleRecord().TmpID)
-			ctx, _ := utils.GetContextWithTimeout()
-			resp, err := runner.etcd.Get(ctx, latestAckKey)
+			finished = false
+
+			if !afterDebounce() {
+				continue
+			}
+			// 1.可以通过注册中心感知节点下线，如果节点有下线记录，则在此处调用agent check任务是否运行中
+			// 2.看锁是否存在，若存在则任务执行中
+			locker := s.runner.app.GetTaskLocker(&common.TaskInfo{TaskID: task.TaskID, ProjectID: task.ProjectID})
+			exist, err := locker.LockExist()
 			if err != nil {
-				return nil, false, errors.NewError(errors.ErrInternalError.Code, "running 状态的任务兜底机制获取ack key失败").
-					WithLog(fmt.Sprintf("workflow_id: %d, project_id: %d, task_id: %s, error: %s", s.Workflow.ID, task.ProjectID, task.TaskID, err.Error()))
+				wlog.Error("failed to get lock status", zap.String("task_id", task.TaskID), zap.Int64("project_id", task.ProjectID), zap.String("method", "locker.LockExist"))
+				continue
+			}
+			if exist {
+				continue
 			}
 
-			if len(resp.Kvs) < 1 {
-				// running状态 但是没有ack key
-				// 有两种情况，一种是done状态还在队列中没有被workflow消费，另一种是agent直接断电，导致agent任务异常终止，没有上报任何状态
-				// 添加re-run标记，待下一次尝试调度时重新拉起任务
-				_, err = concurrency.NewSTM(s.runner.etcd, func(stm concurrency.STM) error {
-					task := s.Tasks[task]
-					if err := setWorkflowTaskNotRunning(stm, WorkflowRunningTaskInfo{
-						TaskID:     task.TaskID,
-						ProjectID:  task.ProjectID,
-						TaskName:   task.TaskName,
-						TmpID:      taskStates.GetLatestScheduleRecord().TmpID,
-						WorkflowID: s.Workflow.ID,
-					}, "waiting re-run"); err != nil {
-						return err
-					}
-					return nil
-				})
+			// if the task lock detection fails, perform a kill operation as a fallback
+			err = s.runner.app.killWorkflowTasks(s.runner.app.GetConfig().Micro.Region, []WorkflowTaskInfo{
+				{
+					ProjectID: task.ProjectID,
+					TaskID:    task.TaskID,
+				},
+			})
+			if err != nil {
+				wlog.Error("workflow kill fallback failed", zap.String("task_id", task.TaskID), zap.Int64("project_id", task.ProjectID), zap.String("method", "killWorkflowTasks"))
+				continue
 			}
-			finished = false
+
+			// running状态 但是没有ack key
+			// 有两种情况，一种是done状态还在队列中没有被workflow消费，另一种是agent直接断电，导致agent任务异常终止，没有上报任何状态
+			// 添加re-run标记，待下一次尝试调度时重新拉起任务
+			_, err = concurrency.NewSTM(s.runner.etcd, func(stm concurrency.STM) error {
+				task := s.Tasks[task]
+				if err := setWorkflowTaskNotRunning(stm, WorkflowRunningTaskInfo{
+					TaskID:     task.TaskID,
+					ProjectID:  task.ProjectID,
+					TaskName:   task.TaskName,
+					TmpID:      taskStates.GetLatestScheduleRecord().TmpID,
+					WorkflowID: s.Workflow.ID,
+				}, "waiting re-run"); err != nil {
+					wlog.Error("mark the task as failed and in need of retry when it fails", zap.Int64("workflow_id", s.Workflow.ID),
+						zap.String("task_id", task.TaskID), zap.Int64("project_id", task.ProjectID), zap.String("task_name", task.TaskName))
+					return err
+				}
+				return nil
+			})
+
 		case common.TASK_STATUS_FAIL_V2:
 			// 判断是否已经重复跑3次
 			if taskStates.ScheduleCount >= common.WORKFLOW_SCHEDULE_LIMIT {
@@ -968,43 +1006,21 @@ func (s *WorkflowPlan) CanSchedule(runner *workflowRunner) ([]WorkflowTaskInfo, 
 			fallthrough
 		case common.TASK_STATUS_NOT_RUNNING_V2:
 			finished = false
+			if len(taskStates.ScheduleRecords) > 1 && !afterDebounce() {
+				continue
+			}
+
 			readys = append(readys, task)
 		case common.TASK_STATUS_STARTING_V2: // 异常补救
-			if runner.IsInProcess(task.TaskID) {
-				continue
-			}
-			// 任务启动的超时间隔内也先不处理
-			if len(taskStates.ScheduleRecords) > 0 &&
-				taskStates.ScheduleRecords[len(taskStates.ScheduleRecords)-1].Status == common.TASK_STATUS_STARTING_V2 &&
-				taskStates.ScheduleRecords[len(taskStates.ScheduleRecords)-1].EventTime > time.Now().Add(-time.Second*(time.Duration(config.GetServiceConfig().Deploy.Timeout)+2)).Unix() {
-				continue
-			}
 			if taskStates.ScheduleCount >= common.WORKFLOW_SCHEDULE_LIMIT {
 				return nil, true, ErrWorkflowFailed
 			}
-			// 查看是否由于系统异常导致任务string后没有waiting到running的ack
-			{
-				latestAckKey := common.BuildWorkflowAckKey(s.Workflow.ID, task.ProjectID, task.TaskID, taskStates.GetLatestScheduleRecord().TmpID)
-				ctx, _ := utils.GetContextWithTimeout()
-				resp, err := runner.etcd.Get(ctx, latestAckKey)
-				if err != nil {
-					return nil, false, errors.NewError(errors.ErrInternalError.Code, "starting 状态的任务兜底机制获取ack key失败").
-						WithLog(fmt.Sprintf("workflow_id: %d, project_id: %d, task_id: %s, error: %s", s.Workflow.ID, task.ProjectID, task.TaskID, err.Error()))
-				}
-
-				if len(resp.Kvs) > 0 {
-					task := s.Tasks[task]
-					// 设置running状态
-					if runner.getAckForTaskRunning(WorkflowRunningTaskInfo{
-						TaskID:     task.TaskID,
-						ProjectID:  task.ProjectID,
-						TaskName:   task.TaskName,
-						TmpID:      taskStates.GetLatestScheduleRecord().TmpID,
-						WorkflowID: s.Workflow.ID,
-					}, resp.Kvs[0].Key, resp.Kvs[0].Value) {
-						return nil, false, nil
-					}
-				}
+			// 任务启动的超时间隔内也先不处理
+			if runner.IsInProcess(task.TaskID) || (len(taskStates.ScheduleRecords) > 0 &&
+				taskStates.ScheduleRecords[len(taskStates.ScheduleRecords)-1].Status == common.TASK_STATUS_STARTING_V2 &&
+				!afterDebounce()) {
+				finished = false
+				continue
 			}
 
 			finished = false
@@ -1189,7 +1205,7 @@ func (a *workflowRunner) Loop() {
 	}
 }
 
-func (a *workflowRunner) handleTaskResultV1(data protocol.TaskFinishedQueueItemV1) error {
+func (a *workflowRunner) handleTaskResultV1(agentIP string, data protocol.TaskFinishedV1) error {
 	var (
 		next         = true
 		planFinished bool
@@ -1197,7 +1213,7 @@ func (a *workflowRunner) handleTaskResultV1(data protocol.TaskFinishedQueueItemV
 	)
 	err = rego.Retry(func() error {
 		_, err := concurrency.NewSTM(a.etcd, func(s concurrency.STM) error {
-			planFinished, err = setWorkFlowTaskFinished(s, data)
+			planFinished, err = setWorkFlowTaskFinished(s, agentIP, data)
 			if err != nil {
 				return err
 			}
@@ -1262,6 +1278,7 @@ func (a *workflowRunner) handleTaskEvent(event *common.TaskEvent) {
 			// 	// todo log
 			// 	fmt.Println("finished error", err.Error())
 			// }
+			wlog.Error("failed to schedule workflow task", zap.Error(err))
 			a.app.Warning(warning.WarningData{
 				Data: fmt.Sprintf("workflow任务调度失败，workflow_id: %d\n%s",
 					event.Task.FlowInfo.WorkflowID, err.Error()),

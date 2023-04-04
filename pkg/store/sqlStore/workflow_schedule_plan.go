@@ -26,7 +26,7 @@ func (s *workflowSchedulePlanStore) AutoMigrate() {
 	if err := s.GetMaster().Table(s.GetTable()).AutoMigrate(&common.WorkflowSchedulePlan{}).Error; err != nil {
 		panic(fmt.Errorf("unable to auto migrate %s, %w", s.GetTable(), err))
 	}
-	s.provider.Logger().Infof("%s, complete initialization", s.GetTable())
+	s.provider.Logger().Info(fmt.Sprintf("%s, complete initialization", s.GetTable()))
 }
 
 func (s *workflowSchedulePlanStore) Create(tx *gorm.DB, data *common.WorkflowSchedulePlan) error {

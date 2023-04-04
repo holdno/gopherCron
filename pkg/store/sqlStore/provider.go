@@ -8,20 +8,21 @@ import (
 	"github.com/holdno/gopherCron/config"
 	"github.com/holdno/gopherCron/pkg/store"
 	"github.com/holdno/gopherCron/utils"
+	"github.com/spacegrower/watermelon/infra/wlog"
+	"go.uber.org/zap"
 
 	"github.com/go-sql-driver/mysql"
 	"github.com/jinzhu/gorm"
-	"github.com/sirupsen/logrus"
 )
 
 type SqlProvider struct {
 	master   *gorm.DB
 	replicas []*gorm.DB
 	stores   SqlProviderStores
-	logger   *logrus.Logger
+	logger   wlog.Logger
 }
 
-func (p *SqlProvider) Logger() *logrus.Logger {
+func (p *SqlProvider) Logger() wlog.Logger {
 	return p.logger
 }
 
@@ -69,7 +70,7 @@ type SqlProviderStores struct {
 	TemporaryTask         store.TemporaryTaskStore
 }
 
-func MustSetup(conf *config.MysqlConf, logger *logrus.Logger, install bool) SqlStore {
+func MustSetup(conf *config.MysqlConf, logger wlog.Logger, install bool) SqlStore {
 	provider := new(SqlProvider)
 
 	provider.logger = logger
@@ -107,10 +108,10 @@ func MustSetup(conf *config.MysqlConf, logger *logrus.Logger, install bool) SqlS
 		if err = provider.stores.User.CreateAdminUser(); err != nil {
 			panic(err)
 		}
-		provider.logger.WithFields(logrus.Fields{
+		provider.logger.With(zap.Any("field", map[string]interface{}{
 			"account":  common.ADMIN_USER_ACCOUNT,
 			"password": common.ADMIN_USER_PASSWORD,
-		}).Info("admin user created")
+		})).Info("admin user created")
 	}
 	return provider
 }

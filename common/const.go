@@ -18,6 +18,7 @@ const (
 
 	TASK_STATUS_STARTING_V2    = "starting"
 	TASK_STATUS_RUNNING_V2     = "running"
+	TASK_STATUS_FINISHED_V2    = "finished"
 	TASK_STATUS_NOT_RUNNING_V2 = ""
 	TASK_STATUS_DONE_V2        = "done"
 	TASK_STATUS_FAIL_V2        = "fail"

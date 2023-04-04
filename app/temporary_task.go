@@ -6,15 +6,16 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/coreos/etcd/clientv3"
 	"github.com/holdno/gocommons/selection"
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/errors"
 	"github.com/holdno/gopherCron/pkg/warning"
 	"github.com/holdno/gopherCron/utils"
+	"github.com/spacegrower/watermelon/infra/wlog"
+	"go.uber.org/zap"
 
 	"github.com/jinzhu/gorm"
-	"github.com/sirupsen/logrus"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 func (a *app) CreateTemporaryTask(data common.TemporaryTask) error {
@@ -33,6 +34,7 @@ func (a *app) GetNeedToScheduleTemporaryTask(t time.Time) ([]*common.TemporaryTa
 	truncateTime := t.Truncate(time.Minute)
 	selector := selection.NewSelector(
 		selection.NewRequirement("schedule_time", selection.LessThanEqual, truncateTime.Add(time.Minute).Unix()),
+		selection.NewRequirement("schedule_time", selection.GreaterThan, truncateTime.Add(-time.Minute).Unix()),
 		selection.NewRequirement("schedule_status", selection.Equals, common.TEMPORARY_TASK_SCHEDULE_STATUS_WAITING),
 	)
 	list, err := a.store.TemporaryTask().GetList(selector)
@@ -173,8 +175,6 @@ func (a *app) TemporaryTaskSchedule(tmpTask common.TemporaryTask) error {
 func (a *app) AutoCleanScheduledTemporaryTask() {
 	opt := selection.NewSelector(selection.NewRequirement("schedule_time", selection.LessThan, time.Now().Unix()-86400*7))
 	if err := a.store.TemporaryTask().Clean(nil, opt); err != nil {
-		a.logger.WithFields(logrus.Fields{
-			"error": err.Error(),
-		}).Error("failed to clean scheduled temporary task by auto clean")
+		wlog.Error("failed to clean scheduled temporary task by auto clean", zap.Error(err))
 	}
 }

@@ -7,26 +7,27 @@ import (
 
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/config"
+	"github.com/holdno/gopherCron/pkg/cronpb"
 	"github.com/holdno/gopherCron/pkg/daemon"
-	"github.com/holdno/gopherCron/pkg/etcd"
-	"github.com/holdno/gopherCron/pkg/logger"
+	"github.com/holdno/gopherCron/pkg/infra"
+	"github.com/holdno/gopherCron/pkg/infra/register"
 	"github.com/holdno/gopherCron/pkg/panicgroup"
 	"github.com/holdno/gopherCron/pkg/warning"
-	"github.com/holdno/gopherCron/protocol"
 	"github.com/holdno/gopherCron/utils"
+	"go.uber.org/zap"
 
-	"github.com/coreos/etcd/clientv3"
-	"github.com/coreos/etcd/mvcc/mvccpb"
-	"github.com/sirupsen/logrus"
+	wregister "github.com/spacegrower/watermelon/infra/register"
+	"github.com/spacegrower/watermelon/infra/wlog"
+	"google.golang.org/grpc"
 )
 
 type client struct {
-	localip    string
-	logger     *logrus.Logger
-	etcd       protocol.EtcdManager
+	localip string
+	logger  wlog.Logger
+
 	scheduler  *TaskScheduler
 	configPath string
-	cfg        *config.ServiceConfig
+	cfg        *config.ClientConfig
 
 	daemon *daemon.ProjectDaemon
 
@@ -35,73 +36,85 @@ type client struct {
 
 	panicgroup.PanicGroup
 	ClientTaskReporter
-	protocol.ClientEtcdManager
+	// etcd       protocol.EtcdManager
+	// protocol.ClientEtcdManager
 	warning.Warner
+
+	centerSrv register.CenterClient
+
+	onCommand func(*cronpb.CommandRequest) (*cronpb.Result, error)
+
+	cronpb.UnimplementedAgentServer
 }
 
 type Client interface {
 	Go(f func())
 	GetIP() string
 	Loop()
-	ResultReport(result *common.TaskExecuteResult) error
 	Close()
 	Down() chan struct{}
+	Cfg() *config.ClientConfig
 	warning.Warner
+
+	MustSetupRemoteRegister() wregister.ServiceRegister[infra.NodeMetaRemote]
+	Schedule(ctx context.Context, req *cronpb.ScheduleRequest) (*cronpb.Result, error)
+	CheckRunning(ctx context.Context, req *cronpb.CheckRunningRequest) (*cronpb.Result, error)
+	KillTask(ctx context.Context, req *cronpb.KillTaskRequest) (*cronpb.Result, error)
+	ProjectTaskHash(ctx context.Context, req *cronpb.ProjectTaskHashRequest) (*cronpb.ProjectTaskHashReply, error)
+	Command(ctx context.Context, req *cronpb.CommandRequest) (*cronpb.Result, error)
 }
 
-type ClientOptions func(a *client)
-
-func ClientWithTaskReporter(reporter ClientTaskReporter) ClientOptions {
-	return func(agent *client) {
-		agent.ClientTaskReporter = reporter
-	}
-}
-
-func ClientWithWarning(w warning.Warner) ClientOptions {
-	return func(a *client) {
-		a.Warner = w
-	}
-}
-
-func (agent *client) loadConfigAndSetupAgentFunc() func() {
+func (agent *client) loadConfigAndSetupAgentFunc() func() error {
 	inited := false
+	var shutDown func()
 
-	return func() {
-		var err error
-		cfg := config.InitServiceConfig(agent.configPath)
+	return func() error {
+		// var err error
+		cfg := config.InitClientConfig(agent.configPath)
 		if !inited {
 			inited = true
-			agent.cfg = &config.ServiceConfig{}
+			agent.cfg = &config.ClientConfig{}
 			if agent.configPath == "" {
 				panic("empty config path")
 			}
 
-			if agent.etcd, err = etcd.Connect(cfg.Etcd); err != nil {
-				panic(err)
-			}
+			var clusterID int64 = 1
 
-			agent.ClientEtcdManager = protocol.NewClientEtcdManager(agent.etcd, cfg.Etcd.Projects)
-
-			clusterID, err := agent.etcd.Inc(cfg.Etcd.Prefix + common.CLUSTER_AUTO_INDEX)
-			if err != nil {
-				panic(err)
-			}
+			wlog.SetGlobalLogger(wlog.NewLogger(&wlog.Config{
+				Level: wlog.ParseLevel(cfg.LogLevel),
+				File:  cfg.LogFile,
+				RotateConfig: &wlog.RotateConfig{
+					MaxAge:  24,
+					MaxSize: 100,
+				},
+			}))
 
 			// why 1024. view https://github.com/holdno/snowFlakeByGo
 			utils.InitIDWorker(clusterID % 1024)
-			agent.logger = logger.MustSetup(cfg.LogLevel)
+			agent.logger = wlog.With()
 			agent.scheduler = initScheduler()
 			agent.daemon = daemon.NewProjectDaemon(nil, agent.logger)
+
+			if cfg.Address != "" {
+				agent.localip = strings.Split(cfg.Address, ":")[0]
+			}
+			if agent.localip == "" {
+				var err error
+				if agent.localip, err = utils.GetLocalIP(); err != nil {
+					agent.logger.Panic("failed to get local ip", zap.Error(err))
+				}
+			}
+
 		} else if agent.configPath == "" {
-			return
+			return fmt.Errorf("invalid config path")
 		}
 
-		if cfg.ReportAddr != agent.cfg.ReportAddr {
-			agent.logger.Infof("init http task log reporter, address: %s", cfg.ReportAddr)
+		if cfg.ReportAddr != "" {
+			agent.logger.Info(fmt.Sprintf("init http task log reporter, address: %s", cfg.ReportAddr))
 			reporter := NewHttpReporter(cfg.ReportAddr)
 			agent.ClientTaskReporter = reporter
 			agent.Warner = reporter
-		} else if agent.ClientTaskReporter == nil {
+		} else {
 			agent.logger.Info("init default task log reporter, it must be used mysql config")
 			agent.ClientTaskReporter = NewDefaultTaskReporter(agent.logger, cfg.Mysql)
 		}
@@ -110,36 +123,32 @@ func (agent *client) loadConfigAndSetupAgentFunc() func() {
 			agent.Warner = warning.NewDefaultWarner(agent.logger)
 		}
 
-		addProjects, _ := agent.daemon.DiffProjects(cfg.Etcd.Projects)
-		agent.logger.WithField("projects", addProjects).Debug("diff projects")
+		addProjects, _ := agent.daemon.DiffAndAddProjects(cfg.Projects)
+		agent.logger.Debug("diff projects", zap.Any("projects", addProjects))
 
-		agent.TaskWatcher(addProjects)
-		agent.TaskKiller(addProjects)
-		agent.Register(addProjects)
+		// remove all plan
+		agent.scheduler.RemoveAll()
 
 		agent.cfg = cfg
-	}
+		if shutDown != nil {
+			shutDown()
+		}
+		srv := agent.SetupMicroService()
+		shutDown = func() {
+			srv.ShutDown()
+		}
 
+		return nil
+	}
 }
 
-func NewClient(configPath string, opts ...ClientOptions) Client {
-	var err error
-
+func NewClient(configPath string) Client {
 	agent := &client{
 		configPath: configPath,
 		isClose:    false,
 		closeChan:  make(chan struct{}),
 	}
-	agent.configPath = configPath
 	setupFunc := agent.loadConfigAndSetupAgentFunc()
-
-	if agent.localip, err = utils.GetLocalIP(); err != nil {
-		agent.logger.Error("failed to get local ip")
-	}
-
-	for _, opt := range opts {
-		opt(agent)
-	}
 
 	agent.PanicGroup = panicgroup.NewPanicGroup(func(err error) {
 		reserr := agent.Warning(warning.WarningData{
@@ -148,23 +157,41 @@ func NewClient(configPath string, opts ...ClientOptions) Client {
 			AgentIP: agent.localip,
 		})
 		if reserr != nil {
-			agent.logger.WithFields(logrus.Fields{
+			agent.logger.With(zap.Any("fields", map[string]interface{}{
 				"desc":         reserr,
 				"source_error": err,
-			}).Error("panicgroup: failed to warning panic error")
+			})).Error("panicgroup: failed to warning panic error")
 		}
 	})
 
 	setupFunc()
 
-	agent.OnCommand(func(command string) {
-		switch command {
+	agent.onCommand = func(e *cronpb.CommandRequest) (*cronpb.Result, error) {
+		var err error
+		switch e.Command {
 		case common.AGENT_COMMAND_RELOAD_CONFIG:
-			setupFunc()
+			err = setupFunc()
+		default:
+			err = fmt.Errorf("unsupport command %s", e.Command)
 		}
-	})
+		if err != nil {
+			return nil, err
+		}
+		return &cronpb.Result{
+			Result:  true,
+			Message: "ok",
+		}, nil
+	}
 
 	return agent
+}
+
+func (c *client) Command(ctx context.Context, req *cronpb.CommandRequest) (*cronpb.Result, error) {
+	return c.onCommand(req)
+}
+
+func (c *client) Cfg() *config.ClientConfig {
+	return c.cfg
 }
 
 func (c *client) Close() {
@@ -185,44 +212,6 @@ func (c *client) GetIP() string {
 	return c.localip
 }
 
-func (agent *client) OnCommand(f func(command string)) {
-	var (
-		err     error
-		preKey  = common.BuildAgentRegisteKey(agent.localip)
-		getResp *clientv3.GetResponse
-	)
-
-	if err = utils.RetryFunc(5, func() error {
-		if getResp, err = agent.etcd.KV().Get(context.TODO(), preKey, clientv3.WithPrefix()); err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
-		err = agent.Warning(warning.WarningData{
-			Data:    fmt.Sprintf("etcd kv get error: %s, client_ip: %s", err.Error(), agent.localip),
-			Type:    warning.WarningTypeSystem,
-			AgentIP: agent.GetIP(),
-		})
-		if err != nil {
-			agent.logger.Errorf("failed to push warning, %s", err.Error())
-		}
-		return
-	}
-
-	watchResp := agent.etcd.Watcher().Watch(context.TODO(), strings.TrimRight(preKey, "/"),
-		clientv3.WithRev(getResp.Header.Revision+1), clientv3.WithPrefix())
-	agent.Go(func() {
-		for resp := range watchResp {
-			for _, watchEvent := range resp.Events {
-				switch watchEvent.Type {
-				case mvccpb.PUT:
-					command := common.ExtractAgentCommand(string(watchEvent.Kv.Key))
-					f(command)
-				case mvccpb.DELETE:
-				default:
-					agent.logger.Warnf("the current version can not support this event, event: %d", watchEvent.Type)
-				}
-			}
-		}
-	})
+func (a *client) GetStatusReporter() func(ctx context.Context, in *cronpb.ScheduleReply, opts ...grpc.CallOption) (*cronpb.Result, error) {
+	return a.centerSrv.StatusReporter
 }

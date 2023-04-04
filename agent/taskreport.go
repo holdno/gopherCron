@@ -14,6 +14,8 @@ import (
 	"github.com/holdno/gopherCron/pkg/store"
 	"github.com/holdno/gopherCron/pkg/store/sqlStore"
 	"github.com/holdno/gopherCron/pkg/warning"
+	"github.com/spacegrower/watermelon/infra/wlog"
+	"go.uber.org/zap"
 
 	"github.com/holdno/gocommons/selection"
 	"github.com/sirupsen/logrus"
@@ -26,6 +28,7 @@ const (
 )
 
 type HttpReporter struct {
+	logger        *logrus.Logger
 	hc            *http.Client
 	reportAddress string
 }
@@ -95,12 +98,12 @@ type ClientTaskReporter interface {
 }
 
 type TaskResultReporter struct {
-	logger       *logrus.Logger
+	logger       wlog.Logger
 	taskLogStore store.TaskLogStore
 	projectStore store.ProjectStore
 }
 
-func NewDefaultTaskReporter(logger *logrus.Logger, mysqlConf *config.MysqlConf) ClientTaskReporter {
+func NewDefaultTaskReporter(logger wlog.Logger, mysqlConf *config.MysqlConf) ClientTaskReporter {
 	_store := sqlStore.MustSetup(mysqlConf, logger, false)
 	return &TaskResultReporter{
 		logger:       logger,
@@ -133,7 +136,7 @@ func (r *TaskResultReporter) ResultReport(result *common.TaskExecuteResult) erro
 	if len(projects) > 0 {
 		projectInfo = projects[0]
 	} else {
-		r.logger.WithField("project_id", result.ExecuteInfo.Task.ProjectID).Errorf("task result report error, project not exist!")
+		r.logger.Error("task result report error, project not exist!", zap.Int64("project_id", result.ExecuteInfo.Task.ProjectID))
 		return errors.New("task result report error, project not exist!")
 	}
 
@@ -169,13 +172,13 @@ func (r *TaskResultReporter) ResultReport(result *common.TaskExecuteResult) erro
 	logInfo.TaskID = result.ExecuteInfo.Task.TaskID
 
 	if err = r.taskLogStore.CreateTaskLog(logInfo); err != nil {
-		r.logger.WithFields(logrus.Fields{
+		r.logger.With(zap.Any("fields", map[string]interface{}{
 			"task_name":  logInfo.Name,
 			"result":     logInfo.Result,
 			"error":      err.Error(),
 			"start_time": time.Unix(logInfo.StartTime, 0).Format("2006-01-02 15:05:05"),
 			"end_time":   time.Unix(logInfo.StartTime, 0).Format("2006-01-02 15:05:05"),
-		}).Error("任务日志入库失败")
+		})).Error("任务日志入库失败")
 
 		return fmt.Errorf("failed to save task result, %w", err)
 	}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -12,28 +13,32 @@ import (
 	"github.com/holdno/gopherCron/config"
 	"github.com/holdno/gopherCron/errors"
 	"github.com/holdno/gopherCron/jwt"
+	"github.com/holdno/gopherCron/pkg/cronpb"
 	"github.com/holdno/gopherCron/pkg/etcd"
-	"github.com/holdno/gopherCron/pkg/logger"
+	"github.com/holdno/gopherCron/pkg/infra"
 	"github.com/holdno/gopherCron/pkg/panicgroup"
 	"github.com/holdno/gopherCron/pkg/store/sqlStore"
 	"github.com/holdno/gopherCron/pkg/warning"
 	"github.com/holdno/gopherCron/protocol"
 	"github.com/holdno/gopherCron/utils"
+	"go.uber.org/zap"
 
-	"github.com/coreos/etcd/clientv3"
-	"github.com/coreos/etcd/clientv3/concurrency"
-	recipe "github.com/coreos/etcd/contrib/recipes"
 	"github.com/gin-gonic/gin"
 	towerconfig "github.com/holdno/firetower/config"
 	"github.com/holdno/firetower/service/tower"
 	"github.com/holdno/gocommons/selection"
-	"github.com/holdno/rego"
+	"github.com/holdno/keypool"
 	"github.com/jinzhu/gorm"
-	"github.com/sirupsen/logrus"
+	"github.com/spacegrower/watermelon/infra/wlog"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/client/v3/concurrency"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/connectivity"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 type App interface {
-	Log() *logrus.Logger
+	Log() wlog.Logger
 	CreateProject(tx *gorm.DB, p common.Project) (int64, error)
 	GetProject(pid int64) (*common.Project, error)
 	GetUserProjects(uid int64) ([]*common.Project, error)
@@ -120,9 +125,20 @@ type App interface {
 	Close()
 	GetVersion() string
 
+	GetAgentClient(region string, projectID int64) (*AgentClient, error)
 	GetEtcdClient() *clientv3.Client
 	Go(f func())
 	warning.Warner
+
+	// registry
+	StreamManager() *streamManager
+	DispatchAgentJob(region string, projectID int64, withStream ...*Stream) error
+	RemoveClientRegister(client string) error
+
+	// task status
+	SetTaskRunning(agentIP string, execInfo *common.TaskExecutingInfo) error
+	CheckTaskIsRunning(projectID int64, taskID string) ([]common.TaskRunningInfo, error)
+	HandlerTaskFinished(agentIP string, result protocol.TaskFinishedV1) error
 }
 
 func GetApp(c *gin.Context) App {
@@ -130,20 +146,19 @@ func GetApp(c *gin.Context) App {
 }
 
 type app struct {
+	connPool   keypool.Pool[*grpc.ClientConn]
 	clusterID  int64
 	httpClient *http.Client
 	store      sqlStore.SqlStore
-	logger     *logrus.Logger
 	etcd       protocol.EtcdManager
 	closeCh    chan struct{}
 	isClose    bool
 	localip    string
 
-	workflowRunner  *workflowRunner
-	messageChan     chan PublishData
-	messageCounter  int64
-	taskResultQueue *recipe.Queue
-	taskResultChan  chan string
+	workflowRunner *workflowRunner
+	messageChan    chan PublishData
+	messageCounter int64
+	taskResultChan chan string
 
 	cfg *config.ServiceConfig
 
@@ -153,6 +168,26 @@ type app struct {
 
 	firetower tower.Manager
 	pusher    *SystemPusher
+
+	streamManager *streamManager
+}
+
+func (a *app) GetAgentClient(region string, projectID int64) (*AgentClient, error) {
+	key := fmt.Sprintf("client_%s_%d", region, projectID)
+	conn, err := a.connPool.Get(key)
+	if err != nil {
+		return nil, err
+	}
+
+	client := &AgentClient{
+		AgentClient: cronpb.NewAgentClient(conn.Conn()),
+		addr:        key,
+		cancel: func() {
+			a.connPool.Put(key, conn)
+		},
+	}
+
+	return client, nil
 }
 
 type WebClientPusher interface {
@@ -203,30 +238,121 @@ func WithFiretower() AppOptions {
 	}
 }
 
+var (
+	POOL_ERROR_FACTORY_NOT_FOUND = fmt.Errorf("factory not found")
+)
+
 func NewApp(configPath string, opts ...AppOptions) App {
 	var err error
 
 	conf := config.InitServiceConfig(configPath)
-
+	wlog.SetGlobalLogger(wlog.NewLogger(&wlog.Config{
+		Level: wlog.ParseLevel(conf.LogLevel),
+		RotateConfig: &wlog.RotateConfig{
+			MaxAge:  24,
+			MaxSize: 1000,
+		},
+		File: conf.LogLevel, // print to sedout if config.File undefined
+	}))
 	app := new(app)
 	app.cfg = conf
-	app.logger = logger.MustSetup(conf.LogLevel)
-	app.store = sqlStore.MustSetup(conf.Mysql, app.logger, true)
+	if conf.Mysql != nil && conf.Mysql.Service != "" {
+		app.store = sqlStore.MustSetup(conf.Mysql, wlog.With(zap.String("component", "sqlprovider")), true)
+	}
+	app.connPool, err = keypool.NewChannelPool(&keypool.Config[*grpc.ClientConn]{
+		MaxCap: 10000,
+		//最大空闲连接
+		MaxIdle: 10,
+		//生成连接的方法
+		Factory: func(key string) (*grpc.ClientConn, error) {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second*time.Duration(conf.Deploy.Timeout))
+			defer cancel()
+			addr := key
+			if strings.Contains(key, "agent_") {
+				addr = strings.TrimPrefix(key, "agent_")
+			} else if strings.Contains(key, "client_") {
+				// client 的连接对象由调用时提供初始化
+				keys := strings.Split(key, "_")
+				if len(keys) != 3 {
+					return nil, POOL_ERROR_FACTORY_NOT_FOUND
+				}
+				projectID, err := strconv.ParseInt(keys[2], 10, 64)
+				if err != nil {
+					return nil, err
+				}
+				newConn := infra.NewClientConn()
+				cc, err := newConn(cronpb.Agent_ServiceDesc.ServiceName,
+					newConn.WithRegion(keys[1]),
+					newConn.WithSystem(projectID),
+					newConn.WithOrg("gophercron"),
+					newConn.WithGrpcDialOptions(grpc.WithTransportCredentials(insecure.NewCredentials())),
+					newConn.WithServiceResolver(infra.MustSetupEtcdResolver()))
+				if err != nil {
+					return nil, errors.NewError(http.StatusInternalServerError, fmt.Sprintf("连接agent失败，project_id: %d", projectID)).WithLog(err.Error())
+				}
+				return cc, nil
+			}
+			return grpc.DialContext(ctx, addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		},
+		//关闭连接的方法
+		Close: func(cc *grpc.ClientConn) error {
+			return cc.Close()
+		},
+		//检查连接是否有效的方法
+		Ping: func(cc *grpc.ClientConn) error {
+			state := cc.GetState().String()
+			switch state {
+			case connectivity.Shutdown.String():
+				fallthrough
+			case connectivity.TransientFailure.String():
+				fallthrough
+			case "INVALID_STATE":
+				return fmt.Errorf("error state %s", cc.GetState().String())
+			default:
+				return nil
+			}
+		},
+		//连接最大空闲时间，超过该事件则将失效
+		IdleTimeout: time.Minute * 10,
+	})
+	if err != nil {
+		panic(err)
+	}
+
 	app.httpClient = &http.Client{
 		Timeout: time.Second * 5,
 	}
 
-	app.logger.Info("start to connect etcd ...")
+	{
+		// watermelon config
+		wlog.NewLogger(&wlog.Config{
+			Level: wlog.DebugLevel,
+		})
+		// register etcd registry
+		// todo register etcd client instead of config
+		infra.RegisterEtcdClient(clientv3.Config{
+			Endpoints:   conf.Etcd.Service, // cluster list
+			Username:    conf.Etcd.Username,
+			Password:    conf.Etcd.Password,
+			DialTimeout: time.Duration(conf.Etcd.DialTimeout) * time.Millisecond,
+		})
+
+		app.streamManager = &streamManager{
+			aliveSrv:  make(map[string]map[string]*Stream),
+			hostIndex: make(map[string]streamHostIndex),
+		}
+	}
+
+	wlog.Info("start to connect etcd ...")
 	if app.etcd, err = etcd.Connect(conf.Etcd); err != nil {
 		panic(err)
 	}
 
 	{
 		app.taskResultChan = make(chan string, 1000)
-		app.taskResultQueue = recipe.NewQueue(app.etcd.Client(), common.BuildTaskResultQueuePrefixKey())
 	}
 
-	app.logger.Info("connected to etcd")
+	wlog.Info("connected to etcd")
 	app.CommonInterface = protocol.NewComm(app.etcd)
 
 	clusterID, err := app.etcd.Inc(conf.Etcd.Prefix + common.CLUSTER_AUTO_INDEX)
@@ -242,10 +368,10 @@ func NewApp(configPath string, opts ...AppOptions) App {
 			AgentIP: app.localip,
 		})
 		if reserr != nil {
-			app.logger.WithFields(logrus.Fields{
+			wlog.With(zap.Any("fields", map[string]interface{}{
 				"desc":         reserr,
 				"source_error": err,
-			}).Error("panicgroup: failed to warning panic error")
+			})).Error("panicgroup: failed to warning panic error")
 		}
 	})
 	for _, opt := range opts {
@@ -253,11 +379,11 @@ func NewApp(configPath string, opts ...AppOptions) App {
 	}
 
 	if app.Warner == nil {
-		app.Warner = warning.NewDefaultWarner(app.logger)
+		app.Warner = warning.NewDefaultWarner(wlog.With(zap.String("component", "warner")))
 	}
 
 	if app.localip, err = utils.GetLocalIP(); err != nil {
-		app.logger.Error("failed to get local ip")
+		wlog.Error("failed to get local ip")
 	}
 
 	jwt.InitJWT(conf.JWT)
@@ -271,7 +397,7 @@ func NewApp(configPath string, opts ...AppOptions) App {
 				return
 			default:
 				if err = app.WebHookWorker(); err != nil {
-					app.logger.Error(err.Error())
+					wlog.Error(err.Error())
 				}
 			}
 		}
@@ -285,42 +411,6 @@ func NewApp(configPath string, opts ...AppOptions) App {
 			case <-t.C:
 				app.AutoCleanLogs()
 				app.AutoCleanScheduledTemporaryTask()
-			case executeResult := <-app.taskResultChan:
-				var execResult protocol.TaskFinishedQueueContent
-				_ = json.Unmarshal([]byte(executeResult), &execResult)
-				switch execResult.Version {
-				case protocol.QueueItemV1:
-					var result protocol.TaskFinishedQueueItemV1
-					_ = json.Unmarshal(execResult.Data, &result)
-					go func(result protocol.TaskFinishedQueueItemV1) {
-						defer func() {
-							if r := recover(); r != nil {
-								app.Warning(warning.WarningData{
-									Type:      warning.WarningTypeSystem,
-									Data:      fmt.Sprintf("任务结果消费出错 panic, %v", r),
-									TaskName:  result.TaskID,
-									ProjectID: result.ProjectID,
-								})
-							}
-						}()
-
-						if result.TaskType == common.WorkflowPlan {
-							if err := app.workflowRunner.handleTaskResultV1(result); err != nil {
-								if err = app.taskResultQueue.Enqueue(executeResult); err != nil {
-									app.Warning(warning.WarningData{
-										Type:      warning.WarningTypeSystem,
-										Data:      fmt.Sprintf("任务结果消费出错，重新入队失败, %s", err.Error()),
-										TaskName:  result.TaskID,
-										ProjectID: result.ProjectID,
-									})
-								}
-							}
-						} else {
-							// normal task
-							app.PublishMessage(messageTaskStatusChanged(result.ProjectID, result.TaskID, result.TmpID, result.Status))
-						}
-					}(result)
-				}
 			case <-app.closeCh:
 				t.Stop()
 				// app.etcd.Lock(nil).CloseAll()
@@ -344,7 +434,7 @@ func NewApp(configPath string, opts ...AppOptions) App {
 			}
 
 			e := concurrency.NewElection(s, common.BuildWorkflowMasterKey())
-			ctx, _ := utils.GetContextWithTimeout()
+			ctx, _ := context.WithTimeout(context.TODO(), time.Duration(app.GetConfig().Deploy.Timeout)*time.Second)
 			err = e.Campaign(ctx, app.GetIP())
 			if err != nil {
 				switch {
@@ -358,7 +448,7 @@ func NewApp(configPath string, opts ...AppOptions) App {
 			fmt.Println("new workflow leader")
 			list, _, err := app.GetWorkflowList(common.GetWorkflowListOptions{}, 1, 100000)
 			if err != nil {
-				app.logger.Error("failed to refresh workflow list", err.Error())
+				wlog.Error("failed to refresh workflow list", zap.Error(err))
 				continue
 			}
 
@@ -372,23 +462,38 @@ func NewApp(configPath string, opts ...AppOptions) App {
 
 	startTemporaryTaskWorker(app)
 
+	startCalaDataConsistency(app)
+	return app
+}
+
+func startCalaDataConsistency(app *app) {
 	app.Go(func() {
 		for {
-			err := rego.Retry(func() error {
-				result, err := app.taskResultQueue.Dequeue()
-				if err != nil {
-					return err
-				}
-				app.taskResultChan <- result
-				return nil
-			}, rego.WithTimes(5), rego.WithPeriod(time.Second))
+			// 同一时间只需要有一个service的Loop运行即可
+			s, err := concurrency.NewSession(app.etcd.Client(), concurrency.WithTTL(9))
 			if err != nil {
-				// todo warning?
+				fmt.Println(err)
+				continue
+			}
+
+			e := concurrency.NewElection(s, common.BuildCalaConsistencyMasterKey())
+			ctx, _ := context.WithTimeout(context.TODO(), time.Duration(app.GetConfig().Deploy.Timeout)*time.Second)
+			err = e.Campaign(ctx, app.GetIP())
+			if err != nil {
+				switch {
+				case err == context.Canceled:
+					return
+				default:
+					time.Sleep(time.Second * 5)
+					continue
+				}
+			}
+			fmt.Println("new calc leader")
+			if err := app.CalcAgentDataConsistency(); err != nil {
+				wlog.Error("failed to calc agent data consistency", zap.Error(err))
 			}
 		}
 	})
-
-	return app
 }
 
 func startTemporaryTaskWorker(app *app) {
@@ -401,7 +506,7 @@ func startTemporaryTaskWorker(app *app) {
 				continue
 			}
 			e := concurrency.NewElection(s, common.BuildTemporaryMasterKey())
-			ctx, _ := utils.GetContextWithTimeout()
+			ctx, _ := context.WithTimeout(context.TODO(), time.Duration(app.GetConfig().Deploy.Timeout)*time.Second)
 			err = e.Campaign(ctx, app.GetIP())
 			if err != nil {
 				switch {
@@ -424,13 +529,13 @@ func startTemporaryTaskWorker(app *app) {
 
 				list, err := app.GetNeedToScheduleTemporaryTask(time.Now())
 				if err != nil {
-					app.logger.Error("failed to refresh temporary task list", err.Error())
+					wlog.Error("failed to refresh temporary task list", zap.Error(err))
 					continue
 				}
 
 				for _, v := range list {
 					if err = app.TemporaryTaskSchedule(*v); err != nil {
-						app.logger.Error("temporary task worker: failed to schedule task", err.Error())
+						wlog.Error("temporary task worker: failed to schedule task", zap.Error(err))
 					}
 				}
 			}
@@ -438,8 +543,8 @@ func startTemporaryTaskWorker(app *app) {
 	})
 }
 
-func (a *app) Log() *logrus.Logger {
-	return a.logger
+func (a *app) Log() wlog.Logger {
+	return wlog.With()
 }
 
 func (a *app) PublishMessage(data PublishData) {
@@ -938,32 +1043,23 @@ func (a *app) GetUserList(args GetUserListArgs) ([]*common.User, error) {
 }
 
 func (a *app) ReloadWorkerConfig(host string) error {
-	var (
-		schedulerKey   string
-		leaseGrantResp *clientv3.LeaseGrantResponse
-		ctx            context.Context
-		errObj         errors.Error
-		err            error
-	)
+	ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
+	defer cancel()
 
-	// build etcd save key
-	schedulerKey = common.BuildAgentCommandKey(host, common.AGENT_COMMAND_RELOAD_CONFIG)
-
-	ctx, _ = utils.GetContextWithTimeout()
-	// make lease to notify worker
-	// 创建一个租约 让其稍后过期并自动删除
-	if leaseGrantResp, err = a.etcd.Lease().Grant(ctx, 1); err != nil {
-		errObj = errors.ErrInternalError
-		errObj.Log = "[Etcd - ReloadAgentConfig] lease grant error:" + err.Error()
-		return errObj
+	conn, err := a.connPool.Get("agent_" + host)
+	if err != nil {
+		return errors.NewError(http.StatusInternalServerError, "获取agent连接失败").WithLog(err.Error())
 	}
+	defer func() {
+		err := a.connPool.Put("agent_"+host, conn)
+		fmt.Println("put back", "agent_"+host, err)
+	}()
 
-	ctx, _ = utils.GetContextWithTimeout()
-	// save to etcd
-	if _, err = a.etcd.KV().Put(ctx, schedulerKey, "", clientv3.WithLease(leaseGrantResp.ID)); err != nil {
-		errObj = errors.ErrInternalError
-		errObj.Log = "[Etcd - ReloadAgentConfig] etcd client kv put error:" + err.Error()
-		return errObj
+	client := cronpb.NewAgentClient(conn.Conn())
+	if _, err = client.Command(ctx, &cronpb.CommandRequest{
+		Command: common.AGENT_COMMAND_RELOAD_CONFIG,
+	}); err != nil {
+		return errors.NewError(http.StatusInternalServerError, "命令执行失败:"+err.Error()).WithLog(err.Error())
 	}
 
 	return nil
@@ -1000,8 +1096,6 @@ func (a *app) ChangePassword(uid int64, password, salt string) error {
 func (a *app) AutoCleanLogs() {
 	opt := selection.NewSelector(selection.NewRequirement("start_time", selection.LessThan, time.Now().Unix()-86400*7))
 	if err := a.store.TaskLog().Clean(nil, opt); err != nil {
-		a.logger.WithFields(logrus.Fields{
-			"error": err.Error(),
-		}).Error("failed to clean logs by auto clean")
+		wlog.Error("failed to clean logs by auto clean", zap.Error(err))
 	}
 }

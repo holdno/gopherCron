@@ -5,10 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/coreos/etcd/clientv3"
-	v3 "github.com/coreos/etcd/clientv3"
-	recipe "github.com/coreos/etcd/contrib/recipes"
-	"github.com/coreos/etcd/mvcc/mvccpb"
+	recipe "go.etcd.io/etcd/client/v3/experimental/recipes"
+	"go.etcd.io/etcd/api/v3/mvccpb"
+	v3 "go.etcd.io/etcd/client/v3"
 )
 
 // Queue implements a multi-reader, multi-writer distributed queue.
@@ -135,15 +134,15 @@ func claimFirstKey(kv v3.KV, kvs []*mvccpb.KeyValue) (*mvccpb.KeyValue, error) {
 	return nil, nil
 }
 
-func WaitPrefixEvents(ctx context.Context, c *clientv3.Client, prefix string, rev int64, evs []mvccpb.Event_EventType) (*clientv3.Event, error) {
-	wc := c.Watch(ctx, prefix, clientv3.WithPrefix(), clientv3.WithRev(rev))
+func WaitPrefixEvents(ctx context.Context, c *v3.Client, prefix string, rev int64, evs []mvccpb.Event_EventType) (*v3.Event, error) {
+	wc := c.Watch(ctx, prefix, v3.WithPrefix(), v3.WithRev(rev))
 	if wc == nil {
 		return nil, recipe.ErrNoWatcher
 	}
 	return waitEvents(wc, evs), nil
 }
 
-func waitEvents(wc clientv3.WatchChan, evs []mvccpb.Event_EventType) *clientv3.Event {
+func waitEvents(wc v3.WatchChan, evs []mvccpb.Event_EventType) *v3.Event {
 	i := 0
 	for wresp := range wc {
 		if err := wresp.Err(); err != nil {

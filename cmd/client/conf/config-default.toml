@@ -1,25 +1,16 @@
 log_level = "debug"
-# 日志接收服务地址，如果配置了地址，client将会把任务结果推送到该地址，同时client不需要再配置mysql配置
-report_addr = ""
-
-[deploy]
-# 当前的环境:dev、release
-environment = "release"
-# 数据库操作超时时间
-timeout = 5  # 秒为单位
-
-# etcd
-[etcd]
-service = ["0.0.0.0:2379"]
-username = ""
-password = ""
-dialtimeout = 5000
-# etcd kv存储的key前缀 用来与其他业务做区分
-prefix = "/gopher_cron"
-# 当前节点需要处理的项目ID
-projects = [1,2]
-# 命令调用脚本 /bin/sh  /bin/bash 根据自己系统情况决定
+report_addr=""
+projects = []
 shell = "/bin/bash"
+token = ""
+
+timeout = 5
+
+[micro]
+region = "center"
+org_id = "gophercron"
+weight = 100
+endpoint = "localhost:6306"
 
 [mysql]
 service="0.0.0.0:3306"

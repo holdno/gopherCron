@@ -9,10 +9,11 @@ import (
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/pkg/warning"
 	"github.com/holdno/gopherCron/utils"
+	"github.com/spacegrower/watermelon/infra/wlog"
+	"go.uber.org/zap"
 
-	"github.com/coreos/etcd/clientv3"
-	"github.com/coreos/etcd/mvcc/mvccpb"
-	"github.com/sirupsen/logrus"
+	"go.etcd.io/etcd/api/v3/mvccpb"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 func (a *app) WebHookWorker() error {
@@ -32,7 +33,7 @@ func (a *app) WebHookWorker() error {
 			Type: warning.WarningTypeSystem,
 		})
 		if warningErr != nil {
-			a.logger.Errorf("[service - WebHookWorker] failed to push warning, %s", err.Error())
+			wlog.Error(fmt.Sprintf("[service - WebHookWorker] failed to push warning, %s", err.Error()))
 		}
 		return err
 	}
@@ -73,20 +74,20 @@ func (a *app) transportWebhookEvent(watchEvent *clientv3.Event) {
 	_projectID, taskID := common.PatchProjectIDTaskIDFromStatusKey(string(watchEvent.Kv.Key))
 	projectID, err := strconv.ParseInt(_projectID, 10, 64)
 	if err != nil {
-		a.logger.WithFields(logrus.Fields{
+		wlog.With(zap.Any("fields", map[string]interface{}{
 			"project_id": _projectID,
 			"task_id":    taskID,
 			"error":      err.Error(),
-		}).Error("failed to parse project id, not int")
+		})).Error("failed to parse project id, not int")
 		return
 	}
 	lock := a.etcd.GetLocker(fmt.Sprintf("%s/lock/center_webhook_watcher_%d_%s", common.ETCD_PREFIX, projectID, taskID))
 	if err = lock.TryLock(); err != nil {
-		a.logger.WithFields(logrus.Fields{
+		wlog.With(zap.Any("fields", map[string]interface{}{
 			"project_id": projectID,
 			"task_id":    taskID,
 			"error":      err.Error(),
-		}).Error("failed to get webhook lock")
+		})).Error("failed to get webhook lock")
 		return
 	}
 	defer lock.Unlock()
@@ -95,23 +96,23 @@ func (a *app) transportWebhookEvent(watchEvent *clientv3.Event) {
 
 	var runningInfo common.TaskRunningInfo
 	if err = json.Unmarshal(watchEvent.PrevKv.Value, &runningInfo); err != nil {
-		a.logger.WithFields(logrus.Fields{
+		wlog.With(zap.Any("fields", map[string]interface{}{
 			"project_id": projectID,
 			"task_id":    taskID,
 			"tmp_id":     runningInfo.TmpID,
 			"value":      string(watchEvent.PrevKv.Value),
 			"error":      err.Error(),
-		}).Error("failed to unmarshal running info")
+		})).Error("failed to unmarshal running info")
 		return
 	}
 
 	if err = a.HandleWebHook(projectID, taskID, "", runningInfo.TmpID); err != nil {
-		a.logger.WithFields(logrus.Fields{
+		wlog.With(zap.Any("fields", map[string]interface{}{
 			"project_id": projectID,
 			"task_id":    taskID,
 			"type":       "",
 			"tmp_id":     runningInfo.TmpID,
 			"error":      err.Error(),
-		}).Error("failed to handle webhook")
+		})).Error("failed to handle webhook")
 	}
 }

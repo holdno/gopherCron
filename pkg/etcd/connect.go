@@ -2,14 +2,13 @@ package etcd
 
 import (
 	"context"
-	"net/http"
-	"time"
 
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/config"
 	"github.com/holdno/gopherCron/errors"
+	"github.com/holdno/gopherCron/pkg/infra"
 
-	"github.com/coreos/etcd/clientv3"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 type TaskManager struct {
@@ -36,29 +35,23 @@ func (t *TaskManager) Watcher() clientv3.Watcher {
 }
 
 func Connect(config *config.EtcdConf) (*TaskManager, error) {
-	var (
-		etcdConf clientv3.Config
-		client   *clientv3.Client
-		err      error
-		errObj   *errors.Error
-	)
-
 	common.ETCD_PREFIX = config.Prefix
 
 	// client config
-	etcdConf = clientv3.Config{
-		Endpoints:   config.Service, // cluster list
-		Username:    config.Username,
-		Password:    config.Password,
-		DialTimeout: time.Duration(config.DialTimeout) * time.Millisecond,
-	}
+	// etcdConf = clientv3.Config{
+	// 	Endpoints:   config.Service, // cluster list
+	// 	Username:    config.Username,
+	// 	Password:    config.Password,
+	// 	DialTimeout: time.Duration(config.DialTimeout) * time.Millisecond,
+	// }
 
-	if client, err = clientv3.New(etcdConf); err != nil {
-		errObj = errors.NewError(http.StatusInternalServerError,
-			"[api_context - InitAPIContext] etcd.Connect get error:"+err.Error())
-		return nil, errObj
-	}
+	// if client, err = clientv3.New(etcdConf); err != nil {
+	// 	errObj = errors.NewError(http.StatusInternalServerError,
+	// 		"[api_context - InitAPIContext] etcd.Connect get error:"+err.Error())
+	// 	return nil, errObj
+	// }
 
+	client := infra.ResolveEtcdClient()
 	Manager := &TaskManager{
 		client:  client,
 		kv:      clientv3.NewKV(client),

@@ -1,174 +1,43 @@
 package agent
 
 import (
-	"context"
-	"fmt"
-
 	"github.com/holdno/gopherCron/common"
-	"github.com/holdno/gopherCron/pkg/warning"
-	"github.com/holdno/gopherCron/utils"
-	"github.com/sirupsen/logrus"
-
-	"github.com/coreos/etcd/clientv3"
-	"github.com/coreos/etcd/mvcc/mvccpb"
+	"github.com/holdno/gopherCron/pkg/cronpb"
+	"github.com/spacegrower/watermelon/infra/wlog"
+	"go.uber.org/zap"
 )
 
-func (a *client) newWatchHandle() func(resp clientv3.WatchResponse, projectID int64) {
+func (a *client) handlerEventFromCenter(event *cronpb.Event) {
 	var (
-		err        error
-		watchEvent *clientv3.Event
-		taskEvent  *common.TaskEvent
-	)
-	return func(resp clientv3.WatchResponse, projectID int64) {
-		var (
-			task   *common.TaskInfo
-			taskID string
-		)
-
-		if resp.Err() != nil {
-			a.logger.WithFields(logrus.Fields{
-				"error":      resp.Err(),
-				"project_id": projectID,
-			}).Error("etcd watcher with error")
-		}
-
-		for _, watchEvent = range resp.Events {
-			if common.IsAckKey(string(watchEvent.Kv.Key)) {
-				continue
-			}
-			switch watchEvent.Type {
-			case mvccpb.PUT: // 任务保存
-				// 反序列化task
-				fmt.Println("get key", string(watchEvent.Kv.Key), string(watchEvent.Kv.Value))
-				if task, err = common.Unmarshal(watchEvent.Kv.Value); err != nil {
-					continue
-				}
-				// 构建一个临时调度任务的事件
-				if common.IsTemporaryKey(string(watchEvent.Kv.Key)) {
-					taskEvent = common.BuildTaskEvent(common.TASK_EVENT_TEMPORARY, task)
-				} else if common.IsWorkflowKey(string(watchEvent.Kv.Key)) {
-					taskEvent = common.BuildTaskEvent(common.TASK_EVENT_WORKFLOW_SCHEDULE, task)
-				} else {
-					// 构建一个event
-					taskEvent = common.BuildTaskEvent(common.TASK_EVENT_SAVE, task)
-				}
-				a.logger.WithFields(logrus.Fields{
-					"event_type": taskEvent.EventType,
-					"task":       taskEvent.Task.Name,
-				}).Debug("get put event")
-				// 推送一个更新事件给 scheduler
-			case mvccpb.DELETE: // 任务删除
-				if common.IsTemporaryKey(string(watchEvent.Kv.Key)) {
-					continue
-				}
-				if common.IsWorkflowKey(string(watchEvent.Kv.Key)) {
-					continue
-				}
-				if common.IsStatusKey(string(watchEvent.Kv.Key)) {
-					continue
-				}
-				taskID = common.ExtractTaskID(projectID, string(watchEvent.Kv.Key))
-				// 构建一个delete event
-				task = &common.TaskInfo{TaskID: taskID, ProjectID: projectID}
-				taskEvent = common.BuildTaskEvent(common.TASK_EVENT_DELETE, task)
-				// 推送给 scheduler 把任务终止掉
-			}
-
-			a.scheduler.PushEvent(taskEvent)
-		}
-	}
-}
-
-func (a *client) startTaskWatcher(projectID int64) error {
-	var (
-		getResp            *clientv3.GetResponse
-		err                error
-		preKey             string
-		kvPair             *mvccpb.KeyValue
-		watchStartRevision int64
-		watchChan          clientv3.WatchChan
-
+		task      *common.TaskInfo
 		taskEvent *common.TaskEvent
 	)
-
-	handleFunc := a.newWatchHandle()
-
-	preKey = common.BuildKey(projectID, "")
-	a.logger.Infof("[agent - TaskWatcher] new task watcher, project_id: %d", projectID)
-	if err = utils.RetryFunc(5, func() error {
-		if getResp, err = a.etcd.KV().Get(context.TODO(), preKey, clientv3.WithPrefix()); err != nil {
-			return err
+	wlog.Debug("handle new event from center", zap.String("event_type", event.Type))
+	switch event.Type {
+	// agent注册成功后会收到中心响应的任务列表
+	case common.REMOTE_EVENT_PUT: // 任务保存
+		// 反序列化task
+		var err error
+		if task, err = common.Unmarshal(event.Value); err != nil {
+			wlog.Error("failed to unmarshal task", zap.String("task", string(event.Value)))
+			return
 		}
-		return nil
-	}); err != nil {
-		warningErr := a.Warning(warning.WarningData{
-			Data:      fmt.Sprintf("[agent - TaskWatcher] etcd kv get error: %s, projectid: %d", err.Error(), projectID),
-			Type:      warning.WarningTypeSystem,
-			AgentIP:   a.GetIP(),
-			ProjectID: projectID,
-		})
-		if warningErr != nil {
-			a.logger.Errorf("[agent - TaskWatcher] failed to push warning, %s", err.Error())
+		taskEvent = common.BuildTaskEvent(common.TASK_EVENT_SAVE, task)
+	case common.REMOTE_EVENT_TMP_SCHEDULE:
+		var err error
+		if task, err = common.Unmarshal(event.Value); err != nil {
+			return
 		}
-		return err
+		taskEvent = common.BuildTaskEvent(common.TASK_EVENT_TEMPORARY, task)
+	case common.REMOTE_EVENT_DELETE:
+		var err error
+		if task, err = common.Unmarshal(event.Value); err != nil {
+			return
+		}
+		taskEvent = common.BuildTaskEvent(common.TASK_EVENT_DELETE, task)
+	default:
+		return
 	}
 
-	for _, kvPair = range getResp.Kvs {
-		if task, err := common.Unmarshal(kvPair.Value); err == nil {
-			taskEvent = common.BuildTaskEvent(common.TASK_EVENT_SAVE, task)
-			// 将所有任务加入调度队列
-			a.scheduler.PushEvent(taskEvent)
-		}
-	}
-
-	cancelCtx, cancelWatchFunc := context.WithCancel(context.TODO())
-	defer cancelWatchFunc()
-	// 从GET时刻的后续版本进行监听变化
-	watchStartRevision = getResp.Header.Revision + 1
-	// 开始监听
-	watchChan = a.etcd.Watcher().Watch(cancelCtx, preKey, clientv3.WithRev(watchStartRevision), clientv3.WithPrefix())
-	for {
-		select {
-		case <-a.daemon.WaitRemoveSignal(projectID):
-			a.scheduler.PlanRange(func(key string, value *common.TaskSchedulePlan) bool {
-				if value.Task.ProjectID == projectID {
-					taskEvent = common.BuildTaskEvent(common.TASK_EVENT_DELETE, value.Task)
-					// 将该项目下的所有任务移出调度队列
-					a.scheduler.PushEvent(taskEvent)
-				}
-				return true
-			})
-			a.logger.Infof("[agent - TaskWatcher] stop to watching project %d", projectID)
-			return nil
-		case w, ok := <-watchChan:
-			if !ok {
-				return nil
-			}
-
-			if w.Err() != nil {
-				return w.Err()
-			}
-			handleFunc(w, projectID)
-		}
-	}
-}
-
-func (a *client) TaskWatcher(projects []int64) {
-	for _, projectID := range projects {
-		a.etcdWatchDaemon(projectID)
-	}
-}
-
-func (a *client) etcdWatchDaemon(projectID int64) {
-	a.Go(func() {
-	REWATCH:
-		a.logger.WithField("project_id", projectID).Info("task watcher start")
-		if err := a.startTaskWatcher(projectID); err != nil {
-			a.logger.WithFields(logrus.Fields{
-				"error":      err.Error(),
-				"project_id": projectID,
-			}).Error("task watcher down")
-			goto REWATCH
-		}
-	})
+	a.scheduler.PushEvent(taskEvent)
 }

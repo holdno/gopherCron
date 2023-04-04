@@ -11,7 +11,7 @@ import (
 func TestProjectDaemon_WaitSignal(t *testing.T) {
 	projects := []int64{1, 2, 3, 4, 5}
 	pd := NewProjectDaemon(nil, nil)
-	addProjects, _ := pd.DiffProjects(projects)
+	addProjects, _ := pd.DiffAndAddProjects(projects)
 	for _, v := range addProjects {
 		pd.addProject(v)
 	}
@@ -50,6 +50,6 @@ func TestNewProjectDaemon(t *testing.T) {
 	}
 
 	time.Sleep(time.Second)
-	pd.DiffProjects(nil)
+	pd.DiffAndAddProjects(nil)
 	w.Wait()
 }

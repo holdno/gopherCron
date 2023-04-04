@@ -10,6 +10,16 @@ import (
 	"github.com/gorhill/cronexpr"
 )
 
+const (
+	REMOTE_EVENT_PUT                   = "remote_event_put"
+	REMOTE_EVENT_DELETE                = "remote_event_delete"
+	REMOTE_EVENT_UPDATE                = "remote_event_update"
+	REMOTE_EVENT_TMP_SCHEDULE          = "remote_event_tmp_schedule"
+	REMOTE_EVENT_WORKFLOW_SCHEDULE     = "remote_event_workflow_schedule"
+	REMOTE_EVENT_TASK_STOP             = "remote_event_task_stop"
+	REMOTE_EVENT_CHECK_TASK_ISRUNNING  = "remote_event_check_task_isrunning"
+)
+
 // TaskInfo 任务详情
 type TaskInfo struct {
 	TaskID    string `json:"task_id"`
@@ -56,6 +66,7 @@ type TaskRunningInfo struct {
 	Status    string `json:"status"`
 	TmpID     string `json:"tmp_id"`
 	Timestamp int64  `json:"timestamp,omitempty"`
+	AgentIP   string `json:"agent_ip"`
 }
 
 // TaskSchedulePlan 任务调度计划
@@ -104,13 +115,14 @@ type TaskResultLog struct {
 
 // ETCD_PREFIX topic prefix  default: /cron
 var (
-	ETCD_PREFIX      = "/cron"
-	TEMPORARY        = "t_scheduler"
-	WORKFLOW         = "t_flow"
-	WORKFLOW_ACK     = "t_flow_ack"
-	WORKFLOW_MASTER  = "t_flow_master"
-	TEMPORARY_MASTER = "t_temporary_master"
-	STATUS           = "t_status"
+	ETCD_PREFIX             = "/cron"
+	TEMPORARY               = "t_scheduler"
+	WORKFLOW                = "t_flow"
+	WORKFLOW_ACK            = "t_flow_ack"
+	WORKFLOW_MASTER         = "t_flow_master"
+	CALC_CONSISTENCY_MASTER = "t_calc_consistency_master"
+	TEMPORARY_MASTER        = "t_temporary_master"
+	STATUS                  = "t_status"
 )
 
 // BuildTaskUpdateKey 任务更新锁的key
@@ -129,6 +141,10 @@ func BuildWorkflowAddUserLockKey(workflowID, userID int64) string {
 
 func BuildWorkflowMasterKey() string {
 	return fmt.Sprintf("%s/%s", ETCD_PREFIX, WORKFLOW_MASTER)
+}
+
+func BuildCalaConsistencyMasterKey() string {
+	return fmt.Sprintf("%s/%s", ETCD_PREFIX, CALC_CONSISTENCY_MASTER)
 }
 
 func BuildTemporaryMasterKey() string {
@@ -151,6 +167,14 @@ func GetTaskStatusPrefixKey() string {
 
 func BuildTaskStatusKey(projectID int64, taskID string) string {
 	return fmt.Sprintf("%s/%d/%s/%s", ETCD_PREFIX, projectID, taskID, STATUS)
+}
+
+func BuildTaskRunningKeyPrefix(projectID int64, taskID string) string {
+	return fmt.Sprintf("%s/status/running/%d/%s", ETCD_PREFIX, projectID, taskID)
+}
+
+func BuildTaskRunningKey(agentIP string, projectID int64, taskID string) string {
+	return fmt.Sprintf("%s/%s", BuildTaskRunningKeyPrefix(projectID, taskID), agentIP)
 }
 
 func BuildWorkflowTaskStatusKey(workflowID, projectID int64, taskID string) string {
@@ -245,7 +269,11 @@ func BuildWorkflowPlanKey(workflowID int64) string {
 
 // BuildTableKey 构建scheduler 关系表中的key
 func (t *TaskInfo) SchedulerKey() string {
-	return fmt.Sprintf("%d_%s", t.ProjectID, t.TaskID)
+	return GenTaskSchedulerKey(t.ProjectID, t.TaskID)
+}
+
+func GenTaskSchedulerKey(projectID int64, taskID string) string {
+	return fmt.Sprintf("%d_%s", projectID, taskID)
 }
 
 func Unmarshal(value []byte) (*TaskInfo, error) {

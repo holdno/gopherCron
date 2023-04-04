@@ -1,9 +1,8 @@
 package warning
 
 import (
-	"fmt"
-
-	"github.com/sirupsen/logrus"
+	"github.com/spacegrower/watermelon/infra/wlog"
+	"go.uber.org/zap"
 )
 
 type WarningData struct {
@@ -24,20 +23,18 @@ type Warner interface {
 }
 
 type warning struct {
-	logger *logrus.Logger
+	logger wlog.Logger
 }
 
-func NewDefaultWarner(logger *logrus.Logger) *warning {
+func NewDefaultWarner(logger wlog.Logger) *warning {
 	return &warning{logger: logger}
 }
 
 func (a *warning) Warning(data WarningData) error {
-
-	if data.Type == WarningTypeSystem {
-		a.logger.Error(data.Data)
-	} else {
-		a.logger.Error(fmt.Sprintf("task: %s, warning: %s", data.TaskName, data.Data))
-	}
-
+	a.logger.With(zap.Any("fields", map[string]interface{}{
+		"error":      data.Data,
+		"task_name":  data.TaskName,
+		"project_id": data.ProjectID,
+	})).Error("agent alert")
 	return nil
 }

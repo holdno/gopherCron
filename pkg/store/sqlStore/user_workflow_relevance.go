@@ -12,7 +12,7 @@ type userWorkflowRelevanceStore struct {
 	commonFields
 }
 
-//NewWebHookStore
+// NewWebHookStore
 func NewUserWorkflowRelevanceStore(provider SqlProviderInterface) store.UserWorkflowRelevanceStore {
 	repo := &userWorkflowRelevanceStore{}
 
@@ -25,7 +25,7 @@ func (s *userWorkflowRelevanceStore) AutoMigrate() {
 	if err := s.GetMaster().Table(s.GetTable()).AutoMigrate(&common.UserWorkflowRelevance{}).Error; err != nil {
 		panic(fmt.Errorf("unable to auto migrate %s, %w", s.GetTable(), err))
 	}
-	s.provider.Logger().Infof("%s, complete initialization", s.GetTable())
+	s.provider.Logger().Info(fmt.Sprintf("%s, complete initialization", s.GetTable()))
 }
 
 func (s *userWorkflowRelevanceStore) Create(tx *gorm.DB, data *common.UserWorkflowRelevance) error {

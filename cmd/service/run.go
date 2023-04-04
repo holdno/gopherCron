@@ -10,11 +10,17 @@ import (
 	"time"
 
 	"github.com/holdno/gopherCron/app"
+	"github.com/holdno/gopherCron/cmd/service/middleware"
 	"github.com/holdno/gopherCron/cmd/service/router"
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/config"
+	"github.com/holdno/gopherCron/pkg/cronpb"
+	"github.com/holdno/gopherCron/pkg/infra"
 	"github.com/holdno/gopherCron/pkg/warning"
 	"github.com/holdno/gopherCron/utils"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/gin-gonic/gin"
 )
@@ -22,9 +28,9 @@ import (
 var httpServer *http.Server
 
 // 初始化服务
-func apiServer(srv app.App, conf *config.DeployConf) {
+func apiServer(srv app.App, conf *config.ServiceConfig) {
 
-	if conf.Environment == "release" {
+	if conf.Deploy.Environment == "release" {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
@@ -46,22 +52,38 @@ func apiServer(srv app.App, conf *config.DeployConf) {
 	})
 
 	//URI路由设置
-	router.SetupRoute(engine, conf)
-
-	go func() {
-		serverAddress := resolveServerAddress(conf.Host)
-		httpServer = &http.Server{
-			Addr:        serverAddress,
+	router.SetupRoute(engine, conf.Deploy)
+	infra.RegisterETCDRegisterPrefixKey(conf.Etcd.Prefix + "/registry")
+	newServer := infra.NewCenterServer()
+	server := newServer(func(grpcServer *grpc.Server) {
+		cronpb.RegisterCenterServer(grpcServer, &cronRpc{
+			app: srv,
+		})
+	}, newServer.WithRegion(conf.Micro.Region),
+		newServer.WithOrg(conf.Micro.OrgID),
+		newServer.WithAddress(conf.Deploy.Host),
+		newServer.WithHttpServer(&http.Server{
 			Handler:     engine,
 			ReadTimeout: time.Duration(5) * time.Second,
+		}),
+		newServer.WithServiceRegister(infra.MustSetupEtcdRegister()))
+
+	server.Handler(cronpb.CenterServer.SendEvent)
+	server.Use(func(ctx context.Context) error {
+		agentIP, exist := GetAgentIPFromContext(ctx)
+		if !exist {
+			return status.Error(codes.Aborted, "header: gophercron-agent-ip is not found")
 		}
-		// TODO log
-		fmt.Println(utils.GetCurrentTimeText(), "listening and serving HTTP on "+serverAddress)
-		err := httpServer.ListenAndServe()
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "http server start failed:", err)
-			os.Exit(0)
-		}
+		middleware.SetAgentIP(ctx, agentIP)
+		return nil
+	})
+	server.Handler(cronpb.CenterServer.RegisterAgent,
+		cronpb.CenterServer.StatusReporter,
+		cronpb.CenterServer.TryLock)
+
+	go func() {
+		fmt.Printf("%s, start grpc server, listen on %s", utils.GetCurrentTimeText(), conf.Deploy.Host)
+		server.RunUntil(syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL)
 	}()
 }
 
@@ -98,7 +120,7 @@ func Run(opts *SetupOptions) error {
 		}
 	}()
 
-	apiServer(srv, srv.GetConfig().Deploy)
+	apiServer(srv, srv.GetConfig())
 
 	os.Setenv("GOPHERENV", srv.GetConfig().Deploy.Environment)
 	waitingShutdown(srv)

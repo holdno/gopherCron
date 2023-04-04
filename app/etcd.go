@@ -6,20 +6,23 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"time"
 
 	"github.com/holdno/gocommons/selection"
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/errors"
+	"github.com/holdno/gopherCron/pkg/cronpb"
 	"github.com/holdno/gopherCron/utils"
 
-	"github.com/coreos/etcd/clientv3"
-	"github.com/coreos/etcd/mvcc/mvccpb"
 	"github.com/jinzhu/gorm"
+	"go.etcd.io/etcd/api/v3/mvccpb"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
-func getTaskDetail(kv clientv3.KV, projectID int64, taskID string) (*common.TaskInfo, error) {
+func (a *app) getTaskDetail(kv clientv3.KV, projectID int64, taskID string) (*common.TaskInfo, error) {
 	taskKey := common.BuildKey(projectID, taskID)
-	ctx, _ := utils.GetContextWithTimeout()
+	ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
+	defer cancel()
 	resp, err := kv.Get(ctx, taskKey)
 	if err != nil {
 		return nil, err
@@ -43,7 +46,6 @@ func (a *app) GetTaskList(projectID int64) ([]*common.TaskListItemWithWorkflows,
 		getResp  *clientv3.GetResponse
 		taskList []*common.TaskListItemWithWorkflows
 		kvPair   *mvccpb.KeyValue
-		ctx      context.Context
 		errObj   errors.Error
 		err      error
 	)
@@ -51,7 +53,8 @@ func (a *app) GetTaskList(projectID int64) ([]*common.TaskListItemWithWorkflows,
 	// build etcd pre key
 	preKey = common.BuildKey(projectID, "")
 
-	ctx, _ = utils.GetContextWithTimeout()
+	ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
+	defer cancel()
 	if getResp, err = a.etcd.KV().Get(ctx, preKey,
 		clientv3.WithPrefix()); err != nil {
 		errObj = errors.ErrInternalError
@@ -131,12 +134,12 @@ func (a *app) GetProjectTaskCount(projectID int64) (int64, error) {
 		getResp *clientv3.GetResponse
 		errObj  errors.Error
 		err     error
-		ctx     context.Context
 	)
 
 	// build etcd pre key
 	preKey = common.BuildKey(projectID, "")
-	ctx, _ = utils.GetContextWithTimeout()
+	ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
+	defer cancel()
 	if getResp, err = a.etcd.KV().Get(ctx, preKey,
 		clientv3.WithPrefix(), clientv3.WithCountOnly()); err != nil {
 		errObj = errors.ErrInternalError
@@ -148,32 +151,32 @@ func (a *app) GetProjectTaskCount(projectID int64) (int64, error) {
 }
 
 // KillTask 强行结束任务
-func (a *app) KillTask(projectID int64, name string) error {
+func (a *app) KillTask(projectID int64, taskID string) error {
 	var (
-		killKey        string
-		leaseGrantResp *clientv3.LeaseGrantResponse
-		errObj         errors.Error
-		err            error
-		ctx            context.Context
+		err error
 	)
 
-	killKey = common.BuildKillKey(projectID, name)
-	ctx, _ = utils.GetContextWithTimeout()
-	// make lease to notify worker
-	// 创建一个租约 让其稍后过期并自动删除
-	if leaseGrantResp, err = a.etcd.Lease().Grant(ctx, 1); err != nil {
-		errObj = errors.ErrInternalError
-		errObj.Log = "[Etcd - KillTask] lease grant error:" + err.Error()
-		return errObj
+	taskKey := common.BuildKey(projectID, taskID)
+	ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
+	defer cancel()
+	resp, err := a.etcd.KV().Get(ctx, taskKey)
+	if err != nil {
+		return err
 	}
 
-	ctx, _ = utils.GetContextWithTimeout()
-	if _, err = a.etcd.KV().Put(ctx, killKey, "", clientv3.WithLease(leaseGrantResp.ID)); err != nil {
-		errObj = errors.ErrInternalError
-		errObj.Log = "[Etcd - KillTask] put kill task error:" + err.Error()
-		return errObj
+	err = a.DispatchEvent(&cronpb.SendEventRequest{
+		Region:    a.cfg.Micro.Region,
+		ProjectId: projectID,
+		Event: &cronpb.Event{
+			Type:      common.REMOTE_EVENT_TASK_STOP,
+			Version:   "v1",
+			Value:     resp.Kvs[0].Value,
+			EventTime: time.Now().Unix(),
+		},
+	})
+	if err != nil {
+		return errors.NewError(http.StatusInternalServerError, "下发任务强行结束事件失败").WithLog(err.Error())
 	}
-
 	return nil
 }
 
@@ -183,11 +186,11 @@ func (a *app) CheckProjectWorkerExist(projectID int64, host string) (bool, error
 		err     error
 		errObj  errors.Error
 		getResp *clientv3.GetResponse
-		ctx     context.Context
 	)
 
 	preKey = common.BuildRegisterKey(projectID, host)
-	ctx, _ = utils.GetContextWithTimeout()
+	ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
+	defer cancel()
 	if getResp, err = a.etcd.KV().Get(ctx, preKey); err != nil {
 		errObj = errors.ErrInternalError
 		errObj.Log = "[Etcd - GetWorkerList] get key error:" + err.Error()
@@ -204,24 +207,23 @@ func (a *app) CheckProjectWorkerExist(projectID int64, host string) (bool, error
 // GetWorkerList 获取节点列表
 func (a *app) GetWorkerList(projectID int64) ([]common.ClientInfo, error) {
 	var (
-		preKey  string
-		err     error
-		errObj  errors.Error
-		getResp *clientv3.GetResponse
-		kv      *mvccpb.KeyValue
-		ctx     context.Context
 		res     []common.ClientInfo
+		getResp *clientv3.GetResponse
 	)
 
-	preKey = common.BuildRegisterKey(projectID, "")
-	ctx, _ = utils.GetContextWithTimeout()
-	if getResp, err = a.etcd.KV().Get(ctx, preKey, clientv3.WithPrefix()); err != nil {
-		errObj = errors.ErrInternalError
-		errObj.Log = "[Etcd - GetWorkerList] get preKey error:" + err.Error()
-		return nil, errObj
+	addrs, err := a.getAgentAddrs(a.GetConfig().Micro.Region, projectID)
+	if err != nil {
+		return nil, errors.NewError(http.StatusInternalServerError, "获取节点列表失败").WithLog(err.Error())
 	}
 
-	for _, kv = range getResp.Kvs {
+	preKey := common.BuildRegisterKey(projectID, "")
+	ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
+	defer cancel()
+	if getResp, err = a.etcd.KV().Get(ctx, preKey, clientv3.WithPrefix()); err != nil {
+		return nil, errors.NewError(http.StatusInternalServerError, "通过etcd获取节点列表失败").WithLog(err.Error())
+	}
+
+	for _, kv := range getResp.Kvs {
 		var (
 			ip         = common.ExtractWorkerIP(projectID, string(kv.Key))
 			clientinfo common.ClientInfo
@@ -231,6 +233,17 @@ func (a *app) GetWorkerList(projectID int64) ([]common.ClientInfo, error) {
 		clientinfo.ClientIP = ip
 		if clientinfo.Version == "" {
 			clientinfo.Version = "unknow"
+		}
+
+		clientinfo.Version += "待升级"
+
+		res = append(res, clientinfo)
+	}
+
+	for _, addr := range addrs {
+		clientinfo := common.ClientInfo{
+			ClientIP: addr.Address(),
+			Version:  addr.Attr().Tags["agent-version"],
 		}
 
 		res = append(res, clientinfo)
@@ -249,7 +262,6 @@ func (a *app) DeleteTask(projectID int64, taskID string) (*common.TaskInfo, erro
 		delResp   *clientv3.DeleteResponse
 		oldTask   *common.TaskInfo
 		ctx       context.Context
-		errObj    errors.Error
 		err       error
 	)
 
@@ -266,15 +278,34 @@ func (a *app) DeleteTask(projectID int64, taskID string) (*common.TaskInfo, erro
 		return nil, errors.NewError(http.StatusBadRequest, "该任务已绑定workflow，请从workflow中移除该任务后再删除")
 	}
 
-	// build etcd delete key
-	deleteKey = common.BuildKey(projectID, taskID)
+	taskKey := common.BuildKey(projectID, taskID)
+	ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
+	defer cancel()
+	resp, err := a.etcd.KV().Get(ctx, taskKey)
+	if err != nil {
+		return nil, errors.NewError(http.StatusInternalServerError, "获取任务信息失败").WithLog(err.Error())
+	}
 
-	ctx, _ = utils.GetContextWithTimeout()
+	err = a.DispatchEvent(&cronpb.SendEventRequest{
+		Region:    a.cfg.Micro.Region,
+		ProjectId: projectID,
+		Event: &cronpb.Event{
+			Type:      common.REMOTE_EVENT_DELETE,
+			Version:   "v1",
+			Value:     resp.Kvs[0].Value,
+			EventTime: time.Now().Unix(),
+		},
+	})
+	if err != nil {
+		return nil, errors.NewError(http.StatusInternalServerError, "下发任务删除事件失败").WithLog(err.Error())
+	}
+
+	deleteKey = common.BuildKey(projectID, taskID)
+	ctx, cancel = context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
+	defer cancel()
 	// save to etcd
 	if delResp, err = a.etcd.KV().Delete(ctx, deleteKey, clientv3.WithPrevKV(), clientv3.WithPrefix()); err != nil {
-		errObj = errors.ErrInternalError
-		errObj.Log = "[Etcd - DeleteTask] etcd client kv delete error:" + err.Error()
-		return nil, errObj
+		return nil, errors.NewError(http.StatusInternalServerError, "删除etcd任务信息失败").WithLog(err.Error())
 	}
 
 	if taskID != "" && len(delResp.PrevKvs) != 0 {
@@ -287,14 +318,14 @@ func (a *app) DeleteTask(projectID int64, taskID string) (*common.TaskInfo, erro
 func (a *app) DeleteAll() error {
 	var (
 		deleteKey string
-		ctx       context.Context
 		errObj    errors.Error
 		err       error
 	)
 
 	// build etcd delete key
 	deleteKey = common.ETCD_PREFIX + "/"
-	ctx, _ = utils.GetContextWithTimeout()
+	ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
+	defer cancel()
 	// save to etcd
 	if _, err = a.etcd.KV().Delete(ctx, deleteKey, clientv3.WithPrevKV(), clientv3.WithPrefix()); err != nil {
 		errObj = errors.ErrInternalError
@@ -305,12 +336,87 @@ func (a *app) DeleteAll() error {
 	return nil
 }
 
+func (a *app) SaveTask(task *common.TaskInfo, opts ...clientv3.OpOption) (*common.TaskInfo, error) {
+	var (
+		saveKey  string
+		saveByte []byte
+		putResp  *clientv3.PutResponse
+		oldTask  *common.TaskInfo
+		errObj   errors.Error
+		err      error
+		locker   = a.etcd.GetLocker(common.BuildTaskUpdateKey(task.ProjectID, task.TaskID))
+	)
+	err = utils.RetryFunc(10, func() error {
+		if err = locker.TryLock(); err != nil {
+			time.Sleep(time.Duration(utils.Random(200, 600)) * time.Second)
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	defer locker.Unlock()
+
+	if oldTask, err = a.GetTask(task.ProjectID, task.TaskID); err != nil && err != errors.ErrDataNotFound {
+		errObj = errors.ErrInternalError
+		errObj.Log = "[Etcd - SaveTask] get old task info error:" + err.Error()
+		return nil, errObj
+	}
+
+	if oldTask != nil && task.IsRunning == common.TASK_STATUS_UNDEFINED {
+		task.IsRunning = oldTask.IsRunning
+		task.ClientIP = oldTask.ClientIP
+	}
+	// build etcd save key
+	saveKey = common.BuildKey(task.ProjectID, task.TaskID)
+
+	// task to json
+	if saveByte, err = json.Marshal(task); err != nil {
+		errObj = errors.ErrInternalError
+		errObj.Log = "[Etcd - SaveTask] json.mashal task error:" + err.Error()
+		return nil, errObj
+	}
+	ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
+	defer cancel()
+	// save to etcd
+	if putResp, err = a.etcd.KV().Put(ctx, saveKey, string(saveByte), clientv3.WithPrevKV()); err != nil {
+		errObj = errors.ErrInternalError
+		errObj.Log = "[Etcd - SaveTask] etcd client kv put error:" + err.Error()
+		return nil, errObj
+	}
+
+	err = a.DispatchEvent(&cronpb.SendEventRequest{
+		Region:    a.cfg.Micro.Region,
+		ProjectId: task.ProjectID,
+		Event: &cronpb.Event{
+			Type:      common.REMOTE_EVENT_PUT,
+			Version:   "v1",
+			Value:     saveByte,
+			EventTime: time.Now().Unix(),
+		},
+	})
+	if err != nil {
+		return nil, errors.NewError(http.StatusInternalServerError, "下发任务更新事件失败").WithLog(err.Error())
+	}
+
+	// oldtask exist
+	if putResp.PrevKv != nil {
+		// if oldtask unmarshal error
+		// don't care because this err doesn't affect result
+		_ = json.Unmarshal(putResp.PrevKv.Value, &oldTask)
+	} else {
+		oldTask = task
+	}
+	return oldTask, nil
+}
+
 // SaveMonitor 保存节点的监控信息
 func (a *app) SaveMonitor(ip string, monitorInfo []byte) error {
 	var (
 		monitorKey     string
 		leaseGrantResp *clientv3.LeaseGrantResponse
-		ctx            context.Context
 		errObj         errors.Error
 		err            error
 	)
@@ -318,7 +424,8 @@ func (a *app) SaveMonitor(ip string, monitorInfo []byte) error {
 	// build worker monitor key
 	monitorKey = common.BuildMonitorKey(ip)
 
-	ctx, _ = utils.GetContextWithTimeout()
+	ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
+	defer cancel()
 	// make lease to notify worker
 	// 创建一个租约 让其稍后过期并自动删除
 	if leaseGrantResp, err = a.etcd.Lease().Grant(ctx, common.MonitorFrequency+1); err != nil {
@@ -327,7 +434,8 @@ func (a *app) SaveMonitor(ip string, monitorInfo []byte) error {
 		return errObj
 	}
 
-	ctx, _ = utils.GetContextWithTimeout()
+	ctx, cancel2 := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
+	defer cancel2()
 	// save to etcd
 	if _, err = a.etcd.KV().Put(ctx, monitorKey, string(monitorInfo), clientv3.WithLease(leaseGrantResp.ID)); err != nil {
 		errObj = errors.ErrInternalError
@@ -345,14 +453,14 @@ func (a *app) GetMonitor(ip string) (*common.MonitorInfo, error) {
 		monitorKey string
 		getResp    *clientv3.GetResponse
 		monitor    *common.MonitorInfo
-		ctx        context.Context
 		errObj     errors.Error
 		err        error
 	)
 	// build worker monitor key
 	monitorKey = common.BuildMonitorKey(ip)
 
-	ctx, _ = utils.GetContextWithTimeout()
+	ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
+	defer cancel()
 
 	if getResp, err = a.etcd.KV().Get(ctx, monitorKey); err != nil {
 		errObj = errors.ErrInternalError

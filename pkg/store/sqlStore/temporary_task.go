@@ -27,7 +27,7 @@ func (s *temporaryTaskStore) AutoMigrate() {
 	if err := s.GetMaster().Table(s.GetTable()).AutoMigrate(&common.TemporaryTask{}).Error; err != nil {
 		panic(fmt.Errorf("unable to auto migrate %s, %w", s.GetTable(), err))
 	}
-	s.provider.Logger().Infof("%s, complete initialization", s.GetTable())
+	s.provider.Logger().Info(fmt.Sprintf("%s, complete initialization", s.GetTable()))
 }
 
 func (s *temporaryTaskStore) Create(data common.TemporaryTask) error {

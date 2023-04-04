@@ -4,11 +4,15 @@ log_level = "debug"
 # 当前的环境:dev、release
 environment = "release"
 # 对外提供的端口
-host = ["0.0.0.0:6306"]
+host = "0.0.0.0:6306"
 # 数据库操作超时时间
 timeout = 5  # 秒为单位
 # 前端文件路径
 view_path = "./view"
+
+[micro]
+region = "center"
+org_id = "gophercron"
 
 # etcd
 [etcd]

@@ -26,7 +26,7 @@ func (s *workflowTaskStore) AutoMigrate() {
 	if err := s.GetMaster().Table(s.GetTable()).AutoMigrate(&common.WorkflowTask{}).Error; err != nil {
 		panic(fmt.Errorf("unable to auto migrate %s, %w", s.GetTable(), err))
 	}
-	s.provider.Logger().Infof("%s, complete initialization", s.GetTable())
+	s.provider.Logger().Info(fmt.Sprintf("%s, complete initialization", s.GetTable()))
 }
 
 func (s *workflowTaskStore) Create(tx *gorm.DB, data *common.WorkflowTask) error {

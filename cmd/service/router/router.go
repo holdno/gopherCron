@@ -107,6 +107,11 @@ func SetupRoute(r *gin.Engine, conf *config.DeployConf) {
 			worker.POST("/reload/config", etcd_func.ReloadConfig)
 		}
 
+		registry := api.Group("/registry")
+		{
+			registry.POST("/remove")
+		}
+
 		project := api.Group("/project")
 		{
 			project.Use(middleware.TokenVerify())
@@ -146,7 +151,6 @@ func SetupRoute(r *gin.Engine, conf *config.DeployConf) {
 	}
 	r.StaticFS("/admin", http.Dir(conf.ViewPath))
 	r.StaticFile("/favicon.ico", conf.ViewPath+"/favicon.ico")
-
 }
 
 var upgrader = websocket.Upgrader{

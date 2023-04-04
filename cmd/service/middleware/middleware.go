@@ -1,11 +1,14 @@
 package middleware
 
 import (
+	"context"
+
 	"github.com/gin-gonic/gin"
 	"github.com/holdno/gopherCron/cmd/service/response"
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/errors"
 	"github.com/holdno/gopherCron/jwt"
+	"github.com/spacegrower/watermelon/infra/middleware"
 )
 
 // CrossDomain 全局添加跨域允许
@@ -45,4 +48,15 @@ func TokenVerify() gin.HandlerFunc {
 			c.Next()
 		}
 	}
+}
+
+type agentIPKey struct{}
+
+func SetAgentIP(ctx context.Context, agentIP string) {
+	middleware.SetInto(ctx, agentIPKey{}, agentIP)
+}
+
+func GetAgentIP(ctx context.Context) (string, bool) {
+	ip, ok := middleware.GetFrom(ctx, agentIPKey{}).(string)
+	return ip, ok
 }
