@@ -156,18 +156,9 @@ func (s *remoteRegistry) register() error {
 		close = cli.CloseSend
 	}
 
-	// print log
-	for _, service := range services {
-		s.log.Info("service registered successful",
-			zap.Any("systems", service.Systems),
-			zap.String("name", service.ServiceName),
-			zap.String("address", fmt.Sprintf("%s:%d", service.Host, service.Port)))
-	}
-
 	go safe.Run(func() {
 		defer func() {
 			close()
-			receive()
 			cancel()
 		}()
 		for {
@@ -180,7 +171,7 @@ func (s *remoteRegistry) register() error {
 					s.log.Warn("recv with error", zap.Error(err))
 					time.Sleep(time.Second)
 					grpcErr, ok := status.FromError(err)
-					if err == io.EOF || (ok && grpcErr.Code() == codes.Unavailable) {
+					if err == io.EOF || !ok || grpcErr.Code() == codes.Unavailable {
 						if err = s.reConnect(); err != nil {
 							s.log.Error("failed to reconnect registry", zap.Error(err))
 							continue
@@ -194,6 +185,13 @@ func (s *remoteRegistry) register() error {
 
 				switch resp.Type {
 				case "heartbeat":
+				case "confirm":
+					for _, service := range services {
+						s.log.Info("service registered successful",
+							zap.Any("systems", service.Systems),
+							zap.String("name", service.ServiceName),
+							zap.String("address", fmt.Sprintf("%s:%d", service.Host, service.Port)))
+					}
 				default:
 					s.eventHandler(resp)
 				}
