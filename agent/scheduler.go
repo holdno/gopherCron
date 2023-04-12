@@ -416,6 +416,7 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) {
 							})
 							return
 						}
+						time.Sleep(time.Duration(rand.Intn(1000)) * time.Millisecond)
 						continue
 					}
 

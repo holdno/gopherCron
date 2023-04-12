@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/holdno/gopherCron/app"
 	"github.com/holdno/gopherCron/cmd/service/controller"
 	"github.com/holdno/gopherCron/cmd/service/controller/etcd_func"
 	"github.com/holdno/gopherCron/cmd/service/controller/log_func"
@@ -12,7 +13,9 @@ import (
 	"github.com/holdno/gopherCron/cmd/service/controller/user_func"
 	"github.com/holdno/gopherCron/cmd/service/middleware"
 	"github.com/holdno/gopherCron/config"
+	"github.com/holdno/gopherCron/pkg/metrics"
 	"github.com/holdno/gopherCron/utils"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -20,10 +23,21 @@ import (
 	"github.com/holdno/firetower/service/tower"
 )
 
-func SetupRoute(r *gin.Engine, conf *config.DeployConf) {
+func prometheusHandler() gin.HandlerFunc {
+	h := promhttp.Handler()
+
+	return func(c *gin.Context) {
+		h.ServeHTTP(c.Writer, c.Request)
+	}
+}
+
+func SetupRoute(srv app.App, r *gin.Engine, conf *config.DeployConf) {
 	r.Use(gin.Recovery())
 	r.Use(middleware.CrossDomain())
 	r.Use(middleware.BuildResponse())
+	r.Use(metrics.Middleware("gophercron", "center", srv.GetIP()))
+
+	r.GET("/metrics", prometheusHandler())
 
 	api := r.Group("/api/v1")
 	{

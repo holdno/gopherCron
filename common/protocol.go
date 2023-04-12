@@ -11,13 +11,13 @@ import (
 )
 
 const (
-	REMOTE_EVENT_PUT                   = "remote_event_put"
-	REMOTE_EVENT_DELETE                = "remote_event_delete"
-	REMOTE_EVENT_UPDATE                = "remote_event_update"
-	REMOTE_EVENT_TMP_SCHEDULE          = "remote_event_tmp_schedule"
-	REMOTE_EVENT_WORKFLOW_SCHEDULE     = "remote_event_workflow_schedule"
-	REMOTE_EVENT_TASK_STOP             = "remote_event_task_stop"
-	REMOTE_EVENT_CHECK_TASK_ISRUNNING  = "remote_event_check_task_isrunning"
+	REMOTE_EVENT_PUT                  = "remote_event_put"
+	REMOTE_EVENT_DELETE               = "remote_event_delete"
+	REMOTE_EVENT_UPDATE               = "remote_event_update"
+	REMOTE_EVENT_TMP_SCHEDULE         = "remote_event_tmp_schedule"
+	REMOTE_EVENT_WORKFLOW_SCHEDULE    = "remote_event_workflow_schedule"
+	REMOTE_EVENT_TASK_STOP            = "remote_event_task_stop"
+	REMOTE_EVENT_CHECK_TASK_ISRUNNING = "remote_event_check_task_isrunning"
 )
 
 // TaskInfo 任务详情
@@ -169,13 +169,13 @@ func BuildTaskStatusKey(projectID int64, taskID string) string {
 	return fmt.Sprintf("%s/%d/%s/%s", ETCD_PREFIX, projectID, taskID, STATUS)
 }
 
-func BuildTaskRunningKeyPrefix(projectID int64, taskID string) string {
-	return fmt.Sprintf("%s/status/running/%d/%s", ETCD_PREFIX, projectID, taskID)
-}
+// func BuildTaskRunningKeyPrefix(projectID int64, taskID string) string {
+// 	return fmt.Sprintf("%s/status/running/%d/%s", ETCD_PREFIX, projectID, taskID)
+// }
 
-func BuildTaskRunningKey(agentIP string, projectID int64, taskID string) string {
-	return fmt.Sprintf("%s/%s", BuildTaskRunningKeyPrefix(projectID, taskID), agentIP)
-}
+// func BuildTaskRunningKey(agentIP string, projectID int64, taskID string) string {
+// 	return fmt.Sprintf("%s/%s", BuildTaskRunningKeyPrefix(projectID, taskID), agentIP)
+// }
 
 func BuildWorkflowTaskStatusKey(workflowID, projectID int64, taskID string) string {
 	return fmt.Sprintf("%s%d/%s", BuildWorkflowTaskStatusKeyPrefix(workflowID), projectID, taskID)

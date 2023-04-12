@@ -16,6 +16,7 @@ import (
 	"github.com/holdno/gopherCron/pkg/cronpb"
 	"github.com/holdno/gopherCron/pkg/etcd"
 	"github.com/holdno/gopherCron/pkg/infra"
+	"github.com/holdno/gopherCron/pkg/metrics"
 	"github.com/holdno/gopherCron/pkg/panicgroup"
 	"github.com/holdno/gopherCron/pkg/store/sqlStore"
 	"github.com/holdno/gopherCron/pkg/warning"
@@ -24,8 +25,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/gin-gonic/gin"
-	towerconfig "github.com/holdno/firetower/config"
-	"github.com/holdno/firetower/service/tower"
 	"github.com/holdno/gocommons/selection"
 	"github.com/holdno/keypool"
 	"github.com/jinzhu/gorm"
@@ -154,6 +153,7 @@ type app struct {
 	closeCh    chan struct{}
 	isClose    bool
 	localip    string
+	metrics    *metrics.Metrics
 
 	workflowRunner *workflowRunner
 	messageChan    chan PublishData
@@ -166,8 +166,7 @@ type app struct {
 	protocol.CommonInterface
 	warning.Warner
 
-	firetower tower.Manager
-	pusher    *SystemPusher
+	pusher *SystemPusher
 
 	streamManager *streamManager
 }
@@ -206,37 +205,58 @@ func WithWarning(w warning.Warner) AppOptions {
 	}
 }
 
-func WithFiretower() AppOptions {
-	return func(a *app) {
-		var err error
-		a.firetower, err = tower.Setup(towerconfig.FireTowerConfig{
-			ChanLens:    1000,
-			Heartbeat:   30,
-			ServiceMode: towerconfig.SingleMode,
-			Bucket: towerconfig.BucketConfig{
-				Num:              4,
-				CentralChanCount: 100000,
-				BuffChanCount:    1000,
-				ConsumerNum:      1,
-			},
-		})
-		if err != nil {
-			panic(err)
-		}
+// func WithFiretower() AppOptions {
+// 	return func(a *app) {
+// 		if !a.cfg.Firetower.Enable {
+// 			return
+// 		}
+// 		mode := towerconfig.SingleMode
+// 		if a.cfg.Firetower.Redis.Addr != "" || a.cfg.Firetower.Nats.Addr != "" {
+// 			mode = towerconfig.ClusterMode
+// 		}
+// 		var err error
+// 		a.firetower, err = tower.Setup(towerconfig.FireTowerConfig{
+// 			ChanLens:    1000,
+// 			Heartbeat:   30,
+// 			ServiceMode: mode,
+// 			Bucket: towerconfig.BucketConfig{
+// 				Num:              4,
+// 				CentralChanCount: 1000,
+// 				BuffChanCount:    1000,
+// 				ConsumerNum:      1,
+// 			},
+// 			Cluster: towerconfig.Cluster{
+// 				RedisOption: towerconfig.Redis{
+// 					KeyPrefix: a.cfg.Firetower.Redis.KeyPrefix,
+// 					Addr:      a.cfg.Firetower.Redis.Addr,
+// 					Password:  a.cfg.Firetower.Redis.Password,
+// 					DB:        a.cfg.Firetower.Redis.DB,
+// 				},
+// 				NatsOption: towerconfig.Nats{
+// 					Addr:       a.cfg.Firetower.Nats.Addr,
+// 					ServerName: a.cfg.Firetower.Nats.ServerName,
+// 					UserName:   a.cfg.Firetower.Nats.UserName,
+// 					Password:   a.cfg.Firetower.Nats.Password,
+// 				},
+// 			},
+// 		})
+// 		if err != nil {
+// 			panic(err)
+// 		}
 
-		a.pusher = &SystemPusher{
-			clientID: "system",
-		}
+// 		a.pusher = &SystemPusher{
+// 			clientID: "system",
+// 		}
 
-		a.messageChan = make(chan PublishData, 1000)
-		a.Go(func() {
-			for {
-				res := <-a.messageChan
-				a.publishEventToWebClient(res)
-			}
-		})
-	}
-}
+// 		a.messageChan = make(chan PublishData, 1000)
+// 		a.Go(func() {
+// 			for {
+// 				res := <-a.messageChan
+// 				a.publishEventToWebClient(res)
+// 			}
+// 		})
+// 	}
+// }
 
 var (
 	POOL_ERROR_FACTORY_NOT_FOUND = fmt.Errorf("factory not found")
@@ -252,13 +272,28 @@ func NewApp(configPath string, opts ...AppOptions) App {
 			MaxAge:  24,
 			MaxSize: 1000,
 		},
-		File: conf.LogLevel, // print to sedout if config.File undefined
+		File: conf.LogPath, // print to sedout if config.File undefined
 	}))
 	app := new(app)
 	app.cfg = conf
 	if conf.Mysql != nil && conf.Mysql.Service != "" {
 		app.store = sqlStore.MustSetup(conf.Mysql, wlog.With(zap.String("component", "sqlprovider")), true)
 	}
+
+	if app.localip, err = utils.GetLocalIP(); err != nil {
+		wlog.Error("failed to get local ip")
+	}
+
+	if app.cfg.Publish.Enable {
+		wlog.Info("enable publish service", zap.String("endpoint", app.cfg.Publish.Endpoint))
+		app.pusher = &SystemPusher{
+			clientID: app.localip,
+			Endpoint: app.cfg.Publish.Endpoint,
+			client:   &http.Client{Timeout: time.Duration(app.cfg.Deploy.Timeout) * time.Second},
+		}
+	}
+
+	app.metrics = metrics.NewMetrics("center", app.GetIP())
 	app.connPool, err = keypool.NewChannelPool(&keypool.Config[*grpc.ClientConn]{
 		MaxCap: 10000,
 		//最大空闲连接
@@ -309,6 +344,7 @@ func NewApp(configPath string, opts ...AppOptions) App {
 			case "INVALID_STATE":
 				return fmt.Errorf("error state %s", cc.GetState().String())
 			default:
+				wlog.Debug("ping conn status", zap.String("status", state), zap.String("component", "connPool"))
 				return nil
 			}
 		},
@@ -380,10 +416,6 @@ func NewApp(configPath string, opts ...AppOptions) App {
 
 	if app.Warner == nil {
 		app.Warner = warning.NewDefaultWarner(wlog.With(zap.String("component", "warner")))
-	}
-
-	if app.localip, err = utils.GetLocalIP(); err != nil {
-		wlog.Error("failed to get local ip")
 	}
 
 	jwt.InitJWT(conf.JWT)

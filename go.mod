@@ -9,7 +9,7 @@ require (
 	github.com/go-sql-driver/mysql v1.4.1
 	github.com/gorhill/cronexpr v0.0.0-20180427100037-88b0669f7d75
 	github.com/gorilla/websocket v1.5.0
-	github.com/holdno/firetower v1.0.0-alpha.2
+	github.com/holdno/firetower v1.0.0-alpha.3
 	github.com/holdno/gocommons v1.2.6
 	github.com/holdno/rego v1.0.6
 	github.com/holdno/snowFlakeByGo v1.0.0
@@ -27,7 +27,7 @@ require (
 
 require (
 	github.com/holdno/keypool v0.1.3
-	github.com/spacegrower/watermelon v0.1.1-alpha.8
+	github.com/spacegrower/watermelon v0.1.1-alpha.13
 	go.etcd.io/etcd/api/v3 v3.5.5
 	go.etcd.io/etcd/client/v3 v3.5.5
 	google.golang.org/grpc v1.53.0
@@ -35,7 +35,9 @@ require (
 )
 
 require (
+	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
+	github.com/cloudevents/sdk-go/v2 v2.13.0 // indirect
 	github.com/coreos/go-semver v0.3.0 // indirect
 	github.com/coreos/go-systemd/v22 v22.3.2 // indirect
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
@@ -43,11 +45,13 @@ require (
 	github.com/go-redis/redis/v9 v9.0.0-beta.2 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/protobuf v1.5.2 // indirect
+	github.com/google/uuid v1.3.0 // indirect
 	github.com/inconshreveable/mousetrap v1.0.0 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/compress v1.15.9 // indirect
 	github.com/konsorten/go-windows-terminal-sequences v1.0.3 // indirect
+	github.com/matttproud/golang_protobuf_extensions v1.0.1 // indirect
 	github.com/minio/highwayhash v1.0.2 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
@@ -57,6 +61,10 @@ require (
 	github.com/nats-io/nuid v1.0.1 // indirect
 	github.com/oklog/ulid/v2 v2.1.0 // indirect
 	github.com/pelletier/go-toml v1.9.4 // indirect
+	github.com/prometheus/client_golang v1.14.0 // indirect
+	github.com/prometheus/client_model v0.3.0 // indirect
+	github.com/prometheus/common v0.37.0 // indirect
+	github.com/prometheus/procfs v0.8.0 // indirect
 	github.com/soheilhy/cmux v0.1.5 // indirect
 	github.com/vmihailenco/msgpack/v5 v5.3.5 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect

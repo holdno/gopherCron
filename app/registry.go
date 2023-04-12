@@ -9,6 +9,8 @@ import (
 	"github.com/holdno/gocommons/selection"
 	"github.com/holdno/gopherCron/pkg/cronpb"
 	"github.com/holdno/gopherCron/pkg/infra"
+	"github.com/spacegrower/watermelon/infra/wlog"
+	"go.uber.org/zap"
 )
 
 func (a *app) StreamManager() *streamManager {
@@ -130,6 +132,8 @@ func (a *app) CalcAgentDataConsistency() error {
 	c := time.NewTicker(time.Minute)
 
 	calc := func() error {
+		mtimer := a.metrics.CustomHistogramSet("calc_agent_data_consistency")
+		defer mtimer.ObserveDuration()
 		list, err := a.store.Project().GetProject(selection.NewSelector())
 		if err != nil {
 			return err
@@ -159,6 +163,7 @@ func (a *app) CalcAgentDataConsistency() error {
 						BeforAddrs: []string{agent.addr},
 					}
 				} else if resp.Hash != compareData.Hash {
+					wlog.Debug("different task hash", zap.String("current_agent", agent.addr), zap.String("before", compareData.Hash), zap.String("after", resp.Hash))
 					if resp.LatestUpdateTime <= compareData.LatestTime {
 						needToRemove = append(needToRemove, agent.addr)
 						compareData.BeforAddrs = append(compareData.BeforAddrs, agent.addr)
@@ -173,23 +178,23 @@ func (a *app) CalcAgentDataConsistency() error {
 			}
 		}
 
-		centerSrvs, err := a.GetCenterSrvList()
-		if err != nil {
-			return err
-		}
+		// centerSrvs, err := a.GetCenterSrvList()
+		// if err != nil {
+		// 	return err
+		// }
 
-		for _, center := range centerSrvs {
-			for _, addr := range needToRemove {
-				_, err := center.RemoveStream(context.TODO(), &cronpb.RemoveStreamRequest{
-					Client: addr,
-				})
-				if err != nil {
-					center.Close()
-					return err
-				}
-			}
-			center.Close()
-		}
+		// for _, center := range centerSrvs {
+		// 	for _, addr := range needToRemove {
+		// 		_, err := center.RemoveStream(context.TODO(), &cronpb.RemoveStreamRequest{
+		// 			Client: addr,
+		// 		})
+		// 		if err != nil {
+		// 			center.Close()
+		// 			return err
+		// 		}
+		// 	}
+		// 	center.Close()
+		// }
 		return nil
 	}
 
@@ -197,6 +202,7 @@ func (a *app) CalcAgentDataConsistency() error {
 		select {
 		case <-c.C:
 			if err := calc(); err != nil {
+				a.metrics.CustomErrorInc("calc_agent_data_consistency", a.GetIP(), err.Error())
 				return err
 			}
 		case <-a.closeCh:

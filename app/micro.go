@@ -63,6 +63,8 @@ func (a *app) RemoveClientRegister(client string) error {
 }
 
 func (a *app) DispatchAgentJob(region string, projectID int64, withStream ...*Stream) error {
+	mtimer := a.metrics.CustomHistogramSet("dispatch_agent_jobs")
+	defer mtimer.ObserveDuration()
 	preKey := common.BuildKey(projectID, "")
 	var (
 		err     error
@@ -104,6 +106,9 @@ func (a *app) DispatchAgentJob(region string, projectID int64, withStream ...*St
 		// taskEvent = common.BuildTaskEvent(common.TASK_EVENT_SAVE, task)
 		// 将所有任务加入调度队列
 		// a.scheduler.PushEvent(taskEvent)
+		if strings.Contains(string(kvPair.Key), "t_flow_ack") {
+			continue
+		}
 		for _, v := range withStream {
 			if err = v.stream.Send(&cronpb.Event{
 				Version:   "v1",
@@ -132,11 +137,14 @@ func (a *AgentClient) Close() {
 }
 
 func (a *app) getAgentAddrs(region string, projectID int64) ([]etcd.FindedResult[infra.NodeMetaRemote], error) {
+	mtimer := a.metrics.CustomHistogramSet("get_agents_list")
+	defer mtimer.ObserveDuration()
 	finder := etcd.NewFinder[infra.NodeMetaRemote](infra.ResolveEtcdClient())
 	ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
 	defer cancel()
 	addrs, _, err := finder.FindAll(ctx, filepath.ToSlash(filepath.Join(etcdregister.GetETCDPrefixKey(), "gophercron", strconv.FormatInt(projectID, 10), cronpb.Agent_ServiceDesc.ServiceName))+"/")
 	if err != nil {
+		a.metrics.CustomErrorInc("find_agents_error", fmt.Sprintf("%s_%d", region, projectID), err.Error())
 		return nil, err
 	}
 	return addrs, nil
@@ -145,6 +153,7 @@ func (a *app) getAgentAddrs(region string, projectID int64) ([]etcd.FindedResult
 func (a *app) FindAgents(region string, projectID int64) ([]*AgentClient, error) {
 	addrs, err := a.getAgentAddrs(region, projectID)
 	if err != nil {
+
 		return nil, err
 	}
 	var list []*AgentClient
@@ -196,11 +205,15 @@ func (c *CenterClient) Close() {
 }
 
 func (a *app) GetCenterSrvList() ([]*CenterClient, error) {
+	mtimer := a.metrics.CustomHistogramSet("get_center_srv_list")
+	defer mtimer.ObserveDuration()
 	finder := etcd.MustSetupEtcdFinder()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
 	defer cancel()
-	addrs, _, err := finder.FindAll(ctx, filepath.ToSlash(filepath.Join(etcdregister.GetETCDPrefixKey(), "gophercron", "0", cronpb.Center_ServiceDesc.ServiceName))+"/")
+	findKey := filepath.ToSlash(filepath.Join(etcdregister.GetETCDPrefixKey(), "gophercron", "0", cronpb.Center_ServiceDesc.ServiceName)) + "/"
+	addrs, _, err := finder.FindAll(ctx, findKey)
 	if err != nil {
+		a.metrics.CustomErrorInc("find_centers_error", findKey, err.Error())
 		return nil, err
 	}
 
@@ -243,6 +256,8 @@ func (a *app) GetCenterSrvList() ([]*CenterClient, error) {
 }
 
 func (a *app) DispatchEvent(event *cronpb.SendEventRequest) error {
+	mtimer := a.metrics.CustomHistogramSet("dispatch_event")
+	defer mtimer.ObserveDuration()
 	centers, err := a.GetCenterSrvList()
 	if err != nil {
 		return err
@@ -253,6 +268,7 @@ func (a *app) DispatchEvent(event *cronpb.SendEventRequest) error {
 		defer cancel()
 		if _, err := v.SendEvent(ctx, event); err != nil {
 			v.Close()
+			a.metrics.CustomErrorInc("send_event_error", v.addr, err.Error())
 			return fmt.Errorf("failed to send event to %s, error: %s", v.addr, err.Error())
 		}
 		v.Close()

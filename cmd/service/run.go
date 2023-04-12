@@ -52,7 +52,7 @@ func apiServer(srv app.App, conf *config.ServiceConfig) {
 	})
 
 	//URI路由设置
-	router.SetupRoute(engine, conf.Deploy)
+	router.SetupRoute(srv, engine, conf.Deploy)
 	infra.RegisterETCDRegisterPrefixKey(conf.Etcd.Prefix + "/registry")
 	newServer := infra.NewCenterServer()
 	server := newServer(func(grpcServer *grpc.Server) {
@@ -61,7 +61,7 @@ func apiServer(srv app.App, conf *config.ServiceConfig) {
 		})
 	}, newServer.WithRegion(conf.Micro.Region),
 		newServer.WithOrg(conf.Micro.OrgID),
-		newServer.WithAddress(conf.Deploy.Host),
+		newServer.WithAddress([]infra.Address{{ListenAddress: conf.Deploy.Host}}),
 		newServer.WithHttpServer(&http.Server{
 			Handler:     engine,
 			ReadTimeout: time.Duration(5) * time.Second,
@@ -82,7 +82,7 @@ func apiServer(srv app.App, conf *config.ServiceConfig) {
 		cronpb.CenterServer.TryLock)
 
 	go func() {
-		fmt.Printf("%s, start grpc server, listen on %s", utils.GetCurrentTimeText(), conf.Deploy.Host)
+		fmt.Printf("%s, start grpc server, listen on %s\n", utils.GetCurrentTimeText(), conf.Deploy.Host)
 		server.RunUntil(syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL)
 	}()
 }
@@ -105,13 +105,14 @@ func resolveServerAddress(addr []string) string {
 func Run(opts *SetupOptions) error {
 	// 加载配置
 	var o []app.AppOptions
-	if opts.Firetower {
-		o = append(o, app.WithFiretower())
-	}
+	// if opts.Firetower {
+	// 	o = append(o, app.WithFiretower())
+	// }
 	srv := app.NewApp(opts.ConfigPath, o...)
 
 	defer func() {
 		if r := recover(); r != nil {
+			fmt.Println(r)
 			srv.Warning(warning.WarningData{
 				Data:    fmt.Sprintf("gophercron service panic: %v", r),
 				Type:    warning.WarningTypeSystem,
@@ -147,6 +148,8 @@ func waitingShutdown(srv app.App) {
 			fmt.Println(utils.GetCurrentTimeText(), "http server graceful shutdown successfully.")
 		}
 	}
+
+	fmt.Println("???")
 }
 
 // 关闭http server

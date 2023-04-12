@@ -13,6 +13,8 @@ import (
 	"github.com/spacegrower/watermelon/infra/resolver"
 )
 
+type Address = infra.Address
+
 // RegisterETCDRegisterPrefixKey a function to change default register(etcd) prefix key
 func RegisterETCDRegisterPrefixKey(prefix string) {
 	infra.RegisterETCDRegisterPrefixKey(prefix)
@@ -61,7 +63,7 @@ func (s *Server[T]) WithGrpcServerOptions(opts ...grpc.ServerOption) infra.Optio
 	return infra.WithGrpcServerOptions[T](opts...)
 }
 
-func (*Server[T]) WithAddress(addr string) infra.Option[T] {
+func (*Server[T]) WithAddress(addr []infra.Address) infra.Option[T] {
 	return infra.WithAddress[T](addr)
 }
 
@@ -156,7 +158,7 @@ func (s *CenterServer[T]) WithGrpcServerOptions(opts ...grpc.ServerOption) infra
 	return infra.WithGrpcServerOptions[T](opts...)
 }
 
-func (*CenterServer[T]) WithAddress(addr string) infra.Option[T] {
+func (*CenterServer[T]) WithAddress(addr []infra.Address) infra.Option[T] {
 	return infra.WithAddress[T](addr)
 }
 

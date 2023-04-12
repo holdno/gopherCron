@@ -26,11 +26,17 @@ type ServiceConfig struct {
 	LogLevel string `toml:"log_level"`
 	LogPath  string `toml:"log_path"`
 
-	Deploy *DeployConf `toml:"deploy"` // host配置
-	Etcd   *EtcdConf   `toml:"etcd"`
-	Micro  Micro       `toml:"micro"`
-	JWT    *JWTConf    `toml:"jwt"`
-	Mysql  *MysqlConf  `toml:"mysql"`
+	Publish Publish     `toml:"publish"`
+	Deploy  *DeployConf `toml:"deploy"` // host配置
+	Etcd    *EtcdConf   `toml:"etcd"`
+	Micro   Micro       `toml:"micro"`
+	JWT     *JWTConf    `toml:"jwt"`
+	Mysql   *MysqlConf  `toml:"mysql"`
+}
+
+type Publish struct {
+	Enable   bool   `toml:"enable"`
+	Endpoint string `toml:"endpoint"`
 }
 
 type Micro struct {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -17,6 +18,7 @@ import (
 	"github.com/holdno/gopherCron/pkg/warning"
 	"github.com/holdno/gopherCron/protocol"
 	"github.com/holdno/gopherCron/utils"
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/gorhill/cronexpr"
 	"github.com/holdno/gocommons/selection"
@@ -561,7 +563,11 @@ func (a *app) DeleteWorkflow(userID int64, workflowID int64) error {
 			return err
 		}
 		if running {
-			if err = plan.Finished(ErrWorkflowKilled); err != nil {
+			if err = plan.Finished(ErrWorkflowDeleted); err != nil {
+				a.metrics.CustomErrorInc("workflow_plan_finished", strconv.FormatInt(plan.Workflow.ID, 10), ErrWorkflowDeleted.Error())
+				wlog.Error("failed to shutdown workflow running plan", zap.Int64("workflow_id", plan.Workflow.ID),
+					zap.Error(ErrWorkflowDeleted),
+					zap.String("finished_with_error", ErrWorkflowDeleted.Error()))
 				return err
 			}
 		}
@@ -589,6 +595,10 @@ func (a *app) KillWorkflow(workflowID int64) error {
 	}
 
 	if err := plan.Finished(ErrWorkflowKilled); err != nil {
+		a.metrics.CustomErrorInc("workflow_plan_finished", strconv.FormatInt(plan.Workflow.ID, 10), ErrWorkflowKilled.Error())
+		wlog.Error("failed to shutdown workflow running plan", zap.Int64("workflow_id", plan.Workflow.ID),
+			zap.Error(ErrWorkflowKilled),
+			zap.String("finished_with_error", ErrWorkflowKilled.Error()))
 		return err
 	}
 	return nil
@@ -687,6 +697,8 @@ type WorkflowPlan struct {
 	LatestScheduleTime time.Time
 
 	locker sync.Mutex
+
+	metrics *prometheus.Timer
 }
 
 func (p *WorkflowPlan) Finished(withError error) error {
@@ -793,6 +805,10 @@ func (p *WorkflowPlan) Finished(withError error) error {
 		return err
 	}
 
+	if p.metrics != nil {
+		p.metrics.ObserveDuration()
+	}
+
 	return nil
 }
 
@@ -804,11 +820,17 @@ type taskFlowItem struct {
 func (a *workflowRunner) scheduleWorkflowPlan(plan *WorkflowPlan) error {
 	needToScheduleTasks, finished, err := plan.CanSchedule(a)
 	if err != nil && err != ErrWorkflowFailed {
+		a.app.metrics.CustomErrorInc("workflow_can_schedule", strconv.FormatInt(plan.Workflow.ID, 10), err.Error())
 		return err
 	}
 
 	if finished {
-		plan.Finished(err)
+		if finishedErr := plan.Finished(err); err != nil {
+			a.app.metrics.CustomErrorInc("workflow_plan_finished", strconv.FormatInt(plan.Workflow.ID, 10), finishedErr.Error())
+			wlog.Error("failed to finished workflow plan", zap.Int64("workflow_id", plan.Workflow.ID),
+				zap.Error(finishedErr),
+				zap.String("finished_with_error", err.Error()))
+		}
 		return nil
 	}
 
@@ -882,12 +904,14 @@ func (s *WorkflowPlan) RefreshPlanTasks() error {
 
 	s.TaskFlow = depsMap
 	s.Tasks = tasksMap
+	s.metrics = nil
 	return nil
 }
 
 var (
 	ErrWorkflowFailed    = fmt.Errorf("workflow任务失败")
 	ErrWorkflowKilled    = fmt.Errorf("人工停止workflow")
+	ErrWorkflowDeleted   = fmt.Errorf("人工删除workflow")
 	ErrWorkflowInProcess = fmt.Errorf("workflow in process")
 )
 
@@ -897,6 +921,9 @@ func (s *WorkflowPlan) CanSchedule(runner *workflowRunner) ([]WorkflowTaskInfo, 
 		return nil, false, ErrWorkflowInProcess
 	}
 	defer s.locker.Unlock()
+
+	mtimer := s.runner.app.metrics.CustomHistogramSet("workflow_can_schedule")
+	defer mtimer.ObserveDuration()
 
 	var (
 		readys        []WorkflowTaskInfo
@@ -960,6 +987,7 @@ func (s *WorkflowPlan) CanSchedule(runner *workflowRunner) ([]WorkflowTaskInfo, 
 			locker := s.runner.app.GetTaskLocker(&common.TaskInfo{TaskID: task.TaskID, ProjectID: task.ProjectID})
 			exist, err := locker.LockExist()
 			if err != nil {
+				s.runner.app.metrics.CustomErrorInc("workflow_check_task_locker_exist", fmt.Sprintf("%d_%s", task.ProjectID, task.TaskID), err.Error())
 				wlog.Error("failed to get lock status", zap.String("task_id", task.TaskID), zap.Int64("project_id", task.ProjectID), zap.String("method", "locker.LockExist"))
 				continue
 			}
@@ -975,6 +1003,7 @@ func (s *WorkflowPlan) CanSchedule(runner *workflowRunner) ([]WorkflowTaskInfo, 
 				},
 			})
 			if err != nil {
+				s.runner.app.metrics.CustomErrorInc("workflow_kill_fallback", fmt.Sprintf("%d_%s", task.ProjectID, task.TaskID), err.Error())
 				wlog.Error("workflow kill fallback failed", zap.String("task_id", task.TaskID), zap.Int64("project_id", task.ProjectID), zap.String("method", "killWorkflowTasks"))
 				continue
 			}
@@ -1323,6 +1352,7 @@ func (p *WorkflowPlan) SetRunning() error {
 		return err
 	}
 	p.planState = newState
+	p.metrics = p.runner.app.metrics.CustomHistogramSet("workflow_plan_duration", strconv.FormatInt(p.Workflow.ID, 10), p.Workflow.Title)
 	p.runner.app.PublishMessage(messageWorkflowStatusChanged(p.Workflow.ID, common.TASK_STATUS_RUNNING_V2))
 	return nil
 }

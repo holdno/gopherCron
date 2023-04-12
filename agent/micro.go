@@ -11,9 +11,11 @@ import (
 	"github.com/holdno/gopherCron/pkg/cronpb"
 	"github.com/holdno/gopherCron/pkg/infra"
 	"github.com/holdno/gopherCron/pkg/infra/register"
+	"go.uber.org/zap"
 
 	winfra "github.com/spacegrower/watermelon/infra"
 	wregister "github.com/spacegrower/watermelon/infra/register"
+	"github.com/spacegrower/watermelon/infra/wlog"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -37,7 +39,7 @@ func (a *client) SetupMicroService() *winfra.Srv[infra.NodeMetaRemote] {
 		newsrv.WithRegion(cfg.Micro.Region),
 		newsrv.WithSystems(cfg.Projects),
 		newsrv.WithWeight(cfg.Micro.Weigth),
-		newsrv.WithAddress(cfg.Address),
+		newsrv.WithAddress([]infra.Address{{ListenAddress: cfg.Address}}),
 		newsrv.WithTags(map[string]string{
 			"agent-version": version,
 		}),
@@ -56,7 +58,10 @@ func (a *client) MustSetupRemoteRegister() wregister.ServiceRegister[infra.NodeM
 	}
 
 	r, err := register.NewRemoteRegister(a.localip, func() (register.CenterClient, error) {
-		cc, err := grpc.DialContext(context.Background(), a.cfg.Micro.Endpoint, grpc.WithTransportCredentials(insecure.NewCredentials()),
+		wlog.Debug("start build new center client")
+		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(a.cfg.Timeout)*time.Second)
+		defer cancel()
+		cc, err := grpc.DialContext(ctx, a.cfg.Micro.Endpoint, grpc.WithTransportCredentials(insecure.NewCredentials()),
 			grpc.WithKeepaliveParams(keepalive.ClientParameters{
 				Time:    time.Second * 10,
 				Timeout: time.Second * 3,
@@ -68,12 +73,14 @@ func (a *client) MustSetupRemoteRegister() wregister.ServiceRegister[infra.NodeM
 				return streamer(genMetadata(ctx), desc, cc, method, opts...)
 			}))
 		if err != nil {
-			panic(err)
+			wlog.Error("failed to dial center service", zap.String("endpoint", a.cfg.Micro.Endpoint), zap.Error(err))
+			return register.CenterClient{}, err
 		}
 		a.centerSrv = register.CenterClient{
 			CenterClient: cronpb.NewCenterClient(cc),
 			Cc:           cc,
 		}
+
 		return a.centerSrv, nil
 	}, func(e *cronpb.Event) {
 		a.handlerEventFromCenter(e)

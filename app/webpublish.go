@@ -1,10 +1,15 @@
 package app
 
 import (
+	"bytes"
 	"encoding/json"
+	"io/ioutil"
+	"net/http"
 
+	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/holdno/firetower/protocol"
-	"github.com/holdno/firetower/service/tower"
+	"github.com/spacegrower/watermelon/infra/wlog"
+	"go.uber.org/zap"
 )
 
 type WebClientEvent struct {
@@ -55,6 +60,8 @@ func messageWorkflowTaskStatusChanged(workflowID, projectID int64, taskID, statu
 
 type SystemPusher struct {
 	clientID string
+	Endpoint string
+	client   *http.Client
 }
 
 func (s *SystemPusher) UserID() string {
@@ -64,15 +71,46 @@ func (s *SystemPusher) ClientID() string {
 	return s.clientID
 }
 
+func (s *SystemPusher) Publish(t *TopicMessage) error {
+	msg := cloudevents.NewEvent()
+	msg.SetSubject(t.Topic)
+	msg.SetSource("gophercron_" + s.clientID)
+	msg.SetData(cloudevents.ApplicationJSON, t.Data)
+
+	raw, _ := json.Marshal(msg)
+	resp, err := s.client.Post(s.Endpoint, "application/json", bytes.NewReader(raw))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		response, _ := ioutil.ReadAll(resp.Body)
+		wlog.Error("failed to publish message to web client", zap.String("response", string(response)))
+	}
+	return nil
+}
+
+type TopicMessage struct {
+	Topic string          `json:"topic"`
+	Data  json.RawMessage `json:"data"` // 可能是个json
+	Type  string          `json:"type"`
+}
+
 func (a *app) publishEventToWebClient(data PublishData) {
-	f := tower.NewFire(protocol.SourceSystem, a.pusher)
+	if a.pusher == nil {
+		return
+	}
+	f := &TopicMessage{}
 	msgBody := map[string]interface{}{
 		"topic": data.Topic,
 		"data":  data.Data,
 	}
 	body, _ := json.Marshal(msgBody)
-	f.Message.Topic = data.Topic
-	f.Message.Type = protocol.PublishKey
-	f.Message.Data = body
-	a.firetower.Publish(f)
+
+	f.Topic = data.Topic
+	f.Type = protocol.PublishKey
+	f.Data = body
+
+	a.pusher.Publish(f)
 }

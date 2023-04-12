@@ -164,6 +164,7 @@ func (s *remoteRegistry) register() error {
 		for {
 			select {
 			case <-s.ctx.Done():
+				s.log.Warn("register receiver is down, context done")
 				return
 			default:
 				resp, err := receive()
@@ -172,6 +173,7 @@ func (s *remoteRegistry) register() error {
 					time.Sleep(time.Second)
 					grpcErr, ok := status.FromError(err)
 					if err == io.EOF || !ok || grpcErr.Code() == codes.Unavailable {
+						s.log.Warn("retry to reconnect", zap.String("status", grpcErr.Code().String()))
 						if err = s.reConnect(); err != nil {
 							s.log.Error("failed to reconnect registry", zap.Error(err))
 							continue
@@ -216,7 +218,7 @@ func (s *remoteRegistry) reRegister() {
 	for {
 		select {
 		case <-s.ctx.Done():
-
+			wlog.Warn("register is down, context done")
 		default:
 			if err := s.Register(); err != nil {
 				time.Sleep(time.Second)

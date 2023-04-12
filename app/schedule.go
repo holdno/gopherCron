@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -675,7 +674,11 @@ func (a *app) TemporarySchedulerTask(task *common.TaskInfo) error {
 	})
 	if err != nil {
 		grpcErr, _ := status.FromError(err)
-		if grpcErr.Code() != codes.AlreadyExists {
+		switch grpcErr.Code() {
+		case codes.AlreadyExists:
+			return errors.NewError(http.StatusInternalServerError,
+				"调度任务失败, 任务运行中...").WithLog(err.Error())
+		default:
 			return errors.NewError(http.StatusInternalServerError,
 				fmt.Sprintf("调度任务失败, project_id: %d, task_id: %s", task.ProjectID, task.TaskID)).WithLog(err.Error())
 		}
@@ -711,7 +714,7 @@ func (a *app) SetTaskRunning(agentIP string, execInfo *common.TaskExecutingInfo)
 			if err != nil {
 				return err
 			}
-			s.Put(common.BuildTaskRunningKey(agentIP, execInfo.Task.ProjectID, execInfo.Task.TaskID), string(runningInfo))
+			s.Put(common.BuildTaskStatusKey(execInfo.Task.ProjectID, execInfo.Task.TaskID), string(runningInfo))
 			return nil
 		})
 		return err
@@ -720,7 +723,11 @@ func (a *app) SetTaskRunning(agentIP string, execInfo *common.TaskExecutingInfo)
 	ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
 	defer cancel()
 
-	_, err := a.etcd.KV().Put(ctx, common.BuildTaskRunningKey(agentIP, execInfo.Task.ProjectID, execInfo.Task.TaskID), string(runningInfo))
+	lease, err := a.etcd.Lease().Grant(ctx, int64(execInfo.Task.Timeout))
+	if err != nil {
+		return errors.NewError(http.StatusInternalServerError, "设置任务运行状态失败，创建lease失败").WithLog(err.Error())
+	}
+	_, err = a.etcd.KV().Put(ctx, common.BuildTaskStatusKey(execInfo.Task.ProjectID, execInfo.Task.TaskID), string(runningInfo), clientv3.WithLease(lease.ID))
 	if err != nil {
 		return errors.NewError(http.StatusInternalServerError, "设置任务运行状态失败").WithLog(err.Error())
 	}
@@ -728,7 +735,7 @@ func (a *app) SetTaskRunning(agentIP string, execInfo *common.TaskExecutingInfo)
 }
 
 func (a *app) CheckTaskIsRunning(projectID int64, taskID string) ([]common.TaskRunningInfo, error) {
-	key := common.BuildTaskRunningKeyPrefix(projectID, taskID)
+	key := common.BuildTaskStatusKey(projectID, taskID)
 	ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
 	defer cancel()
 	resp, err := a.etcd.KV().Get(ctx, key, clientv3.WithPrefix())
@@ -746,10 +753,13 @@ func (a *app) CheckTaskIsRunning(projectID int64, taskID string) ([]common.TaskR
 	}
 
 	for _, kv := range resp.Kvs {
-		agentIP := filepath.Base(string(kv.Key))
+		var runningInfo common.TaskRunningInfo
+		if err = json.Unmarshal(kv.Value, &runningInfo); err != nil {
+			continue
+		}
 		exist := false
 		for _, agent := range agentList {
-			if strings.Contains(agent.addr, agentIP) {
+			if strings.Contains(agent.addr, runningInfo.AgentIP) {
 				exist = true
 				ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
 				defer cancel()
@@ -775,7 +785,7 @@ func (a *app) CheckTaskIsRunning(projectID int64, taskID string) ([]common.TaskR
 			}
 		}
 		if !exist {
-			go a.DelTaskRunningKey(agentIP, projectID, taskID)
+			go a.DelTaskRunningKey(runningInfo.AgentIP, projectID, taskID)
 		}
 	}
 
@@ -790,7 +800,7 @@ func (a *app) DelTaskRunningKey(agentIP string, projectID int64, taskID string) 
 	ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
 	defer cancel()
 	// TODO retry
-	_, err := a.etcd.KV().Delete(ctx, common.BuildTaskRunningKey(agentIP, projectID, taskID))
+	_, err := a.etcd.KV().Delete(ctx, common.BuildTaskStatusKey(projectID, taskID))
 	if err != nil {
 		wlog.Error("failed to delete task running key", zap.String("agent", agentIP), zap.String("task_id", taskID), zap.Int64("project_id", projectID))
 		return errors.NewError(http.StatusInternalServerError, "删除任务运行状态key失败").WithLog(err.Error())
