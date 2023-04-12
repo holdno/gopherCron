@@ -334,40 +334,40 @@ func NewApp(configPath string, opts ...AppOptions) App {
 		panic(err)
 	}
 
-	app.Go(func() {
-		for {
-			// 同一时间只需要有一个service的Loop运行即可
-			s, err := concurrency.NewSession(app.etcd.Client(), concurrency.WithTTL(9))
-			if err != nil {
-				fmt.Println(err)
-				continue
-			}
+	// app.Go(func() {
+	// 	for {
+	// 		// 同一时间只需要有一个service的Loop运行即可
+	// 		s, err := concurrency.NewSession(app.etcd.Client(), concurrency.WithTTL(9))
+	// 		if err != nil {
+	// 			fmt.Println(err)
+	// 			continue
+	// 		}
 
-			e := concurrency.NewElection(s, common.BuildWorkflowMasterKey())
-			ctx, _ := utils.GetContextWithTimeout()
-			err = e.Campaign(ctx, app.GetIP())
-			if err != nil {
-				switch {
-				case err == context.Canceled:
-					return
-				default:
-					time.Sleep(time.Second * 5)
-					continue
-				}
-			}
-			fmt.Println("new workflow leader")
-			list, _, err := app.GetWorkflowList(common.GetWorkflowListOptions{}, 1, 100000)
-			if err != nil {
-				app.logger.Error("failed to refresh workflow list", err.Error())
-				continue
-			}
+	// 		e := concurrency.NewElection(s, common.BuildWorkflowMasterKey())
+	// 		ctx, _ := utils.GetContextWithTimeout()
+	// 		err = e.Campaign(ctx, app.GetIP())
+	// 		if err != nil {
+	// 			switch {
+	// 			case err == context.Canceled:
+	// 				return
+	// 			default:
+	// 				time.Sleep(time.Second * 5)
+	// 				continue
+	// 			}
+	// 		}
+	// 		fmt.Println("new workflow leader")
+	// 		list, _, err := app.GetWorkflowList(common.GetWorkflowListOptions{}, 1, 100000)
+	// 		if err != nil {
+	// 			app.logger.Error("failed to refresh workflow list", err.Error())
+	// 			continue
+	// 		}
 
-			for _, v := range list {
-				workflow.SetPlan(v)
-			}
-			workflow.Loop()
-		}
-	})
+	// 		for _, v := range list {
+	// 			workflow.SetPlan(v)
+	// 		}
+	// 		workflow.Loop()
+	// 	}
+	// })
 	app.workflowRunner = workflow
 
 	startTemporaryTaskWorker(app)
