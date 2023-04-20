@@ -26,7 +26,7 @@
 - [Gin](https://github.com/gin-gonic/gin) 提供 webapi
 - [gopherCronFe](https://github.com/holdno/gopherCronFe) 提供可视化管理界面(已将构建后的文件内置于 dist/view 目录下)
 - [cronexpr](https://github.com/gorhill/cronexpr) 提供 cron 表达式解析器
-- 🍉[watermelon](https://github.com/spacegrower/watermelon) 提供服务注册发现能力
+- 🍉[水瓜](https://github.com/spacegrower/watermelon) 提供服务注册发现能力
 
 ### 实现功能
 
