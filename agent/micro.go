@@ -11,6 +11,7 @@ import (
 	"github.com/holdno/gopherCron/pkg/cronpb"
 	"github.com/holdno/gopherCron/pkg/infra"
 	"github.com/holdno/gopherCron/pkg/infra/register"
+	"github.com/holdno/gopherCron/protocol"
 	"go.uber.org/zap"
 
 	winfra "github.com/spacegrower/watermelon/infra"
@@ -23,8 +24,6 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
-
-const version = "v2.1.0"
 
 func (a *client) SetupMicroService() *winfra.Srv[infra.NodeMetaRemote] {
 	register := a.MustSetupRemoteRegister()
@@ -41,11 +40,11 @@ func (a *client) SetupMicroService() *winfra.Srv[infra.NodeMetaRemote] {
 		newsrv.WithWeight(cfg.Micro.Weigth),
 		newsrv.WithAddress([]infra.Address{{ListenAddress: cfg.Address}}),
 		newsrv.WithTags(map[string]string{
-			"agent-version": version,
+			"agent-version": protocol.GetVersion(),
 		}),
 		newsrv.WithServiceRegister(register))
 	go func() {
-		fmt.Println("start grpc service, on", cfg.Address)
+		wlog.Info(fmt.Sprintf("start grpc service, on %s", cfg.Address))
 		srv.RunUntil(syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL)
 	}()
 	return srv
@@ -58,6 +57,9 @@ func (a *client) MustSetupRemoteRegister() wregister.ServiceRegister[infra.NodeM
 	}
 
 	r, err := register.NewRemoteRegister(a.localip, func() (register.CenterClient, error) {
+		if a.centerSrv.Cc != nil {
+			a.centerSrv.Cc.Close()
+		}
 		wlog.Debug("start build new center client")
 		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(a.cfg.Timeout)*time.Second)
 		defer cancel()
@@ -92,7 +94,7 @@ func (a *client) MustSetupRemoteRegister() wregister.ServiceRegister[infra.NodeM
 }
 
 func (a *client) CheckRunning(ctx context.Context, req *cronpb.CheckRunningRequest) (*cronpb.Result, error) {
-	if _, taskExecuting := a.scheduler.CheckTaskExecuting(common.BuildSchedulerKey(req.ProjectId, req.TaskId)); taskExecuting {
+	if _, taskExecuting := a.scheduler.CheckTaskExecuting(common.GenTaskSchedulerKey(req.ProjectId, req.TaskId)); taskExecuting {
 		return &cronpb.Result{
 			Result:  true,
 			Message: "running",
@@ -122,16 +124,20 @@ func (a *client) Schedule(ctx context.Context, req *cronpb.ScheduleRequest) (*cr
 		if _, taskExecuting := a.scheduler.CheckTaskExecuting(task.SchedulerKey()); taskExecuting {
 			return nil, status.Error(codes.AlreadyExists, "the task already executing, try again later")
 		}
+
+		// 兼容临时调度 不再在plan中检测任务是否存在
 		// plan, exist := a.GetPlan(task.SchedulerKey())
 		// if !exist {
 		// 	return nil, status.Error(codes.NotFound, "task plan is not found")
 		// }
-		// 兼容临时调度
+
 		plan, err := common.BuildTaskSchedulerPlan(task)
 		if err != nil {
 			return nil, status.Error(codes.Aborted, "failed to build task plan: "+err.Error())
 		}
-		a.TryStartTask(plan)
+		if err = a.TryStartTask(plan); err != nil {
+			return nil, err
+		}
 	case common.REMOTE_EVENT_WORKFLOW_SCHEDULE:
 		task, err := unmarshalTask(req.Event.Value)
 		if err != nil {
@@ -145,7 +151,9 @@ func (a *client) Schedule(ctx context.Context, req *cronpb.ScheduleRequest) (*cr
 		if err != nil {
 			return nil, status.Error(codes.Internal, "failed to build workflow task schedule plan")
 		}
-		a.TryStartTask(plan)
+		if err = a.TryStartTask(plan); err != nil {
+			return nil, err
+		}
 	case common.REMOTE_EVENT_TASK_STOP:
 		task, err := unmarshalTask(req.Event.Value)
 		if err != nil {

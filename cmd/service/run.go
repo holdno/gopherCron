@@ -5,59 +5,69 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"os/signal"
+	"runtime/pprof"
 	"syscall"
 	"time"
 
 	"github.com/holdno/gopherCron/app"
 	"github.com/holdno/gopherCron/cmd/service/middleware"
 	"github.com/holdno/gopherCron/cmd/service/router"
-	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/config"
 	"github.com/holdno/gopherCron/pkg/cronpb"
 	"github.com/holdno/gopherCron/pkg/infra"
 	"github.com/holdno/gopherCron/pkg/warning"
 	"github.com/holdno/gopherCron/utils"
+
+	"github.com/gin-gonic/gin"
+	"github.com/spacegrower/watermelon/infra/graceful"
+	"github.com/spacegrower/watermelon/infra/wlog"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-
-	"github.com/gin-gonic/gin"
 )
 
-var httpServer *http.Server
+var shutdownFunc func()
+
+func setupPprof() {
+	{
+		file, err := os.Create("./cpu.pprof")
+		if err != nil {
+			fmt.Printf("create cpu pprof failed, err:%v\n", err)
+			return
+		}
+		pprof.StartCPUProfile(file)
+	}
+
+	{
+		file, err := os.Create("./mem.pprof")
+		if err != nil {
+			fmt.Printf("create mem pprof failed, err:%v\n", err)
+			return
+		}
+		pprof.WriteHeapProfile(file)
+	}
+
+}
 
 // 初始化服务
 func apiServer(srv app.App, conf *config.ServiceConfig) {
 
-	if conf.Deploy.Environment == "release" {
+	if utils.ReleaseMode() {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
 	engine := gin.New()
-
-	//recovery
-	engine.Use(gin.Recovery())
-
-	engine.Use(func(c *gin.Context) {
-		c.Set(common.APP_KEY, srv)
-	})
-
-	engine.NoRoute(func(c *gin.Context) {
-		c.String(http.StatusOK, "no router found")
-	})
-
-	engine.NoMethod(func(c *gin.Context) {
-		c.String(http.StatusOK, "no method found")
-	})
-
 	//URI路由设置
 	router.SetupRoute(srv, engine, conf.Deploy)
+
+	// rpc server
 	infra.RegisterETCDRegisterPrefixKey(conf.Etcd.Prefix + "/registry")
 	newServer := infra.NewCenterServer()
 	server := newServer(func(grpcServer *grpc.Server) {
 		cronpb.RegisterCenterServer(grpcServer, &cronRpc{
-			app: srv,
+			app:                srv,
+			registerMetricsAdd: srv.Metrics().NewGaugeFunc("agent_register_count", "agent"),
+			eventsMetricsInc:   srv.Metrics().CustomIncFunc("registry_event", "", ""),
 		})
 	}, newServer.WithRegion(conf.Micro.Region),
 		newServer.WithOrg(conf.Micro.OrgID),
@@ -68,6 +78,15 @@ func apiServer(srv app.App, conf *config.ServiceConfig) {
 		}),
 		newServer.WithServiceRegister(infra.MustSetupEtcdRegister()))
 
+	grpcRequestCounter := srv.Metrics().NewCounter("grpc_request", "method")
+	grpcRequestDuration := srv.Metrics().NewHistogram("grpc_request", "method")
+	server.Use(func(ctx context.Context) error {
+		method := middleware.GetFullMethodFrom(ctx)
+		grpcRequestCounter(method)
+		timer := grpcRequestDuration(method)
+		defer timer.ObserveDuration()
+		return middleware.Next(ctx)
+	})
 	server.Handler(cronpb.CenterServer.SendEvent)
 	server.Use(func(ctx context.Context) error {
 		agentIP, exist := GetAgentIPFromContext(ctx)
@@ -81,10 +100,13 @@ func apiServer(srv app.App, conf *config.ServiceConfig) {
 		cronpb.CenterServer.StatusReporter,
 		cronpb.CenterServer.TryLock)
 
-	go func() {
-		fmt.Printf("%s, start grpc server, listen on %s\n", utils.GetCurrentTimeText(), conf.Deploy.Host)
-		server.RunUntil(syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL)
-	}()
+	graceful.RegisterPreShutDownHandlers(func() {
+		srv.Close()
+	})
+
+	wlog.Info(fmt.Sprintf("%s, start grpc server, listen on %s\n", utils.GetCurrentTimeText(), conf.Deploy.Host))
+	server.RunUntil(syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL)
+	graceful.ShutDown()
 }
 
 // 获取http server监控端口地址
@@ -112,7 +134,6 @@ func Run(opts *SetupOptions) error {
 
 	defer func() {
 		if r := recover(); r != nil {
-			fmt.Println(r)
 			srv.Warning(warning.WarningData{
 				Data:    fmt.Sprintf("gophercron service panic: %v", r),
 				Type:    warning.WarningTypeSystem,
@@ -121,41 +142,10 @@ func Run(opts *SetupOptions) error {
 		}
 	}()
 
-	apiServer(srv, srv.GetConfig())
-
-	os.Setenv("GOPHERENV", srv.GetConfig().Deploy.Environment)
-	waitingShutdown(srv)
-	return nil
-}
-
-func waitingShutdown(srv app.App) {
-	stopSignalChan := make(chan os.Signal, 1)
-	signal.Notify(stopSignalChan, os.Interrupt, os.Kill, syscall.SIGTERM, syscall.SIGINT)
-
-	sig := <-stopSignalChan
-	if sig != nil {
-		fmt.Println(utils.GetCurrentTimeText(), "got system signal:"+sig.String()+", going to shutdown.")
-		srv.Close()
-		// wait resource remove from nginx upstreams
-		if os.Getenv("GOPHERENV") == "release" {
-			time.Sleep(time.Second * 5)
-		}
-		// 关闭http服务
-		err := shutdownHTTPServer()
-		if err != nil {
-			fmt.Println("http server graceful shutdown failed", err)
-		} else {
-			fmt.Println(utils.GetCurrentTimeText(), "http server graceful shutdown successfully.")
-		}
+	if srv.GetConfig().Deploy.Environment == "" {
+		srv.GetConfig().Deploy.Environment = "debug"
 	}
-
-	fmt.Println("???")
-}
-
-// 关闭http server
-func shutdownHTTPServer() error {
-	// Create a deadline to wait for server shutdown.
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	return httpServer.Shutdown(ctx)
+	os.Setenv("GOPHERENV", srv.GetConfig().Deploy.Environment)
+	apiServer(srv, srv.GetConfig())
+	return nil
 }

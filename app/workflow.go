@@ -564,7 +564,7 @@ func (a *app) DeleteWorkflow(userID int64, workflowID int64) error {
 		}
 		if running {
 			if err = plan.Finished(ErrWorkflowDeleted); err != nil {
-				a.metrics.CustomErrorInc("workflow_plan_finished", strconv.FormatInt(plan.Workflow.ID, 10), ErrWorkflowDeleted.Error())
+				a.metrics.CustomInc("workflow_plan_finished", strconv.FormatInt(plan.Workflow.ID, 10), ErrWorkflowDeleted.Error())
 				wlog.Error("failed to shutdown workflow running plan", zap.Int64("workflow_id", plan.Workflow.ID),
 					zap.Error(ErrWorkflowDeleted),
 					zap.String("finished_with_error", ErrWorkflowDeleted.Error()))
@@ -595,7 +595,7 @@ func (a *app) KillWorkflow(workflowID int64) error {
 	}
 
 	if err := plan.Finished(ErrWorkflowKilled); err != nil {
-		a.metrics.CustomErrorInc("workflow_plan_finished", strconv.FormatInt(plan.Workflow.ID, 10), ErrWorkflowKilled.Error())
+		a.metrics.CustomInc("workflow_plan_finished", strconv.FormatInt(plan.Workflow.ID, 10), ErrWorkflowKilled.Error())
 		wlog.Error("failed to shutdown workflow running plan", zap.Int64("workflow_id", plan.Workflow.ID),
 			zap.Error(ErrWorkflowKilled),
 			zap.String("finished_with_error", ErrWorkflowKilled.Error()))
@@ -820,13 +820,16 @@ type taskFlowItem struct {
 func (a *workflowRunner) scheduleWorkflowPlan(plan *WorkflowPlan) error {
 	needToScheduleTasks, finished, err := plan.CanSchedule(a)
 	if err != nil && err != ErrWorkflowFailed {
-		a.app.metrics.CustomErrorInc("workflow_can_schedule", strconv.FormatInt(plan.Workflow.ID, 10), err.Error())
+		if err != ErrWorkflowInProcess {
+			return err
+		}
+		a.app.metrics.CustomInc("workflow_can_schedule_error", strconv.FormatInt(plan.Workflow.ID, 10), err.Error())
 		return err
 	}
 
 	if finished {
 		if finishedErr := plan.Finished(err); err != nil {
-			a.app.metrics.CustomErrorInc("workflow_plan_finished", strconv.FormatInt(plan.Workflow.ID, 10), finishedErr.Error())
+			a.app.metrics.CustomInc("workflow_plan_finished", strconv.FormatInt(plan.Workflow.ID, 10), finishedErr.Error())
 			wlog.Error("failed to finished workflow plan", zap.Int64("workflow_id", plan.Workflow.ID),
 				zap.Error(finishedErr),
 				zap.String("finished_with_error", err.Error()))
@@ -987,7 +990,7 @@ func (s *WorkflowPlan) CanSchedule(runner *workflowRunner) ([]WorkflowTaskInfo, 
 			locker := s.runner.app.GetTaskLocker(&common.TaskInfo{TaskID: task.TaskID, ProjectID: task.ProjectID})
 			exist, err := locker.LockExist()
 			if err != nil {
-				s.runner.app.metrics.CustomErrorInc("workflow_check_task_locker_exist", fmt.Sprintf("%d_%s", task.ProjectID, task.TaskID), err.Error())
+				s.runner.app.metrics.CustomInc("workflow_check_task_locker_exist", fmt.Sprintf("%d_%s", task.ProjectID, task.TaskID), err.Error())
 				wlog.Error("failed to get lock status", zap.String("task_id", task.TaskID), zap.Int64("project_id", task.ProjectID), zap.String("method", "locker.LockExist"))
 				continue
 			}
@@ -1003,7 +1006,7 @@ func (s *WorkflowPlan) CanSchedule(runner *workflowRunner) ([]WorkflowTaskInfo, 
 				},
 			})
 			if err != nil {
-				s.runner.app.metrics.CustomErrorInc("workflow_kill_fallback", fmt.Sprintf("%d_%s", task.ProjectID, task.TaskID), err.Error())
+				s.runner.app.metrics.CustomInc("workflow_kill_fallback", fmt.Sprintf("%d_%s", task.ProjectID, task.TaskID), err.Error())
 				wlog.Error("workflow kill fallback failed", zap.String("task_id", task.TaskID), zap.Int64("project_id", task.ProjectID), zap.String("method", "killWorkflowTasks"))
 				continue
 			}
@@ -1190,7 +1193,7 @@ func (a *app) GetWorkflowState(workflowID int64) (*PlanState, error) {
 	return plan.planState, nil
 }
 
-func (a *workflowRunner) Loop() {
+func (a *workflowRunner) Loop(closeChan <-chan struct{}) {
 	var (
 		taskEvent     *common.TaskEvent
 		scheduleAfter time.Duration
@@ -1204,10 +1207,13 @@ func (a *workflowRunner) Loop() {
 	scheduleTimer = time.NewTimer(scheduleAfter)
 	daemonTimer = time.NewTicker(time.Second * 10)
 
-	fmt.Printf("start workflow, next schedule after %d second\n", scheduleAfter/time.Second)
-
+	wlog.Info(fmt.Sprintf("start workflow, next schedule after %d seconds", scheduleAfter/time.Second))
+BreakHere:
 	for {
 		select {
+		case <-closeChan:
+			daemonTimer.Stop()
+			break BreakHere
 		case taskEvent = <-a.scheduleEventChan:
 			// 对内存中的任务进行增删改查
 			go a.handleTaskEvent(taskEvent)

@@ -4,6 +4,8 @@ import (
 	"github.com/holdno/gopherCron/app"
 	"github.com/holdno/gopherCron/cmd/service/response"
 	"github.com/holdno/gopherCron/utils"
+	"github.com/spacegrower/watermelon/infra/wlog"
+	"go.uber.org/zap"
 
 	"github.com/gin-gonic/gin"
 )
@@ -28,6 +30,7 @@ func DeleteOne(c *gin.Context) {
 	tx := srv.BeginTx()
 	defer func() {
 		if r := recover(); r != nil || err != nil {
+			wlog.Error("failed to delete project", zap.Int64("project_id", req.ProjectID), zap.Any("panic", r))
 			tx.Rollback()
 		} else {
 			tx.Commit()
@@ -54,7 +57,7 @@ func DeleteOne(c *gin.Context) {
 		return
 	}
 
-	if _, err = srv.DeleteTask(req.ProjectID, ""); err != nil {
+	if err = srv.DeleteProjectAllTasks(req.ProjectID); err != nil {
 		response.APIError(c, err)
 		return
 	}

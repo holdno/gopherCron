@@ -311,7 +311,7 @@ func (a *client) TrySchedule() time.Duration {
 }
 
 // TryStartTask 开始执行任务
-func (a *client) TryStartTask(plan *common.TaskSchedulePlan) {
+func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 	if plan.TmpID == "" {
 		plan.TmpID = utils.GetStrID()
 	}
@@ -349,7 +349,7 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) {
 				Data:      fmt.Sprintf("任务执行结果上报失败: %v", err),
 			})
 		}
-		return
+		return err
 	}
 
 	plan.Task.ClientIP = a.localip
@@ -376,6 +376,8 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) {
 				})).Error("任务执行失败, Panic")
 			}
 		}()
+
+		cancelReason := ""
 		// 构建执行状态信息
 		taskExecuteInfo = common.BuildTaskExecuteInfo(plan)
 		defer func() {
@@ -393,9 +395,12 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) {
 
 			go func() {
 				tryTimes := 0
-				defer taskExecuteInfo.CancelFunc()
+				defer func() {
+					cancelReason = "keep lock failure"
+					taskExecuteInfo.CancelFunc()
+				}()
 				for {
-					unLockFunc, err = tryLock(a.centerSrv, plan, taskExecuteInfo.CancelCtx, lockError)
+					unLockFunc, err = tryLock(a.GetCenterSrv(), plan, taskExecuteInfo.CancelCtx, lockError)
 					once.Do(func() {
 						resultChan <- err
 					})
@@ -404,6 +409,7 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) {
 					if err != nil {
 						wlog.Error("failed to get task execute lock",
 							zap.String("task_id", taskExecuteInfo.Task.TaskID),
+							zap.Int64("project_id", taskExecuteInfo.Task.ProjectID),
 							zap.String("task_name", taskExecuteInfo.Task.Name),
 							zap.Error(err))
 						if tryTimes == 3 {
@@ -428,6 +434,7 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) {
 					case err := <-lockError:
 						wlog.Error("failed to keep task lock", zap.Error(err),
 							zap.String("task_id", taskExecuteInfo.Task.TaskID),
+							zap.Int64("project_id", taskExecuteInfo.Task.ProjectID),
 							zap.String("task_name", taskExecuteInfo.Task.Name))
 					}
 				}
@@ -532,9 +539,13 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) {
 
 		// 执行任务
 		result = a.ExecuteTask(taskExecuteInfo)
+		if result.Err == "cancel" && cancelReason != "" {
+			result.Err += ", " + cancelReason
+		}
 		// 执行结束后 返回给scheduler
 		a.scheduler.PushTaskResult(result)
 	}()
+	return nil
 }
 
 // 处理任务结果

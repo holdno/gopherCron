@@ -120,6 +120,8 @@ var (
 	WORKFLOW                = "t_flow"
 	WORKFLOW_ACK            = "t_flow_ack"
 	WORKFLOW_MASTER         = "t_flow_master"
+	WEBHOOK_MASTER          = "t_webhook_master"
+	CLEANUP_MASTER          = "t_cleanup_master"
 	CALC_CONSISTENCY_MASTER = "t_calc_consistency_master"
 	TEMPORARY_MASTER        = "t_temporary_master"
 	STATUS                  = "t_status"
@@ -135,8 +137,20 @@ func BuildKey(projectID int64, taskID string) string {
 	return fmt.Sprintf("%s/%d/%s", ETCD_PREFIX, projectID, taskID)
 }
 
+func BuildTaskPrefixKey(projectID int64) string {
+	return fmt.Sprintf("%s/%d/", ETCD_PREFIX, projectID)
+}
+
 func BuildWorkflowAddUserLockKey(workflowID, userID int64) string {
 	return fmt.Sprintf("%s/lock/workflow_user_%d_%d", ETCD_PREFIX, workflowID, userID)
+}
+
+func BuildCleanupMasterKey() string {
+	return fmt.Sprintf("%s/%s", ETCD_PREFIX, CLEANUP_MASTER)
+}
+
+func BuildWebhookMasterKey() string {
+	return fmt.Sprintf("%s/%s", ETCD_PREFIX, WEBHOOK_MASTER)
 }
 
 func BuildWorkflowMasterKey() string {

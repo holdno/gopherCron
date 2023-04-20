@@ -11,6 +11,14 @@ import (
 	"github.com/spacegrower/watermelon/infra/middleware"
 )
 
+var (
+	GetFrom           = middleware.GetFrom
+	SetInto           = middleware.SetInto
+	GetFullMethodFrom = middleware.GetFullMethodFrom
+	GetRequestFrom    = middleware.GetRequestFrom
+	Next              = middleware.Next
+)
+
 // CrossDomain 全局添加跨域允许
 func CrossDomain() gin.HandlerFunc {
 	return func(c *gin.Context) {

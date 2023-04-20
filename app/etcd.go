@@ -152,10 +152,6 @@ func (a *app) GetProjectTaskCount(projectID int64) (int64, error) {
 
 // KillTask 强行结束任务
 func (a *app) KillTask(projectID int64, taskID string) error {
-	var (
-		err error
-	)
-
 	taskKey := common.BuildKey(projectID, taskID)
 	ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
 	defer cancel()
@@ -286,6 +282,10 @@ func (a *app) DeleteTask(projectID int64, taskID string) (*common.TaskInfo, erro
 		return nil, errors.NewError(http.StatusInternalServerError, "获取任务信息失败").WithLog(err.Error())
 	}
 
+	if len(resp.Kvs) == 0 {
+		return nil, errors.NewError(http.StatusBadRequest, "任务不存在")
+	}
+
 	err = a.DispatchEvent(&cronpb.SendEventRequest{
 		Region:    a.cfg.Micro.Region,
 		ProjectId: projectID,
@@ -313,6 +313,60 @@ func (a *app) DeleteTask(projectID int64, taskID string) (*common.TaskInfo, erro
 	}
 
 	return oldTask, nil
+}
+
+func (a *app) DeleteProjectAllTasks(projectID int64) error {
+	var (
+		ctx context.Context
+		err error
+	)
+
+	selector := selection.NewSelector(
+		selection.NewRequirement("project_id", selection.Equals, projectID))
+	counter, err := a.store.WorkflowTask().GetTotal(selector)
+	if err != nil {
+		return errors.NewError(http.StatusInternalServerError, "检查项目下任务是否关联workflow失败").WithLog(err.Error())
+	}
+	if counter > 0 {
+		return errors.NewError(http.StatusBadRequest, "该项目下已有任务绑定workflow，请从workflow中移除该任务后再删除")
+	}
+
+	taskKey := common.BuildTaskPrefixKey(projectID)
+	ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
+	defer cancel()
+	resp, err := a.etcd.KV().Get(ctx, taskKey, clientv3.WithPrefix())
+	if err != nil {
+		return errors.NewError(http.StatusInternalServerError, "获取任务信息失败").WithLog(err.Error())
+	}
+
+	if len(resp.Kvs) == 0 {
+		return nil
+	}
+
+	for _, kv := range resp.Kvs {
+		err = a.DispatchEvent(&cronpb.SendEventRequest{
+			Region:    a.cfg.Micro.Region,
+			ProjectId: projectID,
+			Event: &cronpb.Event{
+				Type:      common.REMOTE_EVENT_DELETE,
+				Version:   "v1",
+				Value:     kv.Value,
+				EventTime: time.Now().Unix(),
+			},
+		})
+		if err != nil {
+			return errors.NewError(http.StatusInternalServerError, "下发任务删除事件失败").WithLog(err.Error())
+		}
+	}
+
+	ctx, cancel = context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
+	defer cancel()
+	// save to etcd
+	if _, err = a.etcd.KV().Delete(ctx, taskKey, clientv3.WithPrevKV(), clientv3.WithPrefix()); err != nil {
+		return errors.NewError(http.StatusInternalServerError, "删除etcd任务信息失败").WithLog(err.Error())
+	}
+
+	return nil
 }
 
 func (a *app) DeleteAll() error {
@@ -410,78 +464,4 @@ func (a *app) SaveTask(task *common.TaskInfo, opts ...clientv3.OpOption) (*commo
 		oldTask = task
 	}
 	return oldTask, nil
-}
-
-// SaveMonitor 保存节点的监控信息
-func (a *app) SaveMonitor(ip string, monitorInfo []byte) error {
-	var (
-		monitorKey     string
-		leaseGrantResp *clientv3.LeaseGrantResponse
-		errObj         errors.Error
-		err            error
-	)
-
-	// build worker monitor key
-	monitorKey = common.BuildMonitorKey(ip)
-
-	ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
-	defer cancel()
-	// make lease to notify worker
-	// 创建一个租约 让其稍后过期并自动删除
-	if leaseGrantResp, err = a.etcd.Lease().Grant(ctx, common.MonitorFrequency+1); err != nil {
-		errObj = errors.ErrInternalError
-		errObj.Log = "[Etcd - SaveMonitor] lease grant error:" + err.Error()
-		return errObj
-	}
-
-	ctx, cancel2 := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
-	defer cancel2()
-	// save to etcd
-	if _, err = a.etcd.KV().Put(ctx, monitorKey, string(monitorInfo), clientv3.WithLease(leaseGrantResp.ID)); err != nil {
-		errObj = errors.ErrInternalError
-		errObj.Log = "[Etcd - SaveMonitor] etcd client kv put error:" + err.Error()
-		return errObj
-	}
-
-	return nil
-}
-
-// GetMonitor 获取节点的监控信息
-func (a *app) GetMonitor(ip string) (*common.MonitorInfo, error) {
-
-	var (
-		monitorKey string
-		getResp    *clientv3.GetResponse
-		monitor    *common.MonitorInfo
-		errObj     errors.Error
-		err        error
-	)
-	// build worker monitor key
-	monitorKey = common.BuildMonitorKey(ip)
-
-	ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
-	defer cancel()
-
-	if getResp, err = a.etcd.KV().Get(ctx, monitorKey); err != nil {
-		errObj = errors.ErrInternalError
-		errObj.Log = "[Etcd - GetMonitor] etcd client kv get one error:" + err.Error()
-		return nil, errObj
-	}
-
-	if getResp.Count > 1 {
-		errObj = errors.ErrInternalError
-		errObj.Log = "[Etcd - GetMonitor] etcd client kv get one task but result > 1"
-		return nil, errObj
-	} else if getResp.Count == 0 {
-		return nil, errors.ErrDataNotFound
-	}
-
-	monitor = &common.MonitorInfo{}
-	if err = json.Unmarshal(getResp.Kvs[0].Value, monitor); err != nil {
-		errObj = errors.ErrInternalError
-		errObj.Log = "[Etcd - GetMonitor] monitor json.Unmarshal error:" + err.Error()
-		return nil, errObj
-	}
-
-	return monitor, nil
 }

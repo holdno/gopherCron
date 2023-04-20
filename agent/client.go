@@ -215,3 +215,7 @@ func (c *client) GetIP() string {
 func (a *client) GetStatusReporter() func(ctx context.Context, in *cronpb.ScheduleReply, opts ...grpc.CallOption) (*cronpb.Result, error) {
 	return a.centerSrv.StatusReporter
 }
+
+func (a *client) GetCenterSrv() cronpb.CenterClient {
+	return a.centerSrv.CenterClient
+}

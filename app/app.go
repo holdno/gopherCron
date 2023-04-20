@@ -48,6 +48,7 @@ type App interface {
 	DeleteProject(tx *gorm.DB, pid, uid int64) error
 	SaveTask(task *common.TaskInfo, opts ...clientv3.OpOption) (*common.TaskInfo, error)
 	DeleteTask(pid int64, tid string) (*common.TaskInfo, error)
+	DeleteProjectAllTasks(projectID int64) error
 	KillTask(pid int64, tid string) error
 	IsAdmin(uid int64) (bool, error)
 	GetWorkerList(projectID int64) ([]common.ClientInfo, error)
@@ -56,7 +57,6 @@ type App interface {
 	GetProjectTaskCount(projectID int64) (int64, error)
 	GetTaskList(projectID int64) ([]*common.TaskListItemWithWorkflows, error)
 	GetTask(projectID int64, taskID string) (*common.TaskInfo, error)
-	GetMonitor(ip string) (*common.MonitorInfo, error)
 	TemporarySchedulerTask(task *common.TaskInfo) error
 	GetTaskLogList(pid int64, tid string, page, pagesize int) ([]*common.TaskLog, error)
 	GetTaskLogDetail(pid int64, tid, tmpID string) (*common.TaskLog, error)
@@ -112,6 +112,8 @@ type App interface {
 	WorkflowRemoveUser(workflowID, userID int64) error
 	WorkflowAddUser(workflowID, userID int64) error
 	GetWorkflowRelevanceUsers(workflowID int64) ([]common.UserWorkflowRelevance, error)
+	// metrics
+	Metrics() *metrics.Metrics
 	// web sockets
 	PublishMessage(data PublishData)
 	// temporary task
@@ -145,20 +147,20 @@ func GetApp(c *gin.Context) App {
 }
 
 type app struct {
+	ctx        context.Context
+	cancelFunc context.CancelFunc
 	connPool   keypool.Pool[*grpc.ClientConn]
 	clusterID  int64
 	httpClient *http.Client
 	store      sqlStore.SqlStore
 	etcd       protocol.EtcdManager
-	closeCh    chan struct{}
-	isClose    bool
-	localip    string
-	metrics    *metrics.Metrics
+
+	isClose bool
+	localip string
+	metrics *metrics.Metrics
 
 	workflowRunner *workflowRunner
 	messageChan    chan PublishData
-	messageCounter int64
-	taskResultChan chan string
 
 	cfg *config.ServiceConfig
 
@@ -205,59 +207,6 @@ func WithWarning(w warning.Warner) AppOptions {
 	}
 }
 
-// func WithFiretower() AppOptions {
-// 	return func(a *app) {
-// 		if !a.cfg.Firetower.Enable {
-// 			return
-// 		}
-// 		mode := towerconfig.SingleMode
-// 		if a.cfg.Firetower.Redis.Addr != "" || a.cfg.Firetower.Nats.Addr != "" {
-// 			mode = towerconfig.ClusterMode
-// 		}
-// 		var err error
-// 		a.firetower, err = tower.Setup(towerconfig.FireTowerConfig{
-// 			ChanLens:    1000,
-// 			Heartbeat:   30,
-// 			ServiceMode: mode,
-// 			Bucket: towerconfig.BucketConfig{
-// 				Num:              4,
-// 				CentralChanCount: 1000,
-// 				BuffChanCount:    1000,
-// 				ConsumerNum:      1,
-// 			},
-// 			Cluster: towerconfig.Cluster{
-// 				RedisOption: towerconfig.Redis{
-// 					KeyPrefix: a.cfg.Firetower.Redis.KeyPrefix,
-// 					Addr:      a.cfg.Firetower.Redis.Addr,
-// 					Password:  a.cfg.Firetower.Redis.Password,
-// 					DB:        a.cfg.Firetower.Redis.DB,
-// 				},
-// 				NatsOption: towerconfig.Nats{
-// 					Addr:       a.cfg.Firetower.Nats.Addr,
-// 					ServerName: a.cfg.Firetower.Nats.ServerName,
-// 					UserName:   a.cfg.Firetower.Nats.UserName,
-// 					Password:   a.cfg.Firetower.Nats.Password,
-// 				},
-// 			},
-// 		})
-// 		if err != nil {
-// 			panic(err)
-// 		}
-
-// 		a.pusher = &SystemPusher{
-// 			clientID: "system",
-// 		}
-
-// 		a.messageChan = make(chan PublishData, 1000)
-// 		a.Go(func() {
-// 			for {
-// 				res := <-a.messageChan
-// 				a.publishEventToWebClient(res)
-// 			}
-// 		})
-// 	}
-// }
-
 var (
 	POOL_ERROR_FACTORY_NOT_FOUND = fmt.Errorf("factory not found")
 )
@@ -274,26 +223,20 @@ func NewApp(configPath string, opts ...AppOptions) App {
 		},
 		File: conf.LogPath, // print to sedout if config.File undefined
 	}))
-	app := new(app)
+	app := &app{}
+	app.ctx, app.cancelFunc = context.WithCancel(context.Background())
+
 	app.cfg = conf
 	if conf.Mysql != nil && conf.Mysql.Service != "" {
 		app.store = sqlStore.MustSetup(conf.Mysql, wlog.With(zap.String("component", "sqlprovider")), true)
 	}
 
 	if app.localip, err = utils.GetLocalIP(); err != nil {
-		wlog.Error("failed to get local ip")
-	}
-
-	if app.cfg.Publish.Enable {
-		wlog.Info("enable publish service", zap.String("endpoint", app.cfg.Publish.Endpoint))
-		app.pusher = &SystemPusher{
-			clientID: app.localip,
-			Endpoint: app.cfg.Publish.Endpoint,
-			client:   &http.Client{Timeout: time.Duration(app.cfg.Deploy.Timeout) * time.Second},
-		}
+		wlog.Error("!!! --- failed to get local ip --- !!!")
 	}
 
 	app.metrics = metrics.NewMetrics("center", app.GetIP())
+
 	app.connPool, err = keypool.NewChannelPool(&keypool.Config[*grpc.ClientConn]{
 		MaxCap: 10000,
 		//最大空闲连接
@@ -344,7 +287,7 @@ func NewApp(configPath string, opts ...AppOptions) App {
 			case "INVALID_STATE":
 				return fmt.Errorf("error state %s", cc.GetState().String())
 			default:
-				wlog.Debug("ping conn status", zap.String("status", state), zap.String("component", "connPool"))
+				wlog.Debug("ping conn status", zap.String("status", state), zap.String("component", "conn-pool"))
 				return nil
 			}
 		},
@@ -384,10 +327,6 @@ func NewApp(configPath string, opts ...AppOptions) App {
 		panic(err)
 	}
 
-	{
-		app.taskResultChan = make(chan string, 1000)
-	}
-
 	wlog.Info("connected to etcd")
 	app.CommonInterface = protocol.NewComm(app.etcd)
 
@@ -396,7 +335,9 @@ func NewApp(configPath string, opts ...AppOptions) App {
 		panic(err)
 	}
 
+	// why 1024. view https://github.com/holdno/snowFlakeByGo
 	app.clusterID = clusterID % 1024
+	utils.InitIDWorker(app.clusterID)
 	app.PanicGroup = panicgroup.NewPanicGroup(func(err error) {
 		reserr := app.Warning(warning.WarningData{
 			Data:    err.Error(),
@@ -410,8 +351,32 @@ func NewApp(configPath string, opts ...AppOptions) App {
 			})).Error("panicgroup: failed to warning panic error")
 		}
 	})
+
 	for _, opt := range opts {
 		opt(app)
+	}
+
+	if app.cfg.Publish.Enable {
+		wlog.Info("enable publish service", zap.String("endpoint", app.cfg.Publish.Endpoint))
+		app.pusher = &SystemPusher{
+			clientID: app.localip,
+			Endpoint: app.cfg.Publish.Endpoint,
+			client:   &http.Client{Timeout: time.Duration(app.cfg.Deploy.Timeout) * time.Second},
+		}
+
+		app.messageChan = make(chan PublishData, 1000)
+		publishQpsInc := app.metrics.CustomIncFunc("publish_message", "", "")
+		app.Go(func() {
+			for {
+				select {
+				case res := <-app.messageChan:
+					publishQpsInc()
+					app.publishEventToWebClient(res)
+				case <-app.ctx.Done():
+					return
+				}
+			}
+		})
 	}
 
 	if app.Warner == nil {
@@ -420,54 +385,36 @@ func NewApp(configPath string, opts ...AppOptions) App {
 
 	jwt.InitJWT(conf.JWT)
 
-	// why 1024. view https://github.com/holdno/snowFlakeByGo
-	utils.InitIDWorker(app.clusterID)
-	app.Go(func() {
-		for {
-			select {
-			case <-app.closeCh:
-				return
-			default:
-				if err = app.WebHookWorker(); err != nil {
-					wlog.Error(err.Error())
-				}
-			}
-		}
-	})
+	startCleanupTask(app)
+	startWebhook(app)
+	startWorkflow(app)
+	startTemporaryTaskWorker(app)
+	startCalcDataConsistency(app)
 
-	// 自动清理任务
-	app.Go(func() {
-		t := time.NewTicker(time.Hour * 12)
-		for {
-			select {
-			case <-t.C:
-				app.AutoCleanLogs()
-				app.AutoCleanScheduledTemporaryTask()
-			case <-app.closeCh:
-				t.Stop()
-				// app.etcd.Lock(nil).CloseAll()
-				return
-			}
-		}
-	})
+	return app
+}
 
-	workflow, err := NewWorkflowRunner(app, app.etcd.Client())
-	if err != nil {
-		panic(err)
-	}
+func (a *app) GetVersion() string {
+	return protocol.GetVersion()
+}
 
+func (a *app) Metrics() *metrics.Metrics {
+	return a.metrics
+}
+
+func startWebhook(app *app) {
 	app.Go(func() {
 		for {
 			// 同一时间只需要有一个service的Loop运行即可
-			s, err := concurrency.NewSession(app.etcd.Client(), concurrency.WithTTL(9))
+			s, err := concurrency.NewSession(app.etcd.Client(), concurrency.WithTTL(60))
 			if err != nil {
-				fmt.Println(err)
+				wlog.Error("failed to new concurrency.Session", zap.Error(err), zap.String("component", "webhook"))
+				time.Sleep(time.Second)
 				continue
 			}
 
-			e := concurrency.NewElection(s, common.BuildWorkflowMasterKey())
-			ctx, _ := context.WithTimeout(context.TODO(), time.Duration(app.GetConfig().Deploy.Timeout)*time.Second)
-			err = e.Campaign(ctx, app.GetIP())
+			e := concurrency.NewElection(s, common.BuildWebhookMasterKey())
+			err = e.Campaign(app.ctx, app.GetIP())
 			if err != nil {
 				switch {
 				case err == context.Canceled:
@@ -477,7 +424,104 @@ func NewApp(configPath string, opts ...AppOptions) App {
 					continue
 				}
 			}
-			fmt.Println("new workflow leader")
+			wlog.Info("new webhook leader")
+			app.metrics.CustomInc("workflow_scheduler_leader", app.localip, "")
+		BreakHere:
+			for {
+				select {
+				case <-app.ctx.Done():
+					return
+				case <-s.Done():
+					break BreakHere
+				default:
+					if err = app.WebHookWorker(s.Done()); err != nil {
+						wlog.Error(err.Error())
+					}
+					return
+				}
+			}
+			s.Close()
+		}
+	})
+}
+
+func startCleanupTask(app *app) {
+	// 自动清理任务
+	app.Go(func() {
+		for {
+			// 同一时间只需要有一个service的Loop运行即可
+			s, err := concurrency.NewSession(app.etcd.Client(), concurrency.WithTTL(60))
+			if err != nil {
+				wlog.Error("failed to new concurrency.Session", zap.Error(err), zap.String("component", "cleanup"))
+				time.Sleep(time.Second)
+				continue
+			}
+
+			e := concurrency.NewElection(s, common.BuildCleanupMasterKey())
+			err = e.Campaign(app.ctx, app.GetIP())
+			if err != nil {
+				switch {
+				case err == context.Canceled:
+					return
+				default:
+					time.Sleep(time.Second * 5)
+					continue
+				}
+			}
+			wlog.Info("new tasks cleanup leader")
+			app.metrics.CustomInc("tasks_cleanup_leader", "", "")
+
+			t := time.NewTicker(time.Hour * 12)
+		BreakHere:
+			for {
+				select {
+				case <-t.C:
+					app.AutoCleanLogs()
+					app.AutoCleanScheduledTemporaryTask()
+				case <-app.ctx.Done():
+					t.Stop()
+					s.Close()
+					// app.etcd.Lock(nil).CloseAll()
+					return
+				case <-s.Done():
+					t.Stop()
+					break BreakHere
+				}
+			}
+		}
+	})
+}
+
+func startWorkflow(app *app) {
+	workflow, err := NewWorkflowRunner(app, app.etcd.Client())
+	if err != nil {
+		panic(err)
+	}
+	app.workflowRunner = workflow
+
+	app.Go(func() {
+		// 同一时间只需要有一个service的Loop运行即可
+		for {
+			s, err := concurrency.NewSession(app.etcd.Client(), concurrency.WithTTL(60))
+			if err != nil {
+				wlog.Error("failed to new concurrency.Session", zap.Error(err), zap.String("component", "workflow"))
+				time.Sleep(time.Second)
+				continue
+			}
+
+			e := concurrency.NewElection(s, common.BuildWorkflowMasterKey())
+			err = e.Campaign(app.ctx, app.GetIP())
+			if err != nil {
+				switch {
+				case err == context.Canceled:
+					return
+				default:
+					time.Sleep(time.Second * 5)
+					continue
+				}
+			}
+			wlog.Info("new workflow leader")
+			app.metrics.CustomInc("workflow_scheduler_leader", "", "")
 			list, _, err := app.GetWorkflowList(common.GetWorkflowListOptions{}, 1, 100000)
 			if err != nil {
 				wlog.Error("failed to refresh workflow list", zap.Error(err))
@@ -487,30 +531,26 @@ func NewApp(configPath string, opts ...AppOptions) App {
 			for _, v := range list {
 				workflow.SetPlan(v)
 			}
-			workflow.Loop()
+			workflow.Loop(s.Done())
+
+			s.Close()
 		}
 	})
-	app.workflowRunner = workflow
-
-	startTemporaryTaskWorker(app)
-
-	startCalaDataConsistency(app)
-	return app
 }
 
-func startCalaDataConsistency(app *app) {
+func startCalcDataConsistency(app *app) {
 	app.Go(func() {
 		for {
 			// 同一时间只需要有一个service的Loop运行即可
-			s, err := concurrency.NewSession(app.etcd.Client(), concurrency.WithTTL(9))
+			s, err := concurrency.NewSession(app.etcd.Client(), concurrency.WithTTL(60))
 			if err != nil {
-				fmt.Println(err)
+				wlog.Error("failed to new concurrency.Session", zap.Error(err), zap.String("component", "agents_task_calc"))
+				time.Sleep(time.Second)
 				continue
 			}
 
 			e := concurrency.NewElection(s, common.BuildCalaConsistencyMasterKey())
-			ctx, _ := context.WithTimeout(context.TODO(), time.Duration(app.GetConfig().Deploy.Timeout)*time.Second)
-			err = e.Campaign(ctx, app.GetIP())
+			err = e.Campaign(app.ctx, app.GetIP())
 			if err != nil {
 				switch {
 				case err == context.Canceled:
@@ -520,10 +560,15 @@ func startCalaDataConsistency(app *app) {
 					continue
 				}
 			}
-			fmt.Println("new calc leader")
-			if err := app.CalcAgentDataConsistency(); err != nil {
+
+			wlog.Info("new calc leader")
+			app.metrics.CustomInc("agents_task_calc_leader", app.localip, "")
+
+			if err := app.CalcAgentDataConsistency(s.Done()); err != nil {
 				wlog.Error("failed to calc agent data consistency", zap.Error(err))
 			}
+
+			s.Close()
 		}
 	})
 }
@@ -532,14 +577,14 @@ func startTemporaryTaskWorker(app *app) {
 	app.Go(func() {
 		for {
 			// 同一时间只需要有一个service的Loop运行即可
-			s, err := concurrency.NewSession(app.etcd.Client(), concurrency.WithTTL(9))
+			s, err := concurrency.NewSession(app.etcd.Client(), concurrency.WithTTL(60))
 			if err != nil {
-				fmt.Println(err)
+				wlog.Error("failed to new concurrency.Session", zap.Error(err), zap.String("component", "temporary"))
+				time.Sleep(time.Second)
 				continue
 			}
 			e := concurrency.NewElection(s, common.BuildTemporaryMasterKey())
-			ctx, _ := context.WithTimeout(context.TODO(), time.Duration(app.GetConfig().Deploy.Timeout)*time.Second)
-			err = e.Campaign(ctx, app.GetIP())
+			err = e.Campaign(app.ctx, app.GetIP())
 			if err != nil {
 				switch {
 				case err == context.Canceled:
@@ -549,12 +594,20 @@ func startTemporaryTaskWorker(app *app) {
 					continue
 				}
 			}
-			fmt.Println("new temporary scheduler leader")
+
+			wlog.Info("new temporary scheduler leader")
+			app.metrics.CustomInc("temporary_scheduler_leader", app.localip, "")
 
 			c := time.NewTicker(time.Minute)
+		BreakHere:
 			for {
 				select {
-				case <-app.closeCh:
+				case <-s.Done():
+					c.Stop()
+					break BreakHere
+				case <-app.ctx.Done():
+					c.Stop()
+					s.Close()
 					return
 				case <-c.C:
 				}
@@ -602,7 +655,8 @@ func (a *app) GetTaskLocker(task *common.TaskInfo) *etcd.Locker {
 func (a *app) Close() {
 	if !a.isClose {
 		a.isClose = true
-		close(a.closeCh)
+		a.workflowRunner.cancelFunc()
+		a.cancelFunc()
 	}
 }
 
@@ -629,8 +683,10 @@ func (a *app) CheckUserIsInProject(pid, uid int64) (bool, error) {
 }
 
 func (a *app) CheckUserProject(pid, uid int64) (*common.Project, error) {
-	opt := selection.NewSelector(selection.NewRequirement("id", selection.Equals, pid),
-		selection.NewRequirement("uid", selection.Equals, uid))
+	opt := selection.NewSelector(selection.NewRequirement("id", selection.Equals, pid))
+	if uid != 1 {
+		opt.AddQuery(selection.NewRequirement("uid", selection.Equals, uid))
+	}
 	res, err := a.store.Project().GetProject(opt)
 	if err != nil && err != gorm.ErrRecordNotFound {
 		errObj := errors.ErrInternalError
@@ -838,8 +894,10 @@ func (a *app) CreateProject(tx *gorm.DB, p common.Project) (int64, error) {
 }
 
 func (a *app) DeleteProject(tx *gorm.DB, pid, uid int64) error {
-	opt := selection.NewSelector(selection.NewRequirement("id", selection.Equals, pid),
-		selection.NewRequirement("uid", selection.Equals, uid))
+	opt := selection.NewSelector(selection.NewRequirement("id", selection.Equals, pid))
+	if uid != 1 {
+		opt.AddQuery(selection.NewRequirement("uid", selection.Equals, uid))
+	}
 	if err := a.store.Project().DeleteProject(tx, opt); err != nil {
 		errObj := errors.ErrInternalError
 		errObj.Msg = "删除项目失败"

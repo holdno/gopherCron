@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/holdno/gopherCron/common"
@@ -165,74 +164,74 @@ type WorkflowRunningTaskInfo struct {
 	AgentIP    string
 }
 
-func (a *workflowRunner) getAckForTaskRunning(taskInfo WorkflowRunningTaskInfo, k, v []byte) bool {
-	var ack common.AckResponse
-	if err := json.Unmarshal(v, &ack); err != nil {
-		wlog.With(zap.Any("fields", map[string]interface{}{
-			"workflow_id": taskInfo.WorkflowID,
-			"project_id":  taskInfo.ProjectID,
-			"task_name":   taskInfo.TaskName,
-			"task_id":     taskInfo.TaskID,
-			"tmp_id":      taskInfo.TmpID,
-			"error":       err.Error(),
-		})).Error("failed to json.Unmarshal ack response")
-		return false
-	}
+// func (a *workflowRunner) getAckForTaskRunning(taskInfo WorkflowRunningTaskInfo, k, v []byte) bool {
+// 	var ack common.AckResponse
+// 	if err := json.Unmarshal(v, &ack); err != nil {
+// 		wlog.With(zap.Any("fields", map[string]interface{}{
+// 			"workflow_id": taskInfo.WorkflowID,
+// 			"project_id":  taskInfo.ProjectID,
+// 			"task_name":   taskInfo.TaskName,
+// 			"task_id":     taskInfo.TaskID,
+// 			"tmp_id":      taskInfo.TmpID,
+// 			"error":       err.Error(),
+// 		})).Error("failed to json.Unmarshal ack response")
+// 		return false
+// 	}
 
-	switch ack.Version {
-	case common.ACK_RESPONSE_V1:
-		var v1 common.AckResponseV1
-		if err := json.Unmarshal(ack.Data, &v1); err != nil {
-			wlog.With(zap.Any("fields", map[string]interface{}{
-				"workflow_id": taskInfo.WorkflowID,
-				"project_id":  taskInfo.ProjectID,
-				"task_name":   taskInfo.TaskName,
-				"task_id":     taskInfo.TaskID,
-				"tmp_id":      taskInfo.TmpID,
-				"error":       err.Error(),
-			})).Error("failed to json.Unmarshal ack data")
-			return false
-		}
-	default:
-		wlog.With(zap.Any("fields", map[string]interface{}{
-			"workflow_id": taskInfo.WorkflowID,
-			"project_id":  taskInfo.ProjectID,
-			"task_name":   taskInfo.TaskName,
-			"task_id":     taskInfo.TaskID,
-			"tmp_id":      taskInfo.TmpID,
-			"ack_version": ack.Version,
-		})).Error("unknown ack response version")
-		return false
-	}
+// 	switch ack.Version {
+// 	case common.ACK_RESPONSE_V1:
+// 		var v1 common.AckResponseV1
+// 		if err := json.Unmarshal(ack.Data, &v1); err != nil {
+// 			wlog.With(zap.Any("fields", map[string]interface{}{
+// 				"workflow_id": taskInfo.WorkflowID,
+// 				"project_id":  taskInfo.ProjectID,
+// 				"task_name":   taskInfo.TaskName,
+// 				"task_id":     taskInfo.TaskID,
+// 				"tmp_id":      taskInfo.TmpID,
+// 				"error":       err.Error(),
+// 			})).Error("failed to json.Unmarshal ack data")
+// 			return false
+// 		}
+// 	default:
+// 		wlog.With(zap.Any("fields", map[string]interface{}{
+// 			"workflow_id": taskInfo.WorkflowID,
+// 			"project_id":  taskInfo.ProjectID,
+// 			"task_name":   taskInfo.TaskName,
+// 			"task_id":     taskInfo.TaskID,
+// 			"tmp_id":      taskInfo.TmpID,
+// 			"ack_version": ack.Version,
+// 		})).Error("unknown ack response version")
+// 		return false
+// 	}
 
-	_, err := concurrency.NewSTM(a.etcd, func(s concurrency.STM) error {
-		if err := setWorkflowTaskRunning(s, taskInfo); err != nil {
-			return err
-		}
-		// 删除 ack key
-		// 2022-09-07: 获取到ack状态后不删除，用ack状态标识agent上的任务正在运行中，当做一个运行时状态，agent任务结束后会通过lease的结束自动清理该key
-		// s.Del(string(k))
-		return nil
-	})
-	if err != nil {
-		wlog.With(zap.Any("fields", map[string]interface{}{
-			"workflow_id": taskInfo.WorkflowID,
-			"project_id":  taskInfo.ProjectID,
-			"task_name":   taskInfo.TaskName,
-			"task_id":     taskInfo.TaskID,
-			"tmp_id":      taskInfo.TmpID,
-			"error":       err.Error(),
-		})).Error("failed to delete ack key")
-		return false
-	}
+// 	_, err := concurrency.NewSTM(a.etcd, func(s concurrency.STM) error {
+// 		if err := setWorkflowTaskRunning(s, taskInfo); err != nil {
+// 			return err
+// 		}
+// 		// 删除 ack key
+// 		// 2022-09-07: 获取到ack状态后不删除，用ack状态标识agent上的任务正在运行中，当做一个运行时状态，agent任务结束后会通过lease的结束自动清理该key
+// 		// s.Del(string(k))
+// 		return nil
+// 	})
+// 	if err != nil {
+// 		wlog.With(zap.Any("fields", map[string]interface{}{
+// 			"workflow_id": taskInfo.WorkflowID,
+// 			"project_id":  taskInfo.ProjectID,
+// 			"task_name":   taskInfo.TaskName,
+// 			"task_id":     taskInfo.TaskID,
+// 			"tmp_id":      taskInfo.TmpID,
+// 			"error":       err.Error(),
+// 		})).Error("failed to delete ack key")
+// 		return false
+// 	}
 
-	a.app.PublishMessage(messageWorkflowTaskStatusChanged(
-		taskInfo.WorkflowID,
-		taskInfo.ProjectID,
-		taskInfo.TaskID,
-		common.TASK_STATUS_RUNNING_V2))
-	return true
-}
+// a.app.PublishMessage(messageWorkflowTaskStatusChanged(
+// 	taskInfo.WorkflowID,
+// 	taskInfo.ProjectID,
+// 	taskInfo.TaskID,
+// 	common.TASK_STATUS_RUNNING_V2))
+// 	return true
+// }
 
 type WorkflowTaskScheduleRecord struct {
 	TmpID     string `json:"tmp_id"`
@@ -277,7 +276,7 @@ func setWorkFlowTaskFinished(kv concurrency.STM, agentIP string, result protocol
 	if err := json.Unmarshal([]byte(states), &workflowTaskStates); err != nil {
 		errObj := errors.ErrInternalError
 		errObj.Log = "[setWorkflowTaskRunning] json unmarshal workflow task running result error:" + err.Error()
-		return false, nil
+		return false, errObj
 	}
 
 	if workflowTaskStates.CurrentStatus == common.TASK_STATUS_DONE_V2 ||
@@ -715,6 +714,7 @@ func (a *app) SetTaskRunning(agentIP string, execInfo *common.TaskExecutingInfo)
 				return err
 			}
 			s.Put(common.BuildTaskStatusKey(execInfo.Task.ProjectID, execInfo.Task.TaskID), string(runningInfo))
+			a.PublishMessage(messageWorkflowTaskStatusChanged(execInfo.Task.FlowInfo.WorkflowID, execInfo.Task.ProjectID, execInfo.Task.TaskID, common.TASK_STATUS_RUNNING_V2))
 			return nil
 		})
 		return err
@@ -731,6 +731,8 @@ func (a *app) SetTaskRunning(agentIP string, execInfo *common.TaskExecutingInfo)
 	if err != nil {
 		return errors.NewError(http.StatusInternalServerError, "设置任务运行状态失败").WithLog(err.Error())
 	}
+
+	a.PublishMessage(messageTaskStatusChanged(execInfo.Task.ProjectID, execInfo.Task.TaskID, execInfo.Task.TmpID, common.TASK_STATUS_RUNNING_V2))
 	return nil
 }
 
@@ -738,7 +740,7 @@ func (a *app) CheckTaskIsRunning(projectID int64, taskID string) ([]common.TaskR
 	key := common.BuildTaskStatusKey(projectID, taskID)
 	ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
 	defer cancel()
-	resp, err := a.etcd.KV().Get(ctx, key, clientv3.WithPrefix())
+	resp, err := a.etcd.KV().Get(ctx, key)
 	if err != nil {
 		return nil, errors.NewError(http.StatusInternalServerError, "获取任务运行状态失败").WithLog(err.Error())
 	}
@@ -752,45 +754,45 @@ func (a *app) CheckTaskIsRunning(projectID int64, taskID string) ([]common.TaskR
 		return nil, err
 	}
 
-	for _, kv := range resp.Kvs {
-		var runningInfo common.TaskRunningInfo
-		if err = json.Unmarshal(kv.Value, &runningInfo); err != nil {
-			continue
-		}
-		exist := false
+	defer func() {
 		for _, agent := range agentList {
-			if strings.Contains(agent.addr, runningInfo.AgentIP) {
-				exist = true
-				ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
-				defer cancel()
-				resp, err := agent.CheckRunning(ctx, &cronpb.CheckRunningRequest{
-					ProjectId: projectID,
-					TaskId:    taskID,
-				})
-				if err != nil {
-					return nil, errors.NewError(http.StatusInternalServerError, "确认agent任务运行状态失败").WithLog(err.Error())
-				}
-				if !resp.Result {
-					// 任务没有在运行，但是中心存在运行的key，表示agent在任务运行过程中发生过宕机
-					exist = false
-					break
-				}
-
-				var info common.TaskRunningInfo
-				if err := json.Unmarshal(kv.Value, &info); err != nil {
-					return nil, errors.NewError(http.StatusInternalServerError, "解析任务运行状态失败").WithLog(err.Error())
-				}
-				result = append(result, info)
-				break
-			}
+			agent.Close()
 		}
-		if !exist {
-			go a.DelTaskRunningKey(runningInfo.AgentIP, projectID, taskID)
+	}()
+
+	checkFunc := func(agent *AgentClient) (bool, error) {
+		ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
+		defer cancel()
+		resp, err := agent.CheckRunning(ctx, &cronpb.CheckRunningRequest{
+			ProjectId: projectID,
+			TaskId:    taskID,
+		})
+		if err != nil {
+			return false, errors.NewError(http.StatusInternalServerError, "确认agent任务运行状态失败").WithLog(err.Error())
+		}
+		return resp.Result, nil
+	}
+
+	kv := resp.Kvs[0]
+	var runningInfo common.TaskRunningInfo
+	if err = json.Unmarshal(kv.Value, &runningInfo); err != nil {
+		return nil, err
+	}
+	for _, agent := range agentList {
+		exist, err := checkFunc(agent)
+		if err != nil {
+			return nil, err
+		}
+		if exist {
+			result = append(result, runningInfo)
 		}
 	}
 
-	for _, agent := range agentList {
-		agent.Close()
+	if len(result) == 0 {
+		// 没有agent在跑该任务，但是etcd中存在该任务的running key，大概率是上一次任务执行中agent宕机
+		wlog.Info("delete the key of task running status proactively, because the current running status agent does not match the agent that is executing the task",
+			zap.String("status_key", key), zap.String("task_id", taskID), zap.Int64("project_id", projectID))
+		a.DelTaskRunningKey(runningInfo.AgentIP, projectID, taskID)
 	}
 
 	return result, nil

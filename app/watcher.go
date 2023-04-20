@@ -16,7 +16,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
-func (a *app) WebHookWorker() error {
+func (a *app) WebHookWorker(done <-chan struct{}) error {
 	var (
 		err     error
 		getResp *clientv3.GetResponse
@@ -47,6 +47,10 @@ func (a *app) WebHookWorker() error {
 
 	for {
 		select {
+		case <-a.ctx.Done():
+			return nil
+		case <-done:
+			return nil
 		case w, ok := <-watchChan:
 			if !ok {
 				return nil

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net"
+	"os"
 	"sort"
 	"strconv"
 	"time"
@@ -102,7 +103,11 @@ func TernaryOperation(exist bool, res, el interface{}) interface{} {
 
 // GetContextWithTimeout 返回一个带timeout的context
 func GetContextWithTimeout() (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.TODO(), time.Duration(config.GetServiceConfig().Deploy.Timeout)*time.Second)
+	t := 5
+	if config.GetServiceConfig() != nil {
+		t = config.GetServiceConfig().Deploy.Timeout
+	}
+	return context.WithTimeout(context.TODO(), time.Duration(t)*time.Second)
 }
 
 // GetBeforeDate 获取n天前的时间
@@ -216,4 +221,12 @@ func VerifySign(body common.WebHookBody, secret string, limit int64) bool {
 		return false
 	}
 	return true
+}
+
+func DebugMode() bool {
+	return os.Getenv("GOPHERENV") == "debug"
+}
+
+func ReleaseMode() bool {
+	return os.Getenv("GOPHERENV") == "release"
 }

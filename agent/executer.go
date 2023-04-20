@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/holdno/gopherCron/common"
@@ -26,6 +27,9 @@ func (a *client) ExecuteTask(info *common.TaskExecutingInfo) *common.TaskExecute
 	}
 
 	cmd = exec.CommandContext(info.CancelCtx, a.cfg.Shell, "-c", info.Task.Command)
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Setpgid: true,
+	}
 	stdoutPipe, _ := cmd.StdoutPipe()
 
 	var (
@@ -36,6 +40,11 @@ func (a *client) ExecuteTask(info *common.TaskExecutingInfo) *common.TaskExecute
 		buf := bufio.NewReader(stdoutPipe)
 		for {
 			select {
+			case <-info.CancelCtx.Done():
+				if cmd.Process != nil {
+					cmd.Process.Kill()
+				}
+				return
 			case <-closeCh:
 				return
 			default:

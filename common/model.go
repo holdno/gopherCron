@@ -49,15 +49,6 @@ type TaskLog struct {
 	TmpID     string `json:"tmp_id" gorm:"column:tmp_id;type:varchar(50);not null;comment:'任务执行id'"`
 }
 
-// MonitorInfo 监控信息
-type MonitorInfo struct {
-	IP            string `json:"ip"`
-	CpuPercent    string `json:"cpu_percent"`
-	MemoryPercent string `json:"memory_percent"`
-	MemoryTotal   uint64 `json:"memory_total"`
-	MemoryFree    uint64 `json:"memory_free"`
-}
-
 type WebHook struct {
 	CallbackURL string `json:"callback_url" gorm:"column:callback_url;type:varchar(255);not null;comment:'回调地址'"`
 	ProjectID   int64  `json:"project_id" gorm:"column:project_id;type:int(11);index:project_id;not null;comment:'关联项目id'"`

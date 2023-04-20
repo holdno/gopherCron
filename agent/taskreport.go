@@ -14,11 +14,11 @@ import (
 	"github.com/holdno/gopherCron/pkg/store"
 	"github.com/holdno/gopherCron/pkg/store/sqlStore"
 	"github.com/holdno/gopherCron/pkg/warning"
-	"github.com/spacegrower/watermelon/infra/wlog"
-	"go.uber.org/zap"
 
 	"github.com/holdno/gocommons/selection"
 	"github.com/sirupsen/logrus"
+	"github.com/spacegrower/watermelon/infra/wlog"
+	"go.uber.org/zap"
 )
 
 const (

@@ -75,8 +75,12 @@ func (tl *Locker) CloseAll() {
 	})
 }
 
-// 尝试上锁
 func (tl *Locker) TryLock() error {
+	return tl.TryLockWithOwner("")
+}
+
+// 尝试上锁
+func (tl *Locker) TryLockWithOwner(agentIP string) error {
 	var (
 		leaseGrantResp *clientv3.LeaseGrantResponse
 		cancelCtx      context.Context
@@ -88,7 +92,9 @@ func (tl *Locker) TryLock() error {
 		txnResp        *clientv3.TxnResponse
 	)
 	// 创建一个30s的租约
-	leaseGrantResp, err = tl.lease.Grant(context.TODO(), 30)
+	ctx, cancel := utils.GetContextWithTimeout()
+	defer cancel()
+	leaseGrantResp, err = tl.lease.Grant(ctx, 30)
 	if err != nil {
 		errObj = errors.ErrInternalError
 		errObj.Log = "[TaskLock - TryLock] lease grand error:" + err.Error()
@@ -127,7 +133,7 @@ func (tl *Locker) TryLock() error {
 
 	// 事务抢锁
 	txn.If(clientv3.Compare(clientv3.CreateRevision(tl.key), "=", 0)).
-		Then(clientv3.OpPut(tl.key, "", clientv3.WithLease(leaseGrantResp.ID))).
+		Then(clientv3.OpPut(tl.key, agentIP, clientv3.WithLease(leaseGrantResp.ID))).
 		Else(clientv3.OpGet(tl.key))
 
 	// 提交事务
@@ -139,11 +145,26 @@ func (tl *Locker) TryLock() error {
 		errObj.Log = "[TaskLock - TryLock] txn commit error:" + err.Error()
 		return errObj
 	}
+
 	// 成功返回 失败的话释放租约
 	if !txnResp.Succeeded {
 		// 事务没有执行成功
-		failFunc()
-		return errors.ErrLockAlreadyRequired
+		// 分布式场景下相同的agent(锁持有者)可以进行锁继承操作，如果发现上一个加锁的agent与本次请求的agent ip相同，则允许继承锁
+		// 导致锁需要继承的原因可能是持有锁的center突然宕机，从而导致agent重新尝试连接其他center进行加锁，但是锁又被lease keep在一定的ttl中没有及时释放
+		if agentIP == "" || len(txnResp.Responses) == 0 ||
+			len(txnResp.Responses[0].GetResponseRange().Kvs) == 0 ||
+			string(txnResp.Responses[0].GetResponseRange().Kvs[0].Value) != agentIP {
+			failFunc()
+			return errors.ErrLockAlreadyRequired
+		}
+
+		ctx, cancel := utils.GetContextWithTimeout()
+		defer cancel()
+		if _, err = tl.kv.Put(ctx, tl.key, agentIP, clientv3.WithLease(leaseGrantResp.ID)); err != nil {
+			failFunc()
+			return err
+		}
+		return nil
 	}
 
 	tl.leaseID = leaseGrantResp.ID
@@ -168,7 +189,9 @@ func (tl *Locker) Unlock() {
 	if tl.isLocked {
 		tl.isLocked = false
 		tl.cancelFunc() // 取消锁协成自动续租
-		_, _ = tl.lease.Revoke(context.TODO(), tl.leaseID)
+		ctx, cancel := utils.GetContextWithTimeout()
+		defer cancel()
+		_, _ = tl.lease.Revoke(ctx, tl.leaseID)
 		clientlockers.deleteLease(tl.leaseID)
 	}
 }

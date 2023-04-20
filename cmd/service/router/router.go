@@ -12,11 +12,14 @@ import (
 	"github.com/holdno/gopherCron/cmd/service/controller/system"
 	"github.com/holdno/gopherCron/cmd/service/controller/user_func"
 	"github.com/holdno/gopherCron/cmd/service/middleware"
+	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/config"
 	"github.com/holdno/gopherCron/pkg/metrics"
 	"github.com/holdno/gopherCron/utils"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/spacegrower/watermelon/infra/wlog"
 
+	"github.com/gin-contrib/pprof"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"github.com/holdno/firetower/protocol"
@@ -33,10 +36,25 @@ func prometheusHandler() gin.HandlerFunc {
 
 func SetupRoute(srv app.App, r *gin.Engine, conf *config.DeployConf) {
 	r.Use(gin.Recovery())
+	if utils.DebugMode() {
+		wlog.Info("debug mode will open pprof tools")
+		pprof.Register(r)
+	}
+	r.Use(func(c *gin.Context) {
+		c.Set(common.APP_KEY, srv)
+	})
+	r.NoRoute(func(c *gin.Context) {
+		c.String(http.StatusOK, "no router found")
+	})
+	r.NoMethod(func(c *gin.Context) {
+		c.String(http.StatusOK, "no method found")
+	})
 	r.Use(middleware.CrossDomain())
 	r.Use(middleware.BuildResponse())
-	r.Use(metrics.Middleware("gophercron", "center", srv.GetIP()))
-
+	r.Use(metrics.Middleware(srv.Metrics()))
+	r.GET("/healthy", func(c *gin.Context) {
+		c.String(http.StatusOK, "healthy")
+	})
 	r.GET("/metrics", prometheusHandler())
 
 	api := r.Group("/api/v1")

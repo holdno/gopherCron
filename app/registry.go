@@ -128,7 +128,7 @@ type AgentProjectCompareInfo struct {
 	BeforAddrs []string
 }
 
-func (a *app) CalcAgentDataConsistency() error {
+func (a *app) CalcAgentDataConsistency(done <-chan struct{}) error {
 	c := time.NewTicker(time.Minute)
 
 	calc := func() error {
@@ -139,21 +139,25 @@ func (a *app) CalcAgentDataConsistency() error {
 			return err
 		}
 		var needToRemove []string
-		for _, v := range list {
+		checkOne := func(projectID int64) error {
 			var compareData *AgentProjectCompareInfo
-			agents, err := a.FindAgents(a.GetConfig().Micro.Region, v.ID)
+			agents, err := a.FindAgents(a.GetConfig().Micro.Region, projectID)
 			if err != nil {
 				return err
 			}
+			defer func() {
+				for _, v := range agents {
+					v.Close()
+				}
+			}()
 			if len(agents) <= 1 {
-				continue
+				return nil
 			}
 			for _, agent := range agents {
 				resp, err := agent.ProjectTaskHash(context.TODO(), &cronpb.ProjectTaskHashRequest{
-					ProjectId: v.ID,
+					ProjectId: projectID,
 				})
 				if err != nil {
-					agent.Close()
 					return err
 				}
 				if compareData == nil {
@@ -163,7 +167,7 @@ func (a *app) CalcAgentDataConsistency() error {
 						BeforAddrs: []string{agent.addr},
 					}
 				} else if resp.Hash != compareData.Hash {
-					wlog.Debug("different task hash", zap.String("current_agent", agent.addr), zap.String("before", compareData.Hash), zap.String("after", resp.Hash))
+					wlog.Warn("got different task hash", zap.String("current_agent", agent.addr), zap.String("before", compareData.Hash), zap.String("after", resp.Hash))
 					if resp.LatestUpdateTime <= compareData.LatestTime {
 						needToRemove = append(needToRemove, agent.addr)
 						compareData.BeforAddrs = append(compareData.BeforAddrs, agent.addr)
@@ -174,8 +178,11 @@ func (a *app) CalcAgentDataConsistency() error {
 						compareData.BeforAddrs = nil
 					}
 				}
-				agent.Close()
 			}
+			return nil
+		}
+		for _, v := range list {
+			checkOne(v.ID)
 		}
 
 		// centerSrvs, err := a.GetCenterSrvList()
@@ -202,10 +209,12 @@ func (a *app) CalcAgentDataConsistency() error {
 		select {
 		case <-c.C:
 			if err := calc(); err != nil {
-				a.metrics.CustomErrorInc("calc_agent_data_consistency", a.GetIP(), err.Error())
+				a.metrics.CustomInc("calc_agent_data_consistency", a.GetIP(), err.Error())
 				return err
 			}
-		case <-a.closeCh:
+		case <-done:
+			return nil
+		case <-a.ctx.Done():
 			return nil
 		}
 	}

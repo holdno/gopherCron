@@ -15,6 +15,7 @@ import (
 	"github.com/holdno/gopherCron/pkg/infra"
 	"github.com/holdno/gopherCron/pkg/warning"
 	"github.com/holdno/gopherCron/utils"
+
 	etcdregister "github.com/spacegrower/watermelon/infra/register/etcd"
 	"github.com/spacegrower/watermelon/infra/resolver/etcd"
 	"github.com/spacegrower/watermelon/infra/wlog"
@@ -29,7 +30,27 @@ func (a *app) RemoveClientRegister(client string) error {
 	if err != nil {
 		return err
 	}
+
+	defer func() {
+		for _, v := range list {
+			v.Close()
+		}
+	}()
+
 	removed := false
+
+	disposeOne := func(v *CenterClient) (*cronpb.Result, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
+		defer cancel()
+		resp, err := v.RemoveStream(ctx, &cronpb.RemoveStreamRequest{
+			Client: client,
+		})
+		if err != nil {
+			return nil, errors.NewError(http.StatusInternalServerError, "failed to remove stream")
+		}
+		return resp, nil
+	}
+
 	for _, v := range list {
 		if strings.Contains(v.addr, a.GetIP()) {
 			stream := a.StreamManager().GetStreamsByHost(v.addr)
@@ -38,21 +59,14 @@ func (a *app) RemoveClientRegister(client string) error {
 			}
 			continue
 		}
-		{
-			ctx, cancel := context.WithTimeout(context.Background(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
-			defer cancel()
-			resp, err := v.RemoveStream(ctx, &cronpb.RemoveStreamRequest{
-				Client: client,
-			})
-			if err != nil {
-				v.Close()
-				return errors.NewError(http.StatusInternalServerError, "failed to remove stream")
-			}
-			v.Close()
-			if resp.Result {
-				removed = true
-				break
-			}
+		resp, err := disposeOne(v)
+		if err != nil {
+			return err
+		}
+
+		if resp.Result {
+			removed = true
+			break
 		}
 	}
 
@@ -144,7 +158,7 @@ func (a *app) getAgentAddrs(region string, projectID int64) ([]etcd.FindedResult
 	defer cancel()
 	addrs, _, err := finder.FindAll(ctx, filepath.ToSlash(filepath.Join(etcdregister.GetETCDPrefixKey(), "gophercron", strconv.FormatInt(projectID, 10), cronpb.Agent_ServiceDesc.ServiceName))+"/")
 	if err != nil {
-		a.metrics.CustomErrorInc("find_agents_error", fmt.Sprintf("%s_%d", region, projectID), err.Error())
+		a.metrics.CustomInc("find_agents_error", fmt.Sprintf("%s_%d", region, projectID), err.Error())
 		return nil, err
 	}
 	return addrs, nil
@@ -213,7 +227,7 @@ func (a *app) GetCenterSrvList() ([]*CenterClient, error) {
 	findKey := filepath.ToSlash(filepath.Join(etcdregister.GetETCDPrefixKey(), "gophercron", "0", cronpb.Center_ServiceDesc.ServiceName)) + "/"
 	addrs, _, err := finder.FindAll(ctx, findKey)
 	if err != nil {
-		a.metrics.CustomErrorInc("find_centers_error", findKey, err.Error())
+		a.metrics.CustomInc("find_centers_error", findKey, err.Error())
 		return nil, err
 	}
 
@@ -263,15 +277,26 @@ func (a *app) DispatchEvent(event *cronpb.SendEventRequest) error {
 		return err
 	}
 
-	for _, v := range centers {
+	defer func() {
+		for _, v := range centers {
+			v.Close()
+		}
+	}()
+
+	dispatchOne := func(v *CenterClient) error {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
 		defer cancel()
 		if _, err := v.SendEvent(ctx, event); err != nil {
-			v.Close()
-			a.metrics.CustomErrorInc("send_event_error", v.addr, err.Error())
+			a.metrics.CustomInc("send_event_error", v.addr, err.Error())
 			return fmt.Errorf("failed to send event to %s, error: %s", v.addr, err.Error())
 		}
-		v.Close()
+		return nil
+	}
+
+	for _, v := range centers {
+		if err := dispatchOne(v); err != nil {
+			return err
+		}
 	}
 	return nil
 }
