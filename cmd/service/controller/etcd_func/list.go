@@ -1,8 +1,7 @@
 package etcd_func
 
 import (
-	"strconv"
-	"strings"
+	"fmt"
 
 	"github.com/holdno/gopherCron/app"
 	"github.com/holdno/gopherCron/cmd/service/response"
@@ -15,13 +14,13 @@ import (
 
 // GetTaskListRequest 获取任务列表请求参数
 type GetTaskListRequest struct {
-	ProjectID int64 `form:"project_id" binding:"required"`
+	ProjectID int64 `json:"project_id" form:"project_id" binding:"required"`
 }
 
 // GetList 获取任务列表
 func GetTaskList(c *gin.Context) {
 	var (
-		taskList []*common.TaskInfo
+		taskList []*common.TaskListItemWithWorkflows
 		errObj   errors.Error
 		err      error
 		req      GetTaskListRequest
@@ -30,13 +29,11 @@ func GetTaskList(c *gin.Context) {
 	)
 
 	if err = utils.BindArgsWithGin(c, &req); err != nil {
-		errObj = errors.ErrInvalidArgument
-		errObj.Log = "[Controller - GetList] GetListRequest args error:" + err.Error()
-		response.APIError(c, errObj)
+		response.APIError(c, err)
 		return
 	}
 
-	if _, err = srv.CheckUserIsInProject(req.ProjectID, uid); err != nil {
+	if err = srv.CheckPermissions(req.ProjectID, uid); err != nil {
 		response.APIError(c, err)
 		return
 	}
@@ -54,22 +51,42 @@ func GetTaskList(c *gin.Context) {
 }
 
 // GetWorkerListRequest 获取节点的请求参数
-type GetWorkerListRequest struct {
-	ProjectID int64 `form:"project_id" binding:"required"`
+type GetClientListRequest struct {
+	ProjectID int64 `json:"project_id" form:"project_id" binding:"required"`
 }
 
 // GetWorkerList 获取节点
-func GetWorkerList(c *gin.Context) {
+func GetClientList(c *gin.Context) {
 	var (
 		err error
-		req GetWorkerListRequest
-		res []string
+		req GetClientListRequest
+		res []common.ClientInfo
 		srv = app.GetApp(c)
+		uid = utils.GetUserID(c)
 	)
 
 	if err = utils.BindArgsWithGin(c, &req); err != nil {
 		response.APIError(c, errors.ErrInvalidArgument)
 		return
+	}
+
+	isAdmin, err := srv.IsAdmin(uid)
+	if err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	if !isAdmin {
+		exist, err := srv.CheckUserIsInProject(req.ProjectID, uid)
+		if err != nil {
+			response.APIError(c, err)
+			return
+		}
+
+		if !exist {
+			response.APIError(c, errors.ErrUnauthorized)
+			return
+		}
 	}
 
 	if res, err = srv.GetWorkerList(req.ProjectID); err != nil {
@@ -77,15 +94,30 @@ func GetWorkerList(c *gin.Context) {
 		return
 	}
 
+	var list []string
+	for _, v := range res {
+		list = append(list, fmt.Sprintf("%s:%s", v.ClientIP, v.Version))
+	}
+
 	response.APISuccess(c, &gin.H{
-		"list": utils.TernaryOperation(res != nil, res, []struct{}{}),
+		"list": utils.TernaryOperation(list != nil, list, []struct{}{}),
 	})
 }
 
 // 通过多个projectID来获取所有workerlist
 // GetWorkerListInfoRequest 获取节点的请求参数
 type GetWorkerListInfoRequest struct {
-	ProjectIDs string `form:"project_ids" binding:"required"`
+	ProjectIDs string `json:"project_ids" form:"project_ids"`
+}
+
+type GetWorkerListInfoResponse struct {
+	List []UserWorkerInfo `json:"list"`
+}
+
+type UserWorkerInfo struct {
+	ProjectID int64  `json:"project_id"`
+	ClientIP  string `json:"client_ip"`
+	Version   string `json:"version"`
 }
 
 // GetWorkerList 获取节点
@@ -93,11 +125,11 @@ func GetWorkerListInfo(c *gin.Context) {
 	var (
 		err                error
 		req                GetWorkerListInfoRequest
-		workerList         []string
+		workerList         []common.ClientInfo
 		noRepeatWorkerList []string
-		projects           []string
-		monitorList        []*common.MonitorInfo
 		srv                = app.GetApp(c)
+		uid                = utils.GetUserID(c)
+		result             []UserWorkerInfo
 	)
 
 	if err = utils.BindArgsWithGin(c, &req); err != nil {
@@ -105,40 +137,90 @@ func GetWorkerListInfo(c *gin.Context) {
 		return
 	}
 
-	projects = strings.Split(req.ProjectIDs, ",")
+	projects, err := srv.GetUserProjects(uid)
+	if err != nil {
+		response.APIError(c, err)
+		return
+	}
 
 	if len(projects) == 0 {
-		response.APISuccess(c, &gin.H{
-			"list": []struct{}{},
-		})
+		response.APISuccess(c, result)
 		return
 	}
 
 	for _, v := range projects {
-		id, _ := strconv.ParseInt(v, 10, 64)
-		if workerList, err = srv.GetWorkerList(id); err != nil {
+		if workerList, err = srv.GetWorkerList(v.ID); err != nil {
 			response.APIError(c, err)
 			return
 		}
 
 		for _, worker := range workerList {
-			if !utils.StrArrExist(noRepeatWorkerList, worker) {
-				noRepeatWorkerList = append(noRepeatWorkerList, worker)
+			if !utils.StrArrExist(noRepeatWorkerList, worker.ClientIP) {
+				result = append(result, UserWorkerInfo{
+					ProjectID: v.ID,
+					ClientIP:  worker.ClientIP,
+					Version:   worker.Version,
+				})
+				noRepeatWorkerList = append(noRepeatWorkerList, worker.ClientIP)
 			}
 		}
 	}
 
 	// 遍历去重后的节点列表 获取对应的监控信息
-	for _, worker := range noRepeatWorkerList {
-		if m, err := srv.GetMonitor(worker); err == nil {
-			monitorList = append(monitorList, m)
-		} else {
-			response.APIError(c, err)
-			return
-		}
+	response.APISuccess(c, result)
+}
+
+type ReloadConfigRequest struct {
+	ClientIP string `json:"client_ip" form:"client_ip" binding:"required"`
+}
+
+func ReloadConfig(c *gin.Context) {
+	var (
+		err error
+		req ReloadConfigRequest
+		srv = app.GetApp(c)
+		uid = utils.GetUserID(c)
+	)
+
+	if err = utils.BindArgsWithGin(c, &req); err != nil {
+		response.APIError(c, errors.ErrInvalidArgument)
+		return
 	}
 
-	response.APISuccess(c, &gin.H{
-		"list": utils.TernaryOperation(monitorList != nil, monitorList, []struct{}{}),
-	})
+	isAdmin, err := srv.IsAdmin(uid)
+	if err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	if !isAdmin {
+		response.APIError(c, errors.ErrUnauthorized)
+		return
+		// if ok, err = srv.CheckUserIsInProject(req.ProjectID, uid); err != nil {
+		// 	response.APIError(c, err)
+		// 	return
+		// }
+
+		// if !ok {
+		// 	response.APIError(c, errors.ErrUnauthorized)
+		// 	return
+		// }
+	}
+
+	// if ok, err = srv.CheckProjectWorkerExist(req.ProjectID, req.ClientIP); err != nil {
+	// 	response.APIError(c, err)
+	// 	return
+	// }
+
+	// if !ok {
+	// 	response.APIError(c, errors.ErrUnauthorized)
+	// 	return
+	// }
+
+	if err = srv.ReloadWorkerConfig(req.ClientIP); err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	response.APISuccess(c, nil)
 }

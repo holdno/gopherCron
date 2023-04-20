@@ -1,7 +1,6 @@
 package user_func
 
 import (
-	"strings"
 	"time"
 
 	"github.com/holdno/gopherCron/app"
@@ -13,6 +12,42 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+type DeleteUserRequest struct {
+	ID int64 `json:"id" form:"id" binding:"required"`
+}
+
+func DeleteUser(c *gin.Context) {
+	var (
+		err error
+		req DeleteUserRequest
+		uid = utils.GetUserID(c)
+		srv = app.GetApp(c)
+	)
+
+	if err = utils.BindArgsWithGin(c, &req); err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	isAdmin, err := srv.IsAdmin(uid)
+	if err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	if !isAdmin {
+		response.APIError(c, errors.ErrUnauthorized)
+		return
+	}
+
+	if err = srv.DeleteUser(req.ID); err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	response.APISuccess(c, nil)
+}
+
 // CreateUserRequest 创建用户请求参数
 type CreateUserRequest struct {
 	Name     string `form:"name" binding:"required"`
@@ -23,38 +58,23 @@ type CreateUserRequest struct {
 // CreateUser 创建用户
 func CreateUser(c *gin.Context) {
 	var (
-		req         CreateUserRequest
-		err         error
-		info        *common.User
-		permissions []string
-		isAdmin     bool
-		salt        string
-		uid         = utils.GetUserID(c)
-		srv         = app.GetApp(c)
+		req     CreateUserRequest
+		err     error
+		info    *common.User
+		isAdmin bool
+		salt    string
+		uid     = utils.GetUserID(c)
+		srv     = app.GetApp(c)
 	)
 
 	if err = utils.BindArgsWithGin(c, &req); err != nil {
-		response.APIError(c, errors.ErrInvalidArgument)
-		return
-	}
-
-	if info, err = srv.GetUserInfo(uid); err != nil {
 		response.APIError(c, err)
 		return
 	}
 
-	if info == nil {
-		response.APIError(c, errors.ErrUserNotFound)
+	if isAdmin, err = srv.IsAdmin(uid); err != nil {
+		response.APIError(c, err)
 		return
-	}
-
-	// 确认该用户是否为管理员
-	permissions = strings.Split(info.Permission, ",")
-	for _, v := range permissions {
-		if v == "admin" {
-			isAdmin = true
-			break
-		}
 	}
 
 	if isAdmin {

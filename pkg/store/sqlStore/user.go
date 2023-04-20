@@ -5,9 +5,10 @@ import (
 	"time"
 
 	"github.com/holdno/gopherCron/common"
-	"github.com/holdno/gopherCron/pkg/selection"
 	"github.com/holdno/gopherCron/pkg/store"
 	"github.com/holdno/gopherCron/utils"
+
+	"github.com/holdno/gocommons/selection"
 )
 
 type userStore struct {
@@ -27,7 +28,14 @@ func (s *userStore) AutoMigrate() {
 	if err := s.GetMaster().Table(s.GetTable()).AutoMigrate(&common.User{}).Error; err != nil {
 		panic(fmt.Errorf("unable to auto migrate %s, %w", s.GetTable(), err))
 	}
-	s.provider.Logger().Infof("%s, complete initialization", s.GetTable())
+	s.provider.Logger().Info(fmt.Sprintf("%s, complete initialization", s.GetTable()))
+}
+
+func (s *userStore) DeleteUser(id int64) error {
+	if err := s.GetMaster().Table(s.GetTable()).Where("id = ?", id).Delete(nil).Error; err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *userStore) CreateAdminUser() error {

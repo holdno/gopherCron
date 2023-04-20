@@ -14,15 +14,16 @@ import (
 )
 
 type TaskSaveRequest struct {
-	ProjectID int64  `form:"project_id" binding:"required"`
-	TaskID    string `form:"task_id"`
-	Name      string `form:"name" binding:"required"`
-	Command   string `form:"command" binding:"required"`
-	Cron      string `form:"cron" binding:"required"`
-	Remark    string `form:"remark"`
-	Timeout   int    `form:"timeout"`
-	Status    int    `form:"status"` // 执行状态 1立即加入执行队列 0存入etcd但是不执行
-	Noseize   int    `form:"noseize"`
+	ProjectID int64  `form:"project_id" json:"project_id" binding:"required"`
+	TaskID    string `form:"task_id" json:"task_id"`
+	Name      string `form:"name" json:"name" binding:"required"`
+	Command   string `form:"command" json:"command" binding:"required"`
+	Cron      string `form:"cron" json:"cron" binding:"required"`
+	Remark    string `form:"remark" json:"remark"`
+	Timeout   int    `form:"timeout" json:"timeout"`
+	Status    int    `form:"status" json:"status"` // 执行状态 1立即加入执行队列 0存入etcd但是不执行
+	Noseize   int    `form:"noseize" json:"noseize"`
+	Exclusion int    `form:"exclusion" json:"exclusion"`
 }
 
 // TaskSave save tast to etcd
@@ -32,14 +33,13 @@ func SaveTask(c *gin.Context) {
 		req         TaskSaveRequest
 		oldTaskInfo *common.TaskInfo
 		err         error
-		exist       bool
 
 		uid = utils.GetUserID(c)
 		srv = app.GetApp(c)
 	)
 
 	if err = utils.BindArgsWithGin(c, &req); err != nil {
-		response.APIError(c, errors.ErrInvalidArgument)
+		response.APIError(c, err)
 		return
 	}
 
@@ -49,13 +49,8 @@ func SaveTask(c *gin.Context) {
 		return
 	}
 
-	if exist, err = srv.CheckUserIsInProject(req.ProjectID, uid); err != nil {
+	if err = srv.CheckPermissions(req.ProjectID, uid); err != nil {
 		response.APIError(c, err)
-		return
-	}
-
-	if !exist {
-		response.APIError(c, errors.ErrProjectNotExist)
 		return
 	}
 
@@ -69,6 +64,7 @@ func SaveTask(c *gin.Context) {
 		Timeout:    req.Timeout,
 		Status:     req.Status,
 		Noseize:    req.Noseize,
+		Exclusion:  req.Exclusion,
 		CreateTime: time.Now().Unix(),
 		IsRunning:  common.TASK_STATUS_UNDEFINED,
 	}); err != nil {

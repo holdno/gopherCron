@@ -7,4 +7,4 @@ mkdir ${BUILD_DIR}/config
 mkdir ${BUILD_DIR}/view
 cp ./cmd/service/conf/config-default.toml ${BUILD_DIR}/config/service-config-default.toml
 cp ./cmd/client/conf/config-default.toml ${BUILD_DIR}/config/client-config-default.toml
-cp -r ./dist/view/* ${BUILD_DIR}/view
+cp -r ./dist/* ${BUILD_DIR}/view

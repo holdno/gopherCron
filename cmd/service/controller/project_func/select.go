@@ -9,6 +9,37 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+type GetProjectWorkflowTasksRequest struct {
+	ProjectID int64 `json:"project_id" form:"project_id" binding:"required"`
+}
+
+func GetProjectWorkflowTasks(c *gin.Context) {
+	var (
+		err error
+		req GetProjectWorkflowTasksRequest
+	)
+	if err = utils.BindArgsWithGin(c, &req); err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	srv := app.GetApp(c)
+	uid := utils.GetUserID(c)
+
+	if err = srv.CheckPermissions(req.ProjectID, uid); err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	list, err := srv.GetProjectWorkflowTask(req.ProjectID)
+	if err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	response.APISuccess(c, list)
+}
+
 type GetUserProjectsResponse struct {
 	ProjectID int64  `json:"project_id"`
 	UID       int64  `json:"uid"`

@@ -1,24 +1,26 @@
 package utils
 
 import (
+	"bytes"
 	"context"
 	"crypto/md5"
 	"encoding/hex"
+	"encoding/json"
+	"fmt"
 	"math/rand"
 	"net"
+	"os"
+	"sort"
 	"strconv"
 	"time"
 
 	"github.com/holdno/gopherCron/common"
-
-	"github.com/holdno/gopherCron/errors"
-
 	"github.com/holdno/gopherCron/config"
-
-	"github.com/holdno/snowFlakeByGo"
+	"github.com/holdno/gopherCron/errors"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
+	"github.com/holdno/snowFlakeByGo"
 )
 
 var globalIDWorker *snowFlakeByGo.Worker
@@ -41,10 +43,16 @@ func GetCurrentTimeText() string {
 
 // BindArgsWithGin 绑定请求参数
 func BindArgsWithGin(c *gin.Context, req interface{}) error {
-	return c.ShouldBindWith(req, binding.Default(c.Request.Method, c.ContentType()))
+	err := c.ShouldBindWith(req, binding.Default(c.Request.Method, c.ContentType()))
+	if err != nil {
+		errObj := errors.ErrInvalidArgument
+		errObj.Log = err.Error()
+		return errObj
+	}
+	return nil
 }
 
-// MakeOrderID 生成订单
+// GetStrID 生成任务id编号
 func GetStrID() string {
 	return strconv.FormatInt(globalIDWorker.GetId(), 10)
 }
@@ -95,7 +103,11 @@ func TernaryOperation(exist bool, res, el interface{}) interface{} {
 
 // GetContextWithTimeout 返回一个带timeout的context
 func GetContextWithTimeout() (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.TODO(), time.Duration(config.GetServiceConfig().Deploy.Timeout)*time.Second)
+	t := 5
+	if config.GetServiceConfig() != nil {
+		t = config.GetServiceConfig().Deploy.Timeout
+	}
+	return context.WithTimeout(context.TODO(), time.Duration(t)*time.Second)
 }
 
 // GetBeforeDate 获取n天前的时间
@@ -167,4 +179,54 @@ RETRY:
 		goto RETRY
 	}
 	return nil
+}
+
+func MakeSign(body common.WebHookBody, secret string) string {
+	var (
+		keys       []string
+		signString string
+		params     = make(map[string]interface{})
+	)
+
+	requestString, _ := json.Marshal(body)
+
+	d := json.NewDecoder(bytes.NewReader(requestString))
+	d.UseNumber()
+	_ = d.Decode(&params)
+	for k := range params {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, v := range keys {
+		if params[v] != nil {
+			signString += fmt.Sprintf("%s=%v&", v, params[v])
+		}
+	}
+
+	signString += "key=" + secret
+
+	md5Ctx := md5.New()
+	md5Ctx.Write([]byte(signString))
+	cipherStr := md5Ctx.Sum(nil)
+
+	return hex.EncodeToString(cipherStr)
+}
+
+func VerifySign(body common.WebHookBody, secret string, limit int64) bool {
+	sign := body.Sign
+	body.Sign = ""
+
+	newSign := MakeSign(body, secret)
+	if sign != newSign || time.Now().Unix()-limit > body.RequestTime {
+		return false
+	}
+	return true
+}
+
+func DebugMode() bool {
+	return os.Getenv("GOPHERENV") == "debug"
+}
+
+func ReleaseMode() bool {
+	return os.Getenv("GOPHERENV") == "release"
 }

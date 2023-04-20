@@ -4,8 +4,9 @@ import (
 	"fmt"
 
 	"github.com/holdno/gopherCron/common"
-	"github.com/holdno/gopherCron/pkg/selection"
 	"github.com/holdno/gopherCron/pkg/store"
+
+	"github.com/holdno/gocommons/selection"
 	"github.com/jinzhu/gorm"
 )
 
@@ -13,7 +14,7 @@ type projectStore struct {
 	commonFields
 }
 
-//NewProjectStore
+// NewProjectStore
 func NewProjectStore(provider SqlProviderInterface) store.ProjectStore {
 	repo := &projectStore{}
 
@@ -26,7 +27,7 @@ func (s *projectStore) AutoMigrate() {
 	if err := s.GetMaster().Table(s.GetTable()).AutoMigrate(&common.Project{}).Error; err != nil {
 		panic(fmt.Errorf("unable to auto migrate %s, %w", s.GetTable(), err))
 	}
-	s.provider.Logger().Infof("%s, complete initialization", s.GetTable())
+	s.provider.Logger().Info(fmt.Sprintf("%s, complete initialization", s.GetTable()))
 }
 
 func (s *projectStore) CreateProject(tx *gorm.DB, obj common.Project) (int64, error) {

@@ -5,63 +5,108 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"os/signal"
+	"runtime/pprof"
 	"syscall"
 	"time"
 
 	"github.com/holdno/gopherCron/app"
+	"github.com/holdno/gopherCron/cmd/service/middleware"
 	"github.com/holdno/gopherCron/cmd/service/router"
-	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/config"
+	"github.com/holdno/gopherCron/pkg/cronpb"
+	"github.com/holdno/gopherCron/pkg/infra"
+	"github.com/holdno/gopherCron/pkg/warning"
 	"github.com/holdno/gopherCron/utils"
 
 	"github.com/gin-gonic/gin"
+	"github.com/spacegrower/watermelon/infra/graceful"
+	"github.com/spacegrower/watermelon/infra/wlog"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
-var httpServer *http.Server
+var shutdownFunc func()
+
+func setupPprof() {
+	{
+		file, err := os.Create("./cpu.pprof")
+		if err != nil {
+			fmt.Printf("create cpu pprof failed, err:%v\n", err)
+			return
+		}
+		pprof.StartCPUProfile(file)
+	}
+
+	{
+		file, err := os.Create("./mem.pprof")
+		if err != nil {
+			fmt.Printf("create mem pprof failed, err:%v\n", err)
+			return
+		}
+		pprof.WriteHeapProfile(file)
+	}
+
+}
 
 // 初始化服务
-func apiServer(srv app.App, conf *config.DeployConf) {
+func apiServer(srv app.App, conf *config.ServiceConfig) {
 
-	if conf.Environment == "release" {
+	if utils.ReleaseMode() {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
 	engine := gin.New()
-
-	//recovery
-	engine.Use(gin.Recovery())
-
-	engine.Use(func(c *gin.Context) {
-		c.Set(common.APP_KEY, srv)
-	})
-
-	engine.NoRoute(func(c *gin.Context) {
-		c.String(http.StatusOK, "no router found")
-	})
-
-	engine.NoMethod(func(c *gin.Context) {
-		c.String(http.StatusOK, "no method found")
-	})
-
 	//URI路由设置
-	router.SetupRoute(engine, conf)
+	router.SetupRoute(srv, engine, conf.Deploy)
 
-	go func() {
-		serverAddress := resolveServerAddress(conf.Host)
-		httpServer = &http.Server{
-			Addr:        serverAddress,
+	// rpc server
+	infra.RegisterETCDRegisterPrefixKey(conf.Etcd.Prefix + "/registry")
+	newServer := infra.NewCenterServer()
+	server := newServer(func(grpcServer *grpc.Server) {
+		cronpb.RegisterCenterServer(grpcServer, &cronRpc{
+			app:                srv,
+			registerMetricsAdd: srv.Metrics().NewGaugeFunc("agent_register_count", "agent"),
+			eventsMetricsInc:   srv.Metrics().CustomIncFunc("registry_event", "", ""),
+		})
+	}, newServer.WithRegion(conf.Micro.Region),
+		newServer.WithOrg(conf.Micro.OrgID),
+		newServer.WithAddress([]infra.Address{{ListenAddress: conf.Deploy.Host}}),
+		newServer.WithHttpServer(&http.Server{
 			Handler:     engine,
 			ReadTimeout: time.Duration(5) * time.Second,
+		}),
+		newServer.WithServiceRegister(infra.MustSetupEtcdRegister()))
+
+	grpcRequestCounter := srv.Metrics().NewCounter("grpc_request", "method")
+	grpcRequestDuration := srv.Metrics().NewHistogram("grpc_request", "method")
+	server.Use(func(ctx context.Context) error {
+		method := middleware.GetFullMethodFrom(ctx)
+		grpcRequestCounter(method)
+		timer := grpcRequestDuration(method)
+		defer timer.ObserveDuration()
+		return middleware.Next(ctx)
+	})
+	server.Handler(cronpb.CenterServer.SendEvent)
+	server.Use(func(ctx context.Context) error {
+		agentIP, exist := GetAgentIPFromContext(ctx)
+		if !exist {
+			return status.Error(codes.Aborted, "header: gophercron-agent-ip is not found")
 		}
-		// TODO log
-		fmt.Println(utils.GetCurrentTimeText(), "listening and serving HTTP on "+serverAddress)
-		err := httpServer.ListenAndServe()
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "http server start failed:", err)
-			os.Exit(0)
-		}
-	}()
+		middleware.SetAgentIP(ctx, agentIP)
+		return nil
+	})
+	server.Handler(cronpb.CenterServer.RegisterAgent,
+		cronpb.CenterServer.StatusReporter,
+		cronpb.CenterServer.TryLock)
+
+	graceful.RegisterPreShutDownHandlers(func() {
+		srv.Close()
+	})
+
+	wlog.Info(fmt.Sprintf("%s, start grpc server, listen on %s\n", utils.GetCurrentTimeText(), conf.Deploy.Host))
+	server.RunUntil(syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL)
+	graceful.ShutDown()
 }
 
 // 获取http server监控端口地址
@@ -79,56 +124,28 @@ func resolveServerAddress(addr []string) string {
 	}
 }
 
-// 配置文件初始化
-func initConf(filePath string) *config.ServiceConfig {
-	apiConf := config.InitServiceConfig(filePath)
-	return apiConf
-}
-
-func Run(opt *SetupOptions) error {
+func Run(opts *SetupOptions) error {
 	// 加载配置
-	conf := initConf(opt.ConfigPath)
-	srv := app.NewApp(conf)
+	var o []app.AppOptions
+	// if opts.Firetower {
+	// 	o = append(o, app.WithFiretower())
+	// }
+	srv := app.NewApp(opts.ConfigPath, o...)
 
 	defer func() {
 		if r := recover(); r != nil {
-			srv.Warningf("%v", r)
+			srv.Warning(warning.WarningData{
+				Data:    fmt.Sprintf("gophercron service panic: %v", r),
+				Type:    warning.WarningTypeSystem,
+				AgentIP: srv.GetIP(),
+			})
 		}
 	}()
 
-	apiServer(srv, conf.Deploy)
-
-	os.Setenv("GOPHERENV", conf.Deploy.Environment)
-	waitingShutdown(srv)
-	return nil
-}
-
-func waitingShutdown(srv app.App) {
-	stopSignalChan := make(chan os.Signal, 1)
-	signal.Notify(stopSignalChan, os.Interrupt, os.Kill, syscall.SIGTERM, syscall.SIGINT)
-
-	sig := <-stopSignalChan
-	if sig != nil {
-		fmt.Println(utils.GetCurrentTimeText(), "got system signal:"+sig.String()+", going to shutdown.")
-		// wait resource remove from nginx upstreams
-		if os.Getenv("GOPHERENV") == "release" {
-			time.Sleep(time.Second * 10)
-		}
-		srv.Close()
-		// 关闭http服务
-		err := shutdownHTTPServer()
-		if err != nil {
-			fmt.Println(os.Stderr, "http server graceful shutdown failed", err)
-		} else {
-			fmt.Println(utils.GetCurrentTimeText(), "http server graceful shutdown successfully.")
-		}
+	if srv.GetConfig().Deploy.Environment == "" {
+		srv.GetConfig().Deploy.Environment = "debug"
 	}
-}
-
-// 关闭http server
-func shutdownHTTPServer() error {
-	// Create a deadline to wait for server shutdown.
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	return httpServer.Shutdown(ctx)
+	os.Setenv("GOPHERENV", srv.GetConfig().Deploy.Environment)
+	apiServer(srv, srv.GetConfig())
+	return nil
 }

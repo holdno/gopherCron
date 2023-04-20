@@ -1,10 +1,12 @@
 package sqlStore
 
 import (
-	"github.com/holdno/gopherCron/pkg/selection"
+	"fmt"
+
+	"github.com/holdno/gocommons/selection"
+	"github.com/spacegrower/watermelon/infra/wlog"
 
 	"github.com/jinzhu/gorm"
-	"github.com/sirupsen/logrus"
 )
 
 type commonFields struct {
@@ -21,6 +23,7 @@ func (c *commonFields) GetTable() string {
 }
 
 func (c *commonFields) SetTable(table string) {
+	// table = "test_" + table
 	c.table = table
 }
 
@@ -73,11 +76,11 @@ func (c *commonFields) CheckSelf() {
 		panic("can not set table")
 	}
 
-	c.provider.Logger().Infof("store %s is ok!", c.GetTable())
+	c.provider.Logger().Info(fmt.Sprintf("store %s is ok!", c.GetTable()))
 }
 
 type SqlProviderInterface interface {
 	GetMaster() *gorm.DB
 	GetReplica() *gorm.DB
-	Logger() *logrus.Logger
+	Logger() wlog.Logger
 }

@@ -1,7 +1,6 @@
 package user_func
 
 import (
-	"github.com/gin-gonic/gin/binding"
 	"github.com/holdno/gopherCron/app"
 	"github.com/holdno/gopherCron/cmd/service/response"
 	"github.com/holdno/gopherCron/common"
@@ -26,11 +25,8 @@ func GetUserList(c *gin.Context) {
 		req GetUserListRequest
 	)
 
-	if err = c.ShouldBindWith(&req, binding.Default(c.Request.Method, c.ContentType())); err != nil {
-		errObj := errors.ErrInvalidArgument
-		errObj.Msg = "请求参数错误"
-		errObj.Log = err.Error()
-		response.APIError(c, errObj)
+	if err = utils.BindArgsWithGin(c, &req); err != nil {
+		response.APIError(c, err)
 		return
 	}
 
@@ -84,12 +80,13 @@ func GetUserInfo(c *gin.Context) {
 	response.APISuccess(c, &gin.H{
 		"name":       user.Name,
 		"permission": user.Permission,
+		"account":    user.Account,
 		"id":         user.ID,
 	})
 }
 
 type GetUsersByProjectRequest struct {
-	ProjectID int64 `form:"project_id" json:"project_id"`
+	ProjectID int64 `form:"project_id" json:"project_id" binding:"required"`
 }
 
 // GetUsersByProject 获取项目下的用户列表
@@ -99,11 +96,17 @@ func GetUsersUnderTheProject(c *gin.Context) {
 		req GetUsersByProjectRequest
 		pr  []*common.ProjectRelevance
 		res []*common.User
+		uid = utils.GetUserID(c)
 		srv = app.GetApp(c)
 	)
 
 	if err = utils.BindArgsWithGin(c, &req); err != nil {
-		response.APIError(c, errors.ErrInvalidArgument)
+		response.APIError(c, err)
+		return
+	}
+
+	if err = srv.CheckPermissions(req.ProjectID, uid); err != nil {
+		response.APIError(c, err)
 		return
 	}
 

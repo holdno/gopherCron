@@ -12,6 +12,88 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+type GetErrorLogsRequest struct {
+	Page     int `json:"page" form:"page" binding:"required"`
+	Pagesize int `json:"pagesize" form:"pagesize" binding:"required"`
+}
+
+type GetErrorLogsResponse struct {
+	List  []*common.TaskLog `json:"list"`
+	Total int               `json:"total"`
+}
+
+// GetErrorLogs 获取用户相关项目的最新错误日志
+func GetErrorLogs(c *gin.Context) {
+	var (
+		err error
+		req GetErrorLogsRequest
+		srv = app.GetApp(c)
+		uid = utils.GetUserID(c)
+
+		projectIDs []int64
+	)
+
+	if err = utils.BindArgsWithGin(c, &req); err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	isAdmin, err := srv.IsAdmin(uid)
+	if err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	if !isAdmin {
+		projects, err := srv.GetUserProjects(uid)
+		if err != nil {
+			response.APIError(c, err)
+			return
+		}
+
+		for _, v := range projects {
+			projectIDs = append(projectIDs, v.ID)
+		}
+	}
+
+	logs, total, err := srv.GetErrorLogs(projectIDs, req.Page, req.Pagesize)
+	if err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	response.APISuccess(c, GetErrorLogsResponse{
+		List:  logs,
+		Total: total,
+	})
+}
+
+type GetLogDetailRequest struct {
+	ProjectID int64  `json:"project_id" form:"project_id" binding:"required"`
+	TaskID    string `json:"task_id" form:"task_id" binding:"required"`
+	TmpID     string `json:"tmp_id" form:"tmp_id" binding:"required"`
+}
+
+func GetLogDetail(c *gin.Context) {
+	var (
+		err error
+		req GetLogDetailRequest
+	)
+	if err = utils.BindArgsWithGin(c, &req); err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	a := app.GetApp(c)
+	detail, err := a.GetTaskLogDetail(req.ProjectID, req.TaskID, req.TmpID)
+	if err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	response.APISuccess(c, detail)
+}
+
 // GetListRequest 获取任务执行日志
 type GetListRequest struct {
 	Page      int    `form:"page" binding:"required"`
@@ -33,18 +115,26 @@ func GetList(c *gin.Context) {
 	)
 
 	if err = utils.BindArgsWithGin(c, &req); err != nil {
-		response.APIError(c, errors.ErrInvalidArgument)
-		return
-	}
-
-	if exist, err = srv.CheckUserIsInProject(req.ProjectID, uid); err != nil {
 		response.APIError(c, err)
 		return
 	}
 
-	if !exist {
-		response.APIError(c, errors.ErrProjectNotExist)
+	isAdmin, err := srv.IsAdmin(uid)
+	if err != nil {
+		response.APIError(c, err)
 		return
+	}
+
+	if !isAdmin {
+		if exist, err = srv.CheckUserIsInProject(req.ProjectID, uid); err != nil {
+			response.APIError(c, err)
+			return
+		}
+
+		if !exist {
+			response.APIError(c, errors.ErrProjectNotExist)
+			return
+		}
 	}
 
 	if logList, err = srv.GetTaskLogList(req.ProjectID, req.TaskID, req.Page, req.Pagesize); err != nil {

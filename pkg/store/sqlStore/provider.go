@@ -5,23 +5,24 @@ import (
 	"reflect"
 
 	"github.com/holdno/gopherCron/common"
-
-	"github.com/go-sql-driver/mysql"
 	"github.com/holdno/gopherCron/config"
 	"github.com/holdno/gopherCron/pkg/store"
 	"github.com/holdno/gopherCron/utils"
+	"github.com/spacegrower/watermelon/infra/wlog"
+	"go.uber.org/zap"
+
+	"github.com/go-sql-driver/mysql"
 	"github.com/jinzhu/gorm"
-	"github.com/sirupsen/logrus"
 )
 
 type SqlProvider struct {
 	master   *gorm.DB
 	replicas []*gorm.DB
 	stores   SqlProviderStores
-	logger   *logrus.Logger
+	logger   wlog.Logger
 }
 
-func (p *SqlProvider) Logger() *logrus.Logger {
+func (p *SqlProvider) Logger() wlog.Logger {
 	return p.logger
 }
 
@@ -56,13 +57,20 @@ func (s *SqlProvider) CheckStores() {
 }
 
 type SqlProviderStores struct {
-	User             store.UserStore
-	Project          store.ProjectStore
-	ProjectRelevance store.ProjectRelevanceStore
-	TaskLog          store.TaskLogStore
+	User                  store.UserStore
+	Project               store.ProjectStore
+	ProjectRelevance      store.ProjectRelevanceStore
+	TaskLog               store.TaskLogStore
+	WebHook               store.TaskWebHookStore
+	Workflow              store.WorkflowStore
+	WorkflowSchedulePlan  store.WorkflowSchedulePlanStore
+	UserWorkflowRelevance store.UserWorkflowRelevanceStore
+	WorkflowLog           store.WorkflowLogStore
+	WorkflowTask          store.WorkflowTaskStore
+	TemporaryTask         store.TemporaryTaskStore
 }
 
-func MustSetup(conf *config.MysqlConf, logger *logrus.Logger, install bool) SqlStore {
+func MustSetup(conf *config.MysqlConf, logger wlog.Logger, install bool) SqlStore {
 	provider := new(SqlProvider)
 
 	provider.logger = logger
@@ -74,6 +82,14 @@ func MustSetup(conf *config.MysqlConf, logger *logrus.Logger, install bool) SqlS
 	provider.stores.Project = NewProjectStore(provider)
 	provider.stores.TaskLog = NewTaskLogStore(provider)
 	provider.stores.ProjectRelevance = NewProjectRelevanceStore(provider)
+	provider.stores.WebHook = NewWebHookStore(provider)
+	provider.stores.Workflow = NewWorkflowStore(provider)
+	provider.stores.WorkflowSchedulePlan = NewWorkflowSchedulePlanStore(provider)
+	provider.stores.WorkflowTask = NewWorkflowTaskStore(provider)
+	provider.stores.UserWorkflowRelevance = NewUserWorkflowRelevanceStore(provider)
+	provider.stores.WorkflowLog = NewWorkflowLogStore(provider)
+	provider.stores.TemporaryTask = NewTemporaryTaskStoreStore(provider)
+
 	provider.CheckStores()
 
 	if install {
@@ -92,12 +108,34 @@ func MustSetup(conf *config.MysqlConf, logger *logrus.Logger, install bool) SqlS
 		if err = provider.stores.User.CreateAdminUser(); err != nil {
 			panic(err)
 		}
-		provider.logger.WithFields(logrus.Fields{
+		provider.logger.With(zap.Any("field", map[string]interface{}{
 			"account":  common.ADMIN_USER_ACCOUNT,
 			"password": common.ADMIN_USER_PASSWORD,
-		}).Info("admin user created")
+		})).Info("admin user created")
 	}
 	return provider
+}
+
+func (s *SqlProvider) TemporaryTask() store.TemporaryTaskStore {
+	return s.stores.TemporaryTask
+}
+
+func (s *SqlProvider) WorkflowLog() store.WorkflowLogStore {
+	return s.stores.WorkflowLog
+}
+
+func (s *SqlProvider) UserWorkflowRelevance() store.UserWorkflowRelevanceStore {
+	return s.stores.UserWorkflowRelevance
+}
+
+func (s *SqlProvider) Workflow() store.WorkflowStore {
+	return s.stores.Workflow
+}
+func (s *SqlProvider) WorkflowSchedulePlan() store.WorkflowSchedulePlanStore {
+	return s.stores.WorkflowSchedulePlan
+}
+func (s *SqlProvider) WorkflowTask() store.WorkflowTaskStore {
+	return s.stores.WorkflowTask
 }
 
 func (s *SqlProvider) User() store.UserStore {
@@ -114,6 +152,10 @@ func (s *SqlProvider) ProjectRelevance() store.ProjectRelevanceStore {
 
 func (s *SqlProvider) TaskLog() store.TaskLogStore {
 	return s.stores.TaskLog
+}
+
+func (s *SqlProvider) WebHook() store.TaskWebHookStore {
+	return s.stores.WebHook
 }
 
 func (s *SqlProvider) BeginTx() *gorm.DB {
@@ -160,6 +202,13 @@ type SqlStore interface {
 	Project() store.ProjectStore
 	ProjectRelevance() store.ProjectRelevanceStore
 	TaskLog() store.TaskLogStore
+	WebHook() store.TaskWebHookStore
+	Workflow() store.WorkflowStore
+	WorkflowSchedulePlan() store.WorkflowSchedulePlanStore
+	WorkflowTask() store.WorkflowTaskStore
+	UserWorkflowRelevance() store.UserWorkflowRelevanceStore
+	WorkflowLog() store.WorkflowLogStore
+	TemporaryTask() store.TemporaryTaskStore
 	BeginTx() *gorm.DB
 	Install()
 	Shutdown()

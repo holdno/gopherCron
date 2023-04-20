@@ -7,26 +7,60 @@
   <img src="https://img.shields.io/badge/golang-1.11.0-%23ff69b4.svg" alt="Version">
   <img src="https://img.shields.io/badge/license-MIT-brightgreen.svg" alt="license">
 </p>
-<h1 align="center">GopherCron</h2>
-开箱即用的分布式可视化crontab  
+<h1 align="center">GopherCron</h1>
+开箱即用的分布式可视化crontab
 
 可以通过配置文件指定某个节点所受理的业务线，从而做到业务统一管理但隔离调度
-### 依赖  
-- Etcd   # 服务注册与发现
-- Gin # webapi 提供可视化操作
-- MongoDB  # 任务日志存储
-- cronexpr # github.com/gorhill/cronexpr cron表达式解析器  
-  
-### 实现功能  
-- 秒级定时任务  
-- 任务日志查看  
-- 随时结束任务进程  
-- 分布式扩展  
-- 健康节点检测 (分项目显示对应的健康节点IP及节点数)  
 
-### cronexpr 秒级cron表达式介绍(引用)  
+### V2
 
-    * * * * * * * 
+全新 V2 版本支持 workflow，重写任务调度方式，移除 client 对 etcd 的依赖
+
+### 依赖
+
+- Etcd # 服务注册与发现
+- Mysql # 任务日志存储
+
+### 引用
+
+- Gin # 提供 webapi
+- gopherCronFe # github.com/holdno/gopherCronFe 提供可视化管理界面(已将构建后的文件内置于 dist/view 目录下)
+- cronexpr # github.com/gorhill/cronexpr 提供 cron 表达式解析器
+- watermelon # github.com/spacegrower/watermelon 提供服务注册发现能力
+
+### 实现功能
+
+- 秒级定时任务
+- 任务日志查看
+- 随时结束任务进程
+- 分布式扩展
+- 健康节点检测 (分项目显示对应的健康节点 IP 及节点数)
+
+### 任务日志集中上报
+
+1.10.x 版本中 client 配置增加了 report_addr 项，该配置接收一个 http 接口  
+配置后，任务日志将通过 http 发送到该地址进行集中处理  
+可通过请求中的 Head 参数 Report-Type 来判断是告警还是日志来做对应的处理  
+日志结构(参考：common/protocol.go 下的 TaskExecuteResult)：
+
+```golang
+// TaskExecuteResult 任务执行结果
+type TaskExecuteResult struct {
+	ExecuteInfo *TaskExecutingInfo `json:"execute_info"`
+	Output      string             `json:"output"`     // 程序输出
+	Err         string             `json:"error"`      // 是否发生错误
+	StartTime   time.Time          `json:"start_time"` // 开始时间
+	EndTime     time.Time          `json:"end_time"`   // 结束时间
+}
+```
+
+v2.1.0 + 版本中移除了 client 对 etcd 的依赖
+
+日志上报相关代码参考 app/taskreport.go
+
+### cronexpr 秒级 cron 表达式介绍(引用)
+
+    * * * * * * *
     Field name     Mandatory?   Allowed values    Allowed special characters
     ----------     ----------   --------------    --------------------------
     Seconds        No           0-59              * / , -
@@ -37,100 +71,22 @@
     Day of week    Yes          0-6 or SUN-SAT    * / , - L #
     Year           No           1970–2099         * / , -
 
-### 使用方法  
-下载项目到本地并编译，根据cmd文件夹下service和client中包含的conf/config-default.toml进行配置  
+### 使用方法
 
-#### service 配置文件  
-``` toml 
-log_level = "debug"
+下载项目到本地并编译，根据 cmd 文件夹下 service 和 client 中包含的 conf/config-default.toml 进行配置
 
-[deploy]
-# 当前的环境:dev、release
-environment = "release"
-# 对外提供的端口
-host = ["0.0.0.0:6306"]
-# 数据库操作超时时间
-timeout = 5  # 秒为单位
-# 前端文件路径
-view_path = "./view"
+### Admin 管理页面
 
-# etcd
-[etcd]
-service = ["0.0.0.0:2379"]
-username = ""
-password = ""
-dialtimeout = 5000
-# etcd kv存储的key前缀 用来与其他业务做区分
-prefix = "/gopher_cron"
+访问地址: localhost:6306/admin
 
-[mysql]
-service="0.0.0.0:3306"
-username=""
-password=""
-database=""
+> 管理员初始账号密码为 admin 123456
 
-# jwt用来做api的身份校验
-[jwt]
-# jwt签名的secret 建议修改
-secret = "fjskfjls2ifeew2mn"
-exp = 168  # token 有效期(小时)
-```
-
-#### service 部署  
-``` shell
-$ ./service -conf ./conf/config-default.toml // 配置文件名请随意  
-2019-01-18 00:00:45 listening and serving HTTP on 0.0.0.0:6306
-
-```
-
-#### client 配置文件
-``` toml
-log_level = "debug"
-
-[deploy]
-# 当前的环境:dev、release
-environment = "release"
-# 数据库操作超时时间
-timeout = 5  # 秒为单位
-
-# etcd
-[etcd]
-service = ["0.0.0.0:2379"]
-username = ""
-password = ""
-dialtimeout = 5000
-# etcd kv存储的key前缀 用来与其他业务做区分
-prefix = "/gopher_cron"
-# 当前节点需要处理的项目ID
-projects = [1,2]
-# 命令调用脚本 /bin/sh  /bin/bash 根据自己系统情况决定
-shell = "/bin/bash"
-
-[mysql]
-service="0.0.0.0:3306"
-username=""
-password=""
-database=""
-```
-#### client 部署  
- 
-``` shell
-$ ./client -conf ./conf/config-default.toml
-// 等待如下输入即启动成功 
-register key /gopher_cron/register/12/xxx.xxx.xxx.xxx
-```  
-
-### Admin 管理页面  
-访问地址: localhost:6306/admin    
-  
-> 管理员初始账号密码为 admin  123456  
-
-![image](http://img.holdno.com/github/holdno/gopher_cron/admin_home.png)  
+![image](http://img.holdno.com/github/holdno/gopher_cron/admin_home.png)
 
 ![image](http://img.holdno.com/github/holdno/gopher_cron/admin_task.png)
 
-### 注意   
-client配置文件中的project配置需要用户先部署service  
-在service中创建项目后可以获得项目ID  
-需要将项目ID填写在client的配置中该client才会调度这个项目的任务  
+### 注意
 
+client 配置文件中的 project 配置需要用户先部署 service  
+在 service 中创建项目后可以获得项目 ID  
+需要将项目 ID 填写在 client 的配置中该 client 才会调度这个项目的任务

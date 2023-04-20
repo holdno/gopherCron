@@ -1,24 +1,18 @@
 log_level = "debug"
-
-[deploy]
-# 当前的环境:dev、release
-environment = "release"
-# 数据库操作超时时间
-timeout = 5  # 秒为单位
-
-# etcd
-[etcd]
-service = ["0.0.0.0:2379"]
-username = ""
-password = ""
-dialtimeout = 5000
-# etcd kv存储的key前缀 用来与其他业务做区分
-prefix = "/gopher_cron"
-# 当前节点需要处理的项目ID
-projects = [1,2]
-# 命令调用脚本 /bin/sh  /bin/bash 根据自己系统情况决定
+report_addr=""
+projects = [] # 该agent需要执行的项目id
 shell = "/bin/bash"
+token = ""
 
+timeout = 5
+
+[micro]
+region = "center"
+org_id = "gophercron"
+weight = 100
+endpoint = "localhost:6306" # 中心服务的地址，域名也请带上端口号(HA等则仅需带上80 / 443端口号)
+
+# report_addr 与 mysql 选一填写，mysql优先使用
 [mysql]
 service="0.0.0.0:3306"
 username=""

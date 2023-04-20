@@ -2,23 +2,56 @@ package config
 
 var serviceConf *ServiceConfig
 
+type ClientConfig struct {
+	Shell      string  `toml:"shell,omitempty"`
+	LogLevel   string  `toml:"log_level"`
+	LogFile    string  `toml:"log_file"`
+	ReportAddr string  `toml:"report_addr"`
+	Projects   []int64 `toml:"projects,omitempty"`
+	Timeout    int     `toml:"timeout"`
+
+	Token   string     `toml:"token"`
+	Address string     `toml:"address"`
+	Micro   Micro      `toml:"micro"`
+	Mysql   *MysqlConf `toml:"mysql"`
+}
+
+type Project struct {
+	Appid  int64  `toml:"appid"`
+	Secret string `toml:"secret"`
+}
+
 // APIConfig 配置文件Root
 type ServiceConfig struct {
-	Env      string       `toml:"env"`
-	LogLevel string       `toml:"log_level"`
-	Deploy   *DeployConf  `toml:"deploy"` // host配置
-	Etcd     *EtcdConf    `toml:"etcd"`
-	MongoDB  *MongoDBConf `toml:"mongodb"`
-	JWT      *JWTConf     `toml:"jwt"`
-	Mysql    *MysqlConf   `toml:"mysql"`
+	LogLevel string `toml:"log_level"`
+	LogPath  string `toml:"log_path"`
+
+	Publish Publish     `toml:"publish"`
+	Deploy  *DeployConf `toml:"deploy"` // host配置
+	Etcd    *EtcdConf   `toml:"etcd"`
+	Micro   Micro       `toml:"micro"`
+	JWT     *JWTConf    `toml:"jwt"`
+	Mysql   *MysqlConf  `toml:"mysql"`
+}
+
+type Publish struct {
+	Enable   bool   `toml:"enable"`
+	Endpoint string `toml:"endpoint"`
+}
+
+type Micro struct {
+	Endpoint string `toml:"endpoint"`
+	OrgID    string `toml:"org_id"`
+	Region   string `toml:"region"`
+	Weigth   int32  `toml:"weigth"`
 }
 
 // DeployConf 部署配置
 type DeployConf struct {
-	Environment string   `toml:"environment"`
-	Timeout     int      `toml:"timeout"`
-	Host        []string `toml:"host"`
-	ViewPath    string   `toml:"view_path"`
+	Environment string `toml:"environment"`
+	Timeout     int    `toml:"timeout"`
+	ViewPath    string `toml:"view_path"`
+	Host        string `toml:"host"`
 }
 
 // EtcdConf etcd配置
@@ -56,9 +89,6 @@ type JWTConf struct {
 
 // InitServiceConfig 获取api相关配置
 func InitServiceConfig(path string) *ServiceConfig {
-	if serviceConf != nil {
-		return serviceConf
-	}
 	if path == "" {
 		return nil
 	}
@@ -66,6 +96,17 @@ func InitServiceConfig(path string) *ServiceConfig {
 	var c ServiceConfig
 	LoadFrom(path, &c)
 	serviceConf = &c
+	return &c
+}
+
+// InitServiceConfig 获取api相关配置
+func InitClientConfig(path string) *ClientConfig {
+	if path == "" {
+		return nil
+	}
+
+	var c ClientConfig
+	LoadFrom(path, &c)
 	return &c
 }
 

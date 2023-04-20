@@ -31,18 +31,26 @@ func CleanLogs(c *gin.Context) {
 	)
 
 	if err = utils.BindArgsWithGin(c, &req); err != nil {
-		response.APIError(c, errors.ErrInvalidArgument)
-		return
-	}
-
-	if exist, err = srv.CheckUserIsInProject(req.ProjectID, uid); err != nil {
 		response.APIError(c, err)
 		return
 	}
 
-	if !exist {
-		response.APIError(c, errors.ErrProjectNotExist)
+	isAdmin, err := srv.IsAdmin(uid)
+	if err != nil {
+		response.APIError(c, err)
 		return
+	}
+
+	if !isAdmin {
+		if exist, err = srv.CheckUserIsInProject(req.ProjectID, uid); err != nil {
+			response.APIError(c, err)
+			return
+		}
+
+		if !exist {
+			response.APIError(c, errors.ErrProjectNotExist)
+			return
+		}
 	}
 
 	if req.TaskID == "" {
