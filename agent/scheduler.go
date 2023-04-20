@@ -413,6 +413,9 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 							zap.String("task_name", taskExecuteInfo.Task.Name),
 							zap.Error(err))
 						if tryTimes == 3 {
+							if taskExecuteInfo.CancelCtx.Err() != nil {
+								return
+							}
 							a.Warning(warning.WarningData{
 								Type:      warning.WarningTypeSystem,
 								AgentIP:   a.localip,
@@ -441,13 +444,6 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 			}()
 
 			if err = <-resultChan; err != nil {
-				a.Warning(warning.WarningData{
-					Type:      warning.WarningTypeSystem,
-					AgentIP:   a.localip,
-					TaskName:  plan.Task.Name,
-					ProjectID: plan.Task.ProjectID,
-					Data:      fmt.Sprintf("failed to get execute lock, error: %s", err.Error()),
-				})
 				return
 			}
 
