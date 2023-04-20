@@ -1,6 +1,8 @@
 package project_func
 
 import (
+	"time"
+
 	"github.com/holdno/gopherCron/app"
 	"github.com/holdno/gopherCron/cmd/service/response"
 	"github.com/holdno/gopherCron/common"
@@ -11,9 +13,9 @@ import (
 )
 
 type UpdateRequest struct {
-	ProjectID int64  `form:"project_id" binding:"required"`
-	Title     string `form:"title" binding:"required"`
-	Remark    string `form:"remark"`
+	ProjectID int64  `json:"project_id" form:"project_id" binding:"required"`
+	Title     string `json:"title" form:"title" binding:"required"`
+	Remark    string `json:"remark" form:"remark"`
 }
 
 // Update 更新项目信息
@@ -28,7 +30,7 @@ func Update(c *gin.Context) {
 	)
 
 	if err = utils.BindArgsWithGin(c, &req); err != nil {
-		response.APIError(c, errors.ErrInvalidArgument)
+		response.APIError(c, err)
 		return
 	}
 
@@ -52,17 +54,16 @@ func Update(c *gin.Context) {
 }
 
 type RemoveUserRequest struct {
-	UserID    int64 `form:"user_id" binding:"required"`
-	ProjectID int64 `form:"project_id" binding:"required"`
+	UserID    int64 `json:"user_id" form:"user_id" binding:"required"`
+	ProjectID int64 `json:"project_id" form:"project_id" binding:"required"`
 }
 
 func RemoveUser(c *gin.Context) {
 	var (
-		err     error
-		req     RemoveUserRequest
-		project *common.Project
-		uid     = utils.GetUserID(c)
-		srv     = app.GetApp(c)
+		err error
+		req RemoveUserRequest
+		uid = utils.GetUserID(c)
+		srv = app.GetApp(c)
 	)
 
 	if err = utils.BindArgsWithGin(c, &req); err != nil {
@@ -77,23 +78,9 @@ func RemoveUser(c *gin.Context) {
 		return
 	}
 
-	// 首先确认操作的用户是否为该项目的管理员
-	isAdmin, err := srv.IsAdmin(uid)
-	if err != nil {
+	if err = srv.CheckPermissions(req.ProjectID, uid); err != nil {
 		response.APIError(c, err)
 		return
-	}
-
-	if !isAdmin {
-		if project, err = srv.CheckUserProject(req.ProjectID, uid); err != nil {
-			response.APIError(c, err)
-			return
-		}
-
-		if project == nil {
-			response.APIError(c, errors.ErrUnauthorized)
-			return
-		}
 	}
 
 	// 验证通过后再执行移出操作
@@ -106,8 +93,8 @@ func RemoveUser(c *gin.Context) {
 }
 
 type AddUserRequest struct {
-	ProjectID   int64  `form:"project_id" binding:"required"`
-	UserAccount string `form:"user_account" binding:"required"`
+	ProjectID   int64  `json:"project_id" form:"project_id" binding:"required"`
+	UserAccount string `json:"user_account" form:"user_account" binding:"required"`
 }
 
 func AddUser(c *gin.Context) {
@@ -117,7 +104,6 @@ func AddUser(c *gin.Context) {
 		uid      = utils.GetUserID(c)
 		srv      = app.GetApp(c)
 		userInfo *common.User
-		project  *common.Project
 	)
 
 	if err = utils.BindArgsWithGin(c, &req); err != nil {
@@ -125,22 +111,9 @@ func AddUser(c *gin.Context) {
 		return
 	}
 
-	isAdmin, err := srv.IsAdmin(uid)
-	if err != nil {
+	if err = srv.CheckPermissions(req.ProjectID, uid); err != nil {
 		response.APIError(c, err)
 		return
-	}
-
-	if !isAdmin {
-		if project, err = srv.CheckUserProject(req.ProjectID, uid); err != nil {
-			response.APIError(c, err)
-			return
-		}
-
-		if project == nil {
-			response.APIError(c, errors.ErrUnauthorized)
-			return
-		}
 	}
 
 	if userInfo, err = srv.GetUserByAccount(req.UserAccount); err != nil {
@@ -166,5 +139,43 @@ func AddUser(c *gin.Context) {
 		return
 	}
 
+	response.APISuccess(c, nil)
+}
+
+type UpdateProjectWorkflowTaskRequest struct {
+	TaskID    string `json:"task_id" form:"task_id" binding:"required"`
+	ProjectID int64  `json:"project_id" form:"project_id" binding:"required"`
+	TaskName  string `json:"task_name" form:"task_name" binding:"required"`
+	Command   string `json:"command" form:"command" binding:"required"`
+	Remark    string `json:"remark" form:"remark"`
+	Timeout   int    `json:"timeout" form:"timeout" binding:"required"`
+}
+
+func UpdateProjectWorkflowTask(c *gin.Context) {
+	var (
+		err error
+		req UpdateProjectWorkflowTaskRequest
+	)
+	if err = utils.BindArgsWithGin(c, &req); err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	uid := utils.GetUserID(c)
+	srv := app.GetApp(c)
+
+	err = srv.UpdateWorkflowTask(uid, common.WorkflowTask{
+		TaskID:     req.TaskID,
+		ProjectID:  req.ProjectID,
+		TaskName:   req.TaskName,
+		Command:    req.Command,
+		Remark:     req.Remark,
+		Timeout:    req.Timeout,
+		CreateTime: time.Now().Unix(),
+	})
+	if err != nil {
+		response.APIError(c, err)
+		return
+	}
 	response.APISuccess(c, nil)
 }

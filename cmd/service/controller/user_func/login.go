@@ -1,6 +1,8 @@
 package user_func
 
 import (
+	"time"
+
 	"github.com/holdno/gopherCron/app"
 	"github.com/holdno/gopherCron/cmd/service/response"
 	"github.com/holdno/gopherCron/common"
@@ -16,6 +18,15 @@ type LoginRequest struct {
 	Password string `form:"password" binding:"required"`
 }
 
+type LoginResponse struct {
+	ID         int64  `json:"id"`
+	Name       string `json:"name"`
+	Account    string `json:"account"`
+	Permission string `json:"permission"`
+	Token      string `json:"token"`
+	TTL        int64  `json:"ttl"`
+}
+
 func Login(c *gin.Context) {
 	var (
 		req      LoginRequest
@@ -27,7 +38,7 @@ func Login(c *gin.Context) {
 	)
 
 	if err = utils.BindArgsWithGin(c, &req); err != nil {
-		response.APIError(c, errors.ErrInvalidArgument)
+		response.APIError(c, err)
 		return
 	}
 
@@ -48,10 +59,12 @@ func Login(c *gin.Context) {
 		return
 	}
 
-	response.APISuccess(c, &gin.H{
-		"name":       user.Name,
-		"permission": user.Permission,
-		"id":         user.ID,
-		"token":      jwt.Build(user.ID),
+	response.APISuccess(c, &LoginResponse{
+		ID:         user.ID,
+		Name:       user.Name,
+		Account:    user.Account,
+		Permission: user.Permission,
+		Token:      jwt.Build(user.ID),
+		TTL:        time.Now().Add(time.Duration(srv.GetConfig().JWT.Exp) * time.Second).Unix(),
 	})
 }

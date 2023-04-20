@@ -14,8 +14,8 @@ import (
 )
 
 type KillTaskRequest struct {
-	ProjectID int64  `form:"project_id" binding:"required"`
-	TaskID    string `form:"task_id" binding:"required"`
+	ProjectID int64  `json:"project_id" form:"project_id" binding:"required"`
+	TaskID    string `json:"task_id" form:"task_id" binding:"required"`
 }
 
 // KillTask kill task from etcd
@@ -33,14 +33,12 @@ func KillTask(c *gin.Context) {
 	)
 
 	if err = utils.BindArgsWithGin(c, &req); err != nil {
-		errObj = errors.ErrInvalidArgument
-		errObj.Log = "[Controller - KillTask] KillTaskRequest args error:" + err.Error()
-		response.APIError(c, errObj)
+		response.APIError(c, err)
 		return
 	}
 
 	// 这里主要是防止用户强杀不属于自己项目的业务
-	if _, err = srv.CheckUserIsInProject(req.ProjectID, uid); err != nil {
+	if err = srv.CheckPermissions(req.ProjectID, uid); err != nil {
 		response.APIError(c, err)
 		return
 	}
@@ -70,9 +68,9 @@ func KillTask(c *gin.Context) {
 	if _, err = srv.SaveTask(task); err != nil {
 		goto ChangeStatusError
 	}
-	if err = srv.SetTaskNotRunning(*task); err != nil {
-		goto ChangeStatusError
-	}
+	//if err = srv.SetTaskNotRunning(*task); err != nil {
+	//	goto ChangeStatusError
+	//}
 	response.APISuccess(c, nil)
 	return
 

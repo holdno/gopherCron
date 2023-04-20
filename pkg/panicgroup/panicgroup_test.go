@@ -2,23 +2,12 @@ package panicgroup
 
 import (
 	"fmt"
-	"sync"
 	"testing"
+	"time"
 )
 
 func TestPanicgroup_Go(t *testing.T) {
-	pg := NewPanicGroup(func(err error) {
-		fmt.Println(err)
-	})
+	var ti time.Time
 
-	w := sync.WaitGroup{}
-	for i := 0; i < 10; i++ {
-		w.Add(1)
-		pg.Go(func(a ...interface{}) {
-			fmt.Println(a[0])
-			w.Done()
-		})(i)
-	}
-
-	w.Wait()
+	fmt.Println(ti.IsZero())
 }

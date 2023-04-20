@@ -33,14 +33,13 @@ func SaveTask(c *gin.Context) {
 		req         TaskSaveRequest
 		oldTaskInfo *common.TaskInfo
 		err         error
-		exist       bool
 
 		uid = utils.GetUserID(c)
 		srv = app.GetApp(c)
 	)
 
 	if err = utils.BindArgsWithGin(c, &req); err != nil {
-		response.APIError(c, errors.ErrInvalidArgument)
+		response.APIError(c, err)
 		return
 	}
 
@@ -50,23 +49,9 @@ func SaveTask(c *gin.Context) {
 		return
 	}
 
-	// 首先确认操作的用户是否为该项目的管理员
-	isAdmin, err := srv.IsAdmin(uid)
-	if err != nil {
+	if err = srv.CheckPermissions(req.ProjectID, uid); err != nil {
 		response.APIError(c, err)
 		return
-	}
-
-	if !isAdmin {
-		if exist, err = srv.CheckUserIsInProject(req.ProjectID, uid); err != nil {
-			response.APIError(c, err)
-			return
-		}
-
-		if !exist {
-			response.APIError(c, errors.ErrProjectNotExist)
-			return
-		}
 	}
 
 	if oldTaskInfo, err = srv.SaveTask(&common.TaskInfo{

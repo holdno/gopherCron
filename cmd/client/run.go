@@ -6,8 +6,9 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/holdno/gopherCron/app"
+	"github.com/holdno/gopherCron/agent"
 	"github.com/holdno/gopherCron/config"
+	"github.com/holdno/gopherCron/pkg/warning"
 	"github.com/holdno/gopherCron/utils"
 )
 
@@ -19,15 +20,14 @@ func initConf(filePath string) *config.ServiceConfig {
 
 func Run(opts *SetupOptions) error {
 	// 加载配置
-	client := app.NewClient(opts.ConfigPath)
+	client := agent.NewClient(opts.ConfigPath)
 
 	restart := func() {
 		defer func() {
 			if r := recover(); r != nil {
-				ip, _ := utils.GetLocalIP()
-				_ = client.Warning(app.WarningData{
-					Data:    fmt.Sprintf("agent %s down", ip),
-					Type:    app.WarningTypeSystem,
+				_ = client.Warning(warning.WarningData{
+					Data:    fmt.Sprintf("agent %s down", client.GetIP()),
+					Type:    warning.WarningTypeSystem,
 					AgentIP: client.GetIP(),
 				})
 			}
@@ -37,7 +37,11 @@ func Run(opts *SetupOptions) error {
 
 	go func() {
 		for {
-			restart()
+			select {
+			case <-client.Down():
+			default:
+				restart()
+			}
 		}
 	}()
 
@@ -45,7 +49,7 @@ func Run(opts *SetupOptions) error {
 	return nil
 }
 
-func waitingShutdown(c app.Client) {
+func waitingShutdown(c agent.Client) {
 	stopSignalChan := make(chan os.Signal, 1)
 	signal.Notify(stopSignalChan, os.Interrupt, os.Kill, syscall.SIGTERM, syscall.SIGINT)
 

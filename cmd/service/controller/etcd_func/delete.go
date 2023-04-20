@@ -11,8 +11,8 @@ import (
 )
 
 type DeleteTaskRequest struct {
-	ProjectID int64  `form:"project_id" binding:"required"`
-	TaskID    string `form:"task_id" binding:"required"`
+	ProjectID int64  `form:"project_id" json:"project_id" binding:"required"`
+	TaskID    string `form:"task_id" json:"task_id" binding:"required"`
 }
 
 // DeleteTask delete task from etcd
@@ -23,32 +23,28 @@ func DeleteTask(c *gin.Context) {
 		req     DeleteTaskRequest
 		oldTask *common.TaskInfo
 		task    *common.TaskInfo
-		errObj  errors.Error
-		exist   bool
 		uid     = utils.GetUserID(c)
 		srv     = app.GetApp(c)
 	)
 
 	if err = utils.BindArgsWithGin(c, &req); err != nil {
-		errObj = errors.ErrInvalidArgument
-		errObj.Log = err.Error()
-		response.APIError(c, errObj)
-		return
-	}
-
-	if exist, err = srv.CheckUserIsInProject(req.ProjectID, uid); err != nil {
 		response.APIError(c, err)
 		return
 	}
 
-	if !exist {
-		response.APIError(c, errors.ErrProjectNotExist)
+	if err = srv.CheckPermissions(req.ProjectID, uid); err != nil {
+		response.APIError(c, err)
 		return
 	}
 
 	// 强杀任务后暂停任务
 	if task, err = srv.GetTask(req.ProjectID, req.TaskID); err != nil {
-		response.APIError(c, errors.ErrInternalError)
+		response.APIError(c, err)
+		return
+	}
+
+	if task == nil {
+		response.APIError(c, errors.ErrProjectNotExist)
 		return
 	}
 

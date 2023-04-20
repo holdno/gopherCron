@@ -14,7 +14,7 @@ type projectStore struct {
 	commonFields
 }
 
-//NewProjectStore
+// NewProjectStore
 func NewProjectStore(provider SqlProviderInterface) store.ProjectStore {
 	repo := &projectStore{}
 
@@ -27,7 +27,7 @@ func (s *projectStore) AutoMigrate() {
 	if err := s.GetMaster().Table(s.GetTable()).AutoMigrate(&common.Project{}).Error; err != nil {
 		panic(fmt.Errorf("unable to auto migrate %s, %w", s.GetTable(), err))
 	}
-	s.provider.Logger().Infof("%s, complete initialization", s.GetTable())
+	s.provider.Logger().Info(fmt.Sprintf("%s, complete initialization", s.GetTable()))
 }
 
 func (s *projectStore) CreateProject(tx *gorm.DB, obj common.Project) (int64, error) {

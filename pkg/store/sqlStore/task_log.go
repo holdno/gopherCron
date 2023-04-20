@@ -14,7 +14,7 @@ type taskLogStore struct {
 	commonFields
 }
 
-//NewProjectStore
+// NewProjectStore
 func NewTaskLogStore(provider SqlProviderInterface) store.TaskLogStore {
 	repo := &taskLogStore{}
 
@@ -27,7 +27,7 @@ func (s *taskLogStore) AutoMigrate() {
 	if err := s.GetMaster().Table(s.GetTable()).AutoMigrate(&common.TaskLog{}).Error; err != nil {
 		panic(fmt.Errorf("unable to auto migrate %s, %w", s.GetTable(), err))
 	}
-	s.provider.Logger().Infof("%s, complete initialization", s.GetTable())
+	s.provider.Logger().Info(fmt.Sprintf("%s, complete initialization", s.GetTable()))
 }
 
 func (s *taskLogStore) CreateTaskLog(data common.TaskLog) error {
@@ -49,6 +49,20 @@ func (s *taskLogStore) GetList(selector selection.Selector) ([]*common.TaskLog, 
 		return nil, err
 	}
 	return res, nil
+}
+
+func (s *taskLogStore) GetOne(projectID int64, taskID, tmpID string) (*common.TaskLog, error) {
+	var (
+		err error
+		res common.TaskLog
+	)
+
+	err = s.GetReplica().Table(s.GetTable()).
+		Where("project_id = ? AND task_id = ? AND tmp_id = ?", projectID, taskID, tmpID).First(&res).Error
+	if err != nil {
+		return nil, err
+	}
+	return &res, nil
 }
 
 func (s *taskLogStore) Clean(tx *gorm.DB, selector selection.Selector) error {

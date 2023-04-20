@@ -9,7 +9,7 @@ import (
 )
 
 func TestBuild(t *testing.T) {
-	token := Build("")
+	token := Build(0)
 	t.Log(token)
 }
 
