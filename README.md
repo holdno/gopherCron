@@ -12,6 +12,10 @@
 
 可以通过配置文件指定某个节点所受理的业务线，从而做到业务统一管理但隔离调度
 
+### V2
+
+全新 V2 版本支持 workflow，重写任务调度方式，移除 client 对 etcd 的依赖
+
 ### 依赖
 
 - Etcd # 服务注册与发现
@@ -19,9 +23,10 @@
 
 ### 引用
 
-- Gin # webapi 提供可视化操作
-- cronexpr # github.com/gorhill/cronexpr cron 表达式解析器
-- watermelon # github.com/spacegrower/watermelon 服务注册发现能力
+- Gin # 提供 webapi
+- gopherCronFe # github.com/holdno/gopherCronFe 提供可视化管理界面(已将构建后的文件内置于 dist/view 目录下)
+- cronexpr # github.com/gorhill/cronexpr 提供 cron 表达式解析器
+- watermelon # github.com/spacegrower/watermelon 提供服务注册发现能力
 
 ### 实现功能
 
@@ -49,6 +54,8 @@ type TaskExecuteResult struct {
 }
 ```
 
+v2.1.0 + 版本中移除了 client 对 etcd 的依赖
+
 日志上报相关代码参考 app/taskreport.go
 
 ### cronexpr 秒级 cron 表达式介绍(引用)
@@ -67,96 +74,6 @@ type TaskExecuteResult struct {
 ### 使用方法
 
 下载项目到本地并编译，根据 cmd 文件夹下 service 和 client 中包含的 conf/config-default.toml 进行配置
-
-#### service 配置文件
-
-```toml
-log_level = "debug"
-
-[deploy]
-# 当前的环境:dev、release
-environment = "release"
-# 对外提供的端口
-host = ["0.0.0.0:6306"]
-# 数据库操作超时时间
-timeout = 5  # 秒为单位
-# 前端文件路径
-view_path = "./view"
-
-# etcd
-[etcd]
-service = ["0.0.0.0:2379"]
-username = ""
-password = ""
-dialtimeout = 5000
-# etcd kv存储的key前缀 用来与其他业务做区分
-prefix = "/gopher_cron"
-
-[mysql]
-service="0.0.0.0:3306"
-username=""
-password=""
-database=""
-
-# jwt用来做api的身份校验
-[jwt]
-# jwt签名的secret 建议修改
-secret = "fjskfjls2ifeew2mn"
-exp = 168  # token 有效期(小时)
-```
-
-#### service 部署
-
-```shell
-$ ./gophercron service -c ./config/service-config-default.toml // 配置文件名请随意
-2019-01-18 00:00:45 listening and serving HTTP on 0.0.0.0:6306
-
-```
-
-#### client 配置文件
-
-```toml
-log_level = "debug"
-# 日志统一上报接口(http协议)，如配置此接口可忽略mysql的配置
-report_addr = ""
-
-[deploy]
-# 当前的环境:dev、release
-environment = "release"
-# 数据库操作超时时间
-timeout = 5  # 秒为单位
-
-# etcd
-[etcd]
-service = ["0.0.0.0:2379"]
-username = ""
-password = ""
-dialtimeout = 5000
-# etcd kv存储的key前缀 用来与其他业务做区分
-prefix = "/gopher_cron"
-# 当前节点需要处理的项目ID（先通过service创建项目并获取项目ID）
-projects = [1,2]
-# 命令调用脚本 /bin/sh  /bin/bash 根据自己系统情况决定
-shell = "/bin/bash"
-
-[mysql]
-service="0.0.0.0:3306"
-username=""
-password=""
-database=""
-```
-
-#### client 部署
-
-```shell
-$ ./gophercron client -c ./config/client-config-default.toml
-// 等待如下输入即启动成功
-{"level":"info","msg":"task watcher start","project_id":14,"time":"2020-06-17T18:16:10+08:00"}
-{"level":"info","msg":"[agent - TaskKiller] new task killer, project_id: 14","time":"2020-06-17T18:16:10+08:00"}
-{"level":"info","msg":"[agent - TaskWatcher] new task watcher, project_id: 14","time":"2020-06-17T18:16:10+08:00"}
-{"level":"info","msg":"[agent - Register] new project agent register, project_id: 14","time":"2020-06-17T18:16:10+08:00"}
-...
-```
 
 ### Admin 管理页面
 
