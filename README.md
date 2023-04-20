@@ -23,10 +23,10 @@
 
 ### 引用
 
-- Gin # 提供 webapi
-- gopherCronFe # github.com/holdno/gopherCronFe 提供可视化管理界面(已将构建后的文件内置于 dist/view 目录下)
-- cronexpr # github.com/gorhill/cronexpr 提供 cron 表达式解析器
-- watermelon # github.com/spacegrower/watermelon 提供服务注册发现能力
+- [Gin](github.com/gin-gonic/gin) 提供 webapi
+- [gopherCronFe](github.com/holdno/gopherCronFe) 提供可视化管理界面(已将构建后的文件内置于 dist/view 目录下)
+- [cronexpr](github.com/gorhill/cronexpr) 提供 cron 表达式解析器
+- [watermelon](github.com/spacegrower/watermelon) 提供服务注册发现能力
 
 ### 实现功能
 
@@ -35,6 +35,7 @@
 - 随时结束任务进程
 - 分布式扩展
 - 健康节点检测 (分项目显示对应的健康节点 IP 及节点数)
+- workflow 任务编排
 
 ### 任务日志集中上报
 
