@@ -11,8 +11,8 @@ timeout = 5  # 秒为单位
 view_path = "./view"
 
 [micro]
-region = "center"
-org_id = "gophercron"
+region = "center" # 无特殊调整建议固定
+org_id = "gophercron"  # 无特殊调整建议固定，为日后多租户feature做前提
 
 # etcd
 [etcd]

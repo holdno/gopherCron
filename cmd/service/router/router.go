@@ -1,7 +1,6 @@
 package router
 
 import (
-	"fmt"
 	"net/http"
 
 	"github.com/holdno/gopherCron/app"
@@ -21,9 +20,6 @@ import (
 
 	"github.com/gin-contrib/pprof"
 	"github.com/gin-gonic/gin"
-	"github.com/gorilla/websocket"
-	"github.com/holdno/firetower/protocol"
-	"github.com/holdno/firetower/service/tower"
 )
 
 func prometheusHandler() gin.HandlerFunc {
@@ -59,7 +55,6 @@ func SetupRoute(srv app.App, r *gin.Engine, conf *config.DeployConf) {
 
 	api := r.Group("/api/v1")
 	{
-		api.GET("/ws", Websocket)
 		api.GET("/version", system.GetVersion)
 		user := api.Group("/user")
 		{
@@ -183,53 +178,4 @@ func SetupRoute(srv app.App, r *gin.Engine, conf *config.DeployConf) {
 	}
 	r.StaticFS("/admin", http.Dir(conf.ViewPath))
 	r.StaticFile("/favicon.ico", conf.ViewPath+"/favicon.ico")
-}
-
-var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool {
-		return true
-	},
-}
-
-// Websocket http转websocket连接 并实例化firetower
-func Websocket(c *gin.Context) {
-	// 做用户身份验证
-
-	// 验证成功才升级连接
-	ws, _ := upgrader.Upgrade(c.Writer, c.Request, nil)
-
-	towerSvc := tower.BuildTower(ws, utils.GetStrID())
-
-	towerSvc.SetReadHandler(func(fire *protocol.FireInfo) bool {
-		return false // 禁止客户端与socket通信，仅做接收方
-		// 做发送验证
-		// 判断发送方是否有权限向到达方发送内容
-		towerSvc.Publish(fire)
-		return true
-	})
-
-	towerSvc.SetSubscribeHandler(func(context protocol.FireLife, topic []string) bool {
-		for _, v := range topic {
-			num := towerSvc.GetConnectNum(v)
-			// 继承订阅消息的context
-			var pushmsg = tower.NewFire("system", towerSvc)
-			pushmsg.Message.Topic = v
-			pushmsg.Message.Data = []byte(fmt.Sprintf("{\"type\":\"onSubscribe\",\"data\":%d}", num))
-			towerSvc.Publish(pushmsg)
-		}
-		return true
-	})
-
-	towerSvc.SetUnSubscribeHandler(func(context protocol.FireLife, topic []string) bool {
-		for _, v := range topic {
-			num := towerSvc.GetConnectNum(v)
-			var pushmsg = tower.NewFire("system", towerSvc)
-			pushmsg.Message.Topic = v
-			pushmsg.Message.Data = []byte(fmt.Sprintf("{\"type\":\"onUnsubscribe\",\"data\":%d}", num))
-			towerSvc.Publish(pushmsg)
-		}
-		return true
-	})
-
-	towerSvc.Run()
 }

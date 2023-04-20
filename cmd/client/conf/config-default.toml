@@ -1,6 +1,6 @@
 log_level = "debug"
 report_addr=""
-projects = []
+projects = [] # 该agent需要执行的项目id
 shell = "/bin/bash"
 token = ""
 
@@ -10,8 +10,9 @@ timeout = 5
 region = "center"
 org_id = "gophercron"
 weight = 100
-endpoint = "localhost:6306"
+endpoint = "localhost:6306" # 中心服务的地址，域名也请带上端口号(HA等则仅需带上80 / 443端口号)
 
+# report_addr 与 mysql 选一填写，mysql优先使用
 [mysql]
 service="0.0.0.0:3306"
 username=""
