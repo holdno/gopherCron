@@ -135,6 +135,7 @@ type App interface {
 	StreamManager() *streamManager
 	DispatchAgentJob(region string, projectID int64, withStream ...*Stream) error
 	RemoveClientRegister(client string) error
+	HandleCenterEvent(event *cronpb.Event) error
 
 	// task status
 	SetTaskRunning(agentIP string, execInfo *common.TaskExecutingInfo) error
@@ -402,226 +403,166 @@ func (a *app) Metrics() *metrics.Metrics {
 	return a.metrics
 }
 
-func startWebhook(app *app) {
-	app.Go(func() {
-		for {
-			// 同一时间只需要有一个service的Loop运行即可
-			s, err := concurrency.NewSession(app.etcd.Client(), concurrency.WithTTL(60))
-			if err != nil {
-				wlog.Error("failed to new concurrency.Session", zap.Error(err), zap.String("component", "webhook"))
-				time.Sleep(time.Second)
-				continue
-			}
+func (a *app) HandleCenterEvent(event *cronpb.Event) error {
+	if event == nil {
+		return nil
+	}
+	switch event.Type {
+	case common.CENTER_EVENT_WORKFLOW_REFRESH:
+		if err := a.workflowRunner.RefreshPlan(); err != nil {
+			return err
+		}
+		if a.workflowRunner.isLeader {
+			a.workflowRunner.reCalcScheduleTimeChan <- struct{}{}
+		}
+	default:
+		return fmt.Errorf("unsupport event %s, version: %s", event.Type, a.GetVersion())
+	}
+	return nil
+}
 
-			e := concurrency.NewElection(s, common.BuildWebhookMasterKey())
-			err = e.Campaign(app.ctx, app.GetIP())
-			if err != nil {
-				switch {
-				case err == context.Canceled:
-					return
-				default:
-					time.Sleep(time.Second * 5)
-					continue
+func startWebhook(app *app) {
+	app.election(common.BuildWebhookMasterKey(), func(s *concurrency.Session) error {
+		wlog.Info("new webhook leader")
+		for {
+			select {
+			case <-app.ctx.Done():
+				return app.ctx.Err()
+			case <-s.Done():
+				return nil
+			default:
+				if err := app.WebHookWorker(s.Done()); err != nil {
+					wlog.Error("webhook runner return error", zap.Error(err))
+					return err
 				}
 			}
-			wlog.Info("new webhook leader")
-			app.metrics.CustomInc("workflow_scheduler_leader", app.localip, "")
-		BreakHere:
-			for {
-				select {
-				case <-app.ctx.Done():
-					return
-				case <-s.Done():
-					break BreakHere
-				default:
-					if err = app.WebHookWorker(s.Done()); err != nil {
-						wlog.Error(err.Error())
-					}
-					return
-				}
-			}
-			s.Close()
 		}
 	})
 }
 
 func startCleanupTask(app *app) {
 	// 自动清理任务
-	app.Go(func() {
+	app.election(common.BuildCleanupMasterKey(), func(s *concurrency.Session) error {
+		wlog.Info("new tasks cleanup leader")
+		t := time.NewTicker(time.Hour * 12)
+	BreakHere:
 		for {
-			// 同一时间只需要有一个service的Loop运行即可
-			s, err := concurrency.NewSession(app.etcd.Client(), concurrency.WithTTL(60))
-			if err != nil {
-				wlog.Error("failed to new concurrency.Session", zap.Error(err), zap.String("component", "cleanup"))
-				time.Sleep(time.Second)
-				continue
-			}
-
-			e := concurrency.NewElection(s, common.BuildCleanupMasterKey())
-			err = e.Campaign(app.ctx, app.GetIP())
-			if err != nil {
-				switch {
-				case err == context.Canceled:
-					return
-				default:
-					time.Sleep(time.Second * 5)
-					continue
-				}
-			}
-			wlog.Info("new tasks cleanup leader")
-			app.metrics.CustomInc("tasks_cleanup_leader", "", "")
-
-			t := time.NewTicker(time.Hour * 12)
-		BreakHere:
-			for {
-				select {
-				case <-t.C:
-					app.AutoCleanLogs()
-					app.AutoCleanScheduledTemporaryTask()
-				case <-app.ctx.Done():
-					t.Stop()
-					s.Close()
-					// app.etcd.Lock(nil).CloseAll()
-					return
-				case <-s.Done():
-					t.Stop()
-					break BreakHere
-				}
+			select {
+			case <-t.C:
+				app.AutoCleanLogs()
+				app.AutoCleanScheduledTemporaryTask()
+			case <-app.ctx.Done():
+				t.Stop()
+				s.Close()
+				break BreakHere
+			case <-s.Done():
+				t.Stop()
+				break BreakHere
 			}
 		}
+		return nil
 	})
 }
 
+func (a *app) election(key string, successFunc func(s *concurrency.Session) error) error {
+	ele := func() error {
+		s, err := concurrency.NewSession(a.GetEtcdClient(), concurrency.WithTTL(60))
+		if err != nil {
+			wlog.Error("failed to new concurrency.Session", zap.Error(err), zap.String("key", key))
+			return err
+		}
+		defer func() {
+			if r := recover(); r != nil {
+				wlog.Error("election was recovered", zap.Any("info", r))
+			}
+			if s != nil {
+				s.Close()
+			}
+		}()
+
+		e := concurrency.NewElection(s, key)
+		if err = e.Campaign(a.ctx, a.GetIP()); err != nil {
+			return err
+		}
+
+		return successFunc(s)
+	}
+	a.Go(func() {
+		for {
+			select {
+			case <-a.ctx.Done():
+				return
+			default:
+			}
+			if err := ele(); err != nil {
+				wlog.Error("failed to election", zap.String("key", key), zap.Error(err))
+			}
+			time.Sleep(time.Second * 5)
+		}
+	})
+	return nil
+}
+
 func startWorkflow(app *app) {
-	workflow, err := NewWorkflowRunner(app, app.etcd.Client())
-	if err != nil {
+	var err error
+	if app.workflowRunner, err = NewWorkflowRunner(app, app.etcd.Client()); err != nil {
 		panic(err)
 	}
-	app.workflowRunner = workflow
 
-	app.Go(func() {
-		// 同一时间只需要有一个service的Loop运行即可
-		for {
-			s, err := concurrency.NewSession(app.etcd.Client(), concurrency.WithTTL(60))
-			if err != nil {
-				wlog.Error("failed to new concurrency.Session", zap.Error(err), zap.String("component", "workflow"))
-				time.Sleep(time.Second)
-				continue
-			}
-
-			e := concurrency.NewElection(s, common.BuildWorkflowMasterKey())
-			err = e.Campaign(app.ctx, app.GetIP())
-			if err != nil {
-				switch {
-				case err == context.Canceled:
-					return
-				default:
-					time.Sleep(time.Second * 5)
-					continue
-				}
-			}
-			wlog.Info("new workflow leader")
-			app.metrics.CustomInc("workflow_scheduler_leader", "", "")
-			list, _, err := app.GetWorkflowList(common.GetWorkflowListOptions{}, 1, 100000)
-			if err != nil {
-				wlog.Error("failed to refresh workflow list", zap.Error(err))
-				continue
-			}
-
-			for _, v := range list {
-				workflow.SetPlan(v)
-			}
-			workflow.Loop(s.Done())
-
-			s.Close()
+	app.election(common.BuildWorkflowMasterKey(), func(s *concurrency.Session) error {
+		defer func() {
+			app.workflowRunner.isLeader = false
+		}()
+		app.workflowRunner.isLeader = true
+		wlog.Info("new workflow leader")
+		if err = app.workflowRunner.RefreshPlan(); err != nil {
+			return err
 		}
+		app.workflowRunner.Loop(s.Done())
+		return nil
 	})
 }
 
 func startCalcDataConsistency(app *app) {
-	app.Go(func() {
-		for {
-			// 同一时间只需要有一个service的Loop运行即可
-			s, err := concurrency.NewSession(app.etcd.Client(), concurrency.WithTTL(60))
-			if err != nil {
-				wlog.Error("failed to new concurrency.Session", zap.Error(err), zap.String("component", "agents_task_calc"))
-				time.Sleep(time.Second)
-				continue
-			}
+	app.election(common.BuildCalaConsistencyMasterKey(), func(s *concurrency.Session) error {
+		wlog.Info("new calc leader")
+		app.metrics.CustomInc("agents_task_calc_leader", app.localip, "")
 
-			e := concurrency.NewElection(s, common.BuildCalaConsistencyMasterKey())
-			err = e.Campaign(app.ctx, app.GetIP())
-			if err != nil {
-				switch {
-				case err == context.Canceled:
-					return
-				default:
-					time.Sleep(time.Second * 5)
-					continue
-				}
-			}
-
-			wlog.Info("new calc leader")
-			app.metrics.CustomInc("agents_task_calc_leader", app.localip, "")
-
-			if err := app.CalcAgentDataConsistency(s.Done()); err != nil {
-				wlog.Error("failed to calc agent data consistency", zap.Error(err))
-			}
-
-			s.Close()
+		if err := app.CalcAgentDataConsistency(s.Done()); err != nil {
+			wlog.Error("failed to calc agent data consistency", zap.Error(err))
+			return err
 		}
+		return nil
 	})
 }
 
 func startTemporaryTaskWorker(app *app) {
-	app.Go(func() {
+	app.election(common.BuildTemporaryMasterKey(), func(s *concurrency.Session) error {
+		wlog.Info("new temporary scheduler leader")
+		app.metrics.CustomInc("temporary_scheduler_leader", app.localip, "")
+
+		c := time.NewTicker(time.Minute)
 		for {
-			// 同一时间只需要有一个service的Loop运行即可
-			s, err := concurrency.NewSession(app.etcd.Client(), concurrency.WithTTL(60))
+			select {
+			case <-s.Done():
+				c.Stop()
+				return nil
+			case <-app.ctx.Done():
+				c.Stop()
+				return nil
+			case <-c.C:
+			}
+
+			list, err := app.GetNeedToScheduleTemporaryTask(time.Now())
 			if err != nil {
-				wlog.Error("failed to new concurrency.Session", zap.Error(err), zap.String("component", "temporary"))
-				time.Sleep(time.Second)
+				wlog.Error("failed to refresh temporary task list", zap.Error(err))
 				continue
 			}
-			e := concurrency.NewElection(s, common.BuildTemporaryMasterKey())
-			err = e.Campaign(app.ctx, app.GetIP())
-			if err != nil {
-				switch {
-				case err == context.Canceled:
-					return
-				default:
-					time.Sleep(time.Second * 5)
-					continue
-				}
-			}
 
-			wlog.Info("new temporary scheduler leader")
-			app.metrics.CustomInc("temporary_scheduler_leader", app.localip, "")
-
-			c := time.NewTicker(time.Minute)
-		BreakHere:
-			for {
-				select {
-				case <-s.Done():
-					c.Stop()
-					break BreakHere
-				case <-app.ctx.Done():
-					c.Stop()
-					s.Close()
-					return
-				case <-c.C:
-				}
-
-				list, err := app.GetNeedToScheduleTemporaryTask(time.Now())
-				if err != nil {
-					wlog.Error("failed to refresh temporary task list", zap.Error(err))
-					continue
-				}
-
-				for _, v := range list {
-					if err = app.TemporaryTaskSchedule(*v); err != nil {
-						wlog.Error("temporary task worker: failed to schedule task", zap.Error(err))
-					}
+			for _, v := range list {
+				if err = app.TemporaryTaskSchedule(*v); err != nil {
+					wlog.Error("temporary task worker: failed to schedule task", zap.Error(err))
+					return err
 				}
 			}
 		}

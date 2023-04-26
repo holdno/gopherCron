@@ -59,7 +59,7 @@ func (s *workflowStore) GetOne(id int64) (*common.Workflow, error) {
 	return &res, nil
 }
 
-func (s *workflowStore) GetList(selector selection.Selector, page, pagesize uint64) ([]common.Workflow, error) {
+func (s *workflowStore) GetList(selector selection.Selector) ([]common.Workflow, error) {
 	var (
 		err error
 		res []common.Workflow
@@ -67,9 +67,7 @@ func (s *workflowStore) GetList(selector selection.Selector, page, pagesize uint
 
 	db := parseSelector(s.GetReplica(), selector, true)
 
-	err = db.Table(s.GetTable()).
-		Offset((page - 1) * pagesize).Limit(pagesize).Order("id DESC").Find(&res).Error
-	if err != nil {
+	if err = db.Table(s.GetTable()).Order("id DESC").Find(&res).Error; err != nil {
 		return nil, err
 	}
 

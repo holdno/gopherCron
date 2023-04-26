@@ -138,8 +138,6 @@ func (tl *Locker) TryLockWithOwner(agentIP string) error {
 
 	// 提交事务
 	if txnResp, err = txn.Commit(); err != nil {
-		// 有可能是抢锁失败 也有可能是网络失败
-		// 都进行回滚
 		failFunc()
 		errObj = errors.ErrInternalError
 		errObj.Log = "[TaskLock - TryLock] txn commit error:" + err.Error()

@@ -37,7 +37,7 @@ func GetAgentIPFromContext(ctx context.Context) (string, bool) {
 		return "", exist
 	}
 
-	agentIP := md.Get("gophercron-agent-ip")
+	agentIP := md.Get(protocol.GOPHERCRON_AGENT_HEADER_IP)
 	if len(agentIP) == 0 {
 		return "", false
 	}
@@ -65,6 +65,7 @@ func (s *cronRpc) TryLock(req cronpb.Center_TryLockServer) error {
 	var locker *etcd.Locker
 	defer func() {
 		if locker != nil {
+			time.Sleep(time.Second * 3)
 			locker.Unlock()
 		}
 	}()
@@ -151,11 +152,19 @@ func (s *cronRpc) StatusReporter(ctx context.Context, req *cronpb.ScheduleReply)
 }
 
 func (s *cronRpc) SendEvent(ctx context.Context, req *cronpb.SendEventRequest) (*cronpb.Result, error) {
-	for _, v := range s.app.StreamManager().GetStreams(req.Region, req.ProjectId, cronpb.Agent_ServiceDesc.ServiceName) {
-		if err := v.Send(req.Event); err != nil {
-			return nil, errors.NewError(http.StatusInternalServerError, "下发任务删除操作失败")
+	if req.ProjectId == 0 {
+		// got event for center
+		if err := s.app.HandleCenterEvent(req.Event); err != nil {
+			return nil, status.Error(codes.Internal, err.Error())
+		}
+	} else {
+		for _, v := range s.app.StreamManager().GetStreams(req.Region, req.ProjectId, cronpb.Agent_ServiceDesc.ServiceName) {
+			if err := v.Send(req.Event); err != nil {
+				return nil, errors.NewError(http.StatusInternalServerError, "下发任务删除操作失败")
+			}
 		}
 	}
+
 	return &cronpb.Result{
 		Result:  true,
 		Message: "ok",

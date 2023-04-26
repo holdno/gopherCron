@@ -84,6 +84,8 @@ func (a *workflowRunner) scheduleTask(taskInfo *common.TaskInfo) error {
 			EventTime: time.Now().Unix(),
 		},
 	})
+	// addr, taskid, witherr, errdesc
+	a.scheduleAgentMetric(client.addr, fmt.Sprintf("%d_%s", taskInfo.ProjectID, taskInfo.TaskID), fmt.Sprint(err == nil), utils.PrintError(err))
 	if err != nil {
 		wlog.With(zap.Any("fields", map[string]interface{}{
 			"workflow_id": taskInfo.FlowInfo.WorkflowID,

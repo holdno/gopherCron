@@ -400,6 +400,9 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 					taskExecuteInfo.CancelFunc()
 				}()
 				for {
+					if taskExecuteInfo.CancelCtx.Err() != nil {
+						return
+					}
 					unLockFunc, err = tryLock(a.GetCenterSrv(), plan, taskExecuteInfo.CancelCtx, lockError)
 					once.Do(func() {
 						resultChan <- err
@@ -413,9 +416,6 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 							zap.String("task_name", taskExecuteInfo.Task.Name),
 							zap.Error(err))
 						if tryTimes == 3 {
-							if taskExecuteInfo.CancelCtx.Err() != nil {
-								return
-							}
 							a.Warning(warning.WarningData{
 								Type:      warning.WarningTypeSystem,
 								AgentIP:   a.localip,

@@ -91,7 +91,7 @@ type WorkflowTaskStore interface {
 type WorkflowStore interface {
 	Commons
 	Create(tx *gorm.DB, data *common.Workflow) error
-	GetList(selector selection.Selector, page, pagesize uint64) ([]common.Workflow, error)
+	GetList(selector selection.Selector) ([]common.Workflow, error)
 	Update(tx *gorm.DB, data common.Workflow) error
 	GetOne(id int64) (*common.Workflow, error)
 	Delete(tx *gorm.DB, id int64) error

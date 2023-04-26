@@ -10,6 +10,7 @@ import (
 	"math/rand"
 	"net"
 	"os"
+	"reflect"
 	"sort"
 	"strconv"
 	"time"
@@ -229,4 +230,19 @@ func DebugMode() bool {
 
 func ReleaseMode() bool {
 	return os.Getenv("GOPHERENV") == "release"
+}
+
+func PrintError(err error) string {
+	if err == nil || IsNil(err) {
+		return ""
+	}
+	return err.Error()
+}
+
+func IsNil(v any) bool {
+	rv := reflect.ValueOf(v)
+	if rv.Kind() == reflect.Pointer {
+		return rv.IsNil()
+	}
+	return false
 }

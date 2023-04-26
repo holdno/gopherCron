@@ -18,7 +18,6 @@ import (
 	"github.com/holdno/gopherCron/pkg/warning"
 	"github.com/holdno/gopherCron/protocol"
 	"github.com/holdno/gopherCron/utils"
-	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/gorhill/cronexpr"
 	"github.com/holdno/gocommons/selection"
@@ -107,7 +106,6 @@ func (a *app) WorkflowAddUser(workflowID int64, userID int64) error {
 }
 
 func (a *app) CreateWorkflow(userID int64, data common.Workflow) error {
-
 	var (
 		tx  = a.store.BeginTx()
 		err error
@@ -120,8 +118,6 @@ func (a *app) CreateWorkflow(userID int64, data common.Workflow) error {
 	defer func() {
 		if r := recover(); r != nil && err != nil {
 			tx.Rollback()
-		} else {
-			tx.Commit()
 		}
 	}()
 	if err = a.store.Workflow().Create(tx, &data); err != nil {
@@ -136,8 +132,32 @@ func (a *app) CreateWorkflow(userID int64, data common.Workflow) error {
 		return errors.NewError(http.StatusInternalServerError, "创建workflow用户关联关系失败").WithLog(err.Error())
 	}
 
-	err = a.workflowRunner.SetPlan(data)
+	if err = a.workflowRunner.SetPlan(data); err != nil {
+		return errors.NewError(http.StatusInternalServerError, "设置workflow执行计划失败："+err.Error()).WithLog(err.Error())
+	}
+
+	if err = tx.Commit().Error; err != nil {
+		return errors.NewError(http.StatusInternalServerError, "存储事务提交失败").WithLog(err.Error())
+	}
+	err = a.notifyCenterToRefreshWorkflowPlan()
 	return err
+}
+
+func (a *app) notifyCenterToRefreshWorkflowPlan() error {
+	err := a.DispatchEvent(&cronpb.SendEventRequest{
+		Region:    a.cfg.Micro.Region,
+		ProjectId: 0,
+		Event: &cronpb.Event{
+			Type:      common.CENTER_EVENT_WORKFLOW_REFRESH,
+			Version:   "v1",
+			Value:     []byte("refresh_now"),
+			EventTime: time.Now().Unix(),
+		},
+	})
+	if err != nil {
+		return errors.NewError(http.StatusInternalServerError, "通知workflow更新失败，请联系管理员处理").WithLog(err.Error())
+	}
+	return nil
 }
 
 func checkUserWorkflowPermission(checkFunc interface {
@@ -181,6 +201,7 @@ func (a *app) UpdateWorkflowTask(userID int64, data common.WorkflowTask) error {
 	if err := a.store.WorkflowTask().Save(nil, &data); err != nil {
 		return errors.NewError(http.StatusInternalServerError, "更新workflow任务失败").WithLog(err.Error())
 	}
+
 	return nil
 }
 
@@ -222,8 +243,12 @@ func (a *app) CreateWorkflowSchedulePlan(userID, workflowID int64, taskList []Cr
 
 	plan := a.workflowRunner.GetPlan(workflowID)
 	if plan == nil {
-		// 分布式场景下每台服务器缓存的workflow可能会不一致，如果在服务启动后新建workflow，则会导致其他服务器没有该plan的信息
-		return nil
+		if err = a.workflowRunner.RefreshPlan(); err != nil {
+			return errors.NewError(http.StatusInternalServerError, "更新workflow执行计划列表失败").WithLog(err.Error())
+		}
+		if plan = a.workflowRunner.GetPlan(workflowID); plan == nil {
+			return nil
+		}
 	}
 	running, err := plan.IsRunning()
 	if err != nil {
@@ -416,7 +441,9 @@ func (a *app) GetWorkflowList(opts common.GetWorkflowListOptions, page, pagesize
 	if opts.Title != "" {
 		selector.AddQuery(selection.NewRequirement("title", selection.Like, opts.Title))
 	}
-	list, err := a.store.Workflow().GetList(selector, page, pagesize)
+	selector.Page = int(page)
+	selector.Pagesize = int(pagesize)
+	list, err := a.store.Workflow().GetList(selector)
 	if err != nil {
 		return nil, 0, errors.NewError(http.StatusInternalServerError, "获取workflow列表失败").WithLog(err.Error())
 	}
@@ -483,8 +510,6 @@ func (a *app) UpdateWorkflow(userID int64, data common.Workflow) error {
 	defer func() {
 		if r := recover(); r != nil || err != nil {
 			tx.Rollback()
-		} else {
-			tx.Commit()
 		}
 	}()
 	if err = a.store.Workflow().Update(tx, data); err != nil {
@@ -497,6 +522,11 @@ func (a *app) UpdateWorkflow(userID int64, data common.Workflow) error {
 	// 	a.workflowRunner.DelPlan(data.ID)
 	// }
 	err = a.workflowRunner.SetPlan(data)
+
+	if err = tx.Commit().Error; err != nil {
+		return errors.NewError(http.StatusInternalServerError, "存储事务提交失败").WithLog(err.Error())
+	}
+	err = a.notifyCenterToRefreshWorkflowPlan()
 	return err
 }
 
@@ -542,8 +572,6 @@ func (a *app) DeleteWorkflow(userID int64, workflowID int64) error {
 	defer func() {
 		if r := recover(); r != nil || err != nil {
 			tx.Rollback()
-		} else {
-			tx.Commit()
 		}
 	}()
 	if err = a.store.Workflow().Delete(tx, workflowID); err != nil {
@@ -574,6 +602,11 @@ func (a *app) DeleteWorkflow(userID int64, workflowID int64) error {
 	}
 
 	a.workflowRunner.DelPlan(workflowID)
+
+	if err = tx.Commit().Error; err != nil {
+		return errors.NewError(http.StatusInternalServerError, "存储事务提交失败").WithLog(err.Error())
+	}
+	err = a.notifyCenterToRefreshWorkflowPlan()
 	return err
 }
 
@@ -633,8 +666,12 @@ type workflowRunner struct {
 	planCounter       int64
 	nextWorkflow      common.Workflow
 	scheduleEventChan chan *common.TaskEvent
+	isLeader          bool
 
-	processRecord sync.Map
+	reCalcScheduleTimeChan chan struct{}
+
+	processRecord       sync.Map
+	scheduleAgentMetric func(labels ...string)
 
 	ctx        context.Context
 	cancelFunc context.CancelFunc
@@ -658,20 +695,18 @@ func (r *workflowRunner) ProcessDone(taskID string) {
 func NewWorkflowRunner(app *app, cli *clientv3.Client) (*workflowRunner, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	runner := &workflowRunner{
-		app:               app,
-		etcd:              app.GetEtcdClient(),
-		ctx:               ctx,
-		cancelFunc:        cancel,
-		scheduleEventChan: make(chan *common.TaskEvent, 100),
+		app:                    app,
+		etcd:                   app.GetEtcdClient(),
+		ctx:                    ctx,
+		cancelFunc:             cancel,
+		scheduleEventChan:      make(chan *common.TaskEvent, 100),
+		reCalcScheduleTimeChan: make(chan struct{}, 10),
+		// addr, taskid, witherr, errdesc
+		scheduleAgentMetric: app.metrics.NewCounter("workflow_schedule_agent_task", "address", "taskid", "witherr", "desc"),
 	}
 
-	list, _, err := app.GetWorkflowList(common.GetWorkflowListOptions{}, 1, 100000)
-	if err != nil {
+	if err := runner.RefreshPlan(); err != nil {
 		return nil, err
-	}
-
-	for _, v := range list {
-		runner.SetPlan(v)
 	}
 
 	return runner, nil
@@ -697,8 +732,6 @@ type WorkflowPlan struct {
 	LatestScheduleTime time.Time
 
 	locker sync.Mutex
-
-	metrics *prometheus.Timer
 }
 
 func (p *WorkflowPlan) Finished(withError error) error {
@@ -722,16 +755,28 @@ func (p *WorkflowPlan) Finished(withError error) error {
 	}
 
 	failedReason := strings.Builder{}
+
+	defer func() {
+		if failedReason.Len() > 0 {
+			p.runner.app.Warning(warning.WarningData{
+				Type:      warning.WarningTypeTask,
+				TaskName:  p.Workflow.Title,
+				ProjectID: states[0].ProjectID,
+				Data:      "workflow运行失败: " + failedReason.String(),
+			})
+		}
+	}()
+
 	var killList []WorkflowTaskInfo
 	for _, v := range states {
+		// get task info
+		taskDetail, err := p.runner.app.GetWorkflowTask(v.ProjectID, v.TaskID)
+		if err != nil {
+			// log
+			return err
+		}
 		if v.CurrentStatus == common.TASK_STATUS_FAIL_V2 {
 			p.planState.Status = common.TASK_STATUS_FAIL_V2
-			// get task info
-			taskDetail, err := p.runner.app.GetWorkflowTask(v.ProjectID, v.TaskID)
-			if err != nil {
-				// log
-				return err
-			}
 			failedReason.WriteString(taskDetail.TaskName)
 			failedReason.WriteString(" 任务执行失败")
 		} else if v.CurrentStatus == common.TASK_STATUS_STARTING_V2 {
@@ -739,15 +784,15 @@ func (p *WorkflowPlan) Finished(withError error) error {
 				ProjectID: v.ProjectID,
 				TaskID:    v.TaskID,
 			})
-
-			failedReason.WriteString("任务启动失败")
+			failedReason.WriteString(taskDetail.TaskName)
+			failedReason.WriteString(" 任务启动失败")
 		} else if v.CurrentStatus == common.TASK_STATUS_RUNNING_V2 {
 			killList = append(killList, WorkflowTaskInfo{
 				ProjectID: v.ProjectID,
 				TaskID:    v.TaskID,
 			})
-
-			failedReason.WriteString("任务执行失败")
+			failedReason.WriteString(taskDetail.TaskName)
+			failedReason.WriteString(" 任务执行失败")
 		}
 	}
 	if withError != nil {
@@ -805,10 +850,6 @@ func (p *WorkflowPlan) Finished(withError error) error {
 		return err
 	}
 
-	if p.metrics != nil {
-		p.metrics.ObserveDuration()
-	}
-
 	return nil
 }
 
@@ -834,6 +875,10 @@ func (a *workflowRunner) scheduleWorkflowPlan(plan *WorkflowPlan) error {
 				zap.Error(finishedErr),
 				zap.String("finished_with_error", err.Error()))
 		}
+		return nil
+	}
+
+	if !a.isLeader {
 		return nil
 	}
 
@@ -907,7 +952,6 @@ func (s *WorkflowPlan) RefreshPlanTasks() error {
 
 	s.TaskFlow = depsMap
 	s.Tasks = tasksMap
-	s.metrics = nil
 	return nil
 }
 
@@ -1160,7 +1204,10 @@ func (a *workflowRunner) TrySchedule() time.Duration {
 			// 尝试执行任务
 			// 因为可能上一次任务还没执行结束
 			if err := a.TryStartPlan(plan); err != nil {
-				fmt.Println("执行workflow失败", err.Error())
+				wlog.Error("failed to start workflow plan", zap.Error(err),
+					zap.String("plan", plan.Workflow.Title),
+					zap.Int64("workflow_id", plan.Workflow.ID))
+				a.app.Metrics().CustomInc("workflow_start_plan_fail", fmt.Sprintf("%d_%s", plan.Workflow.ID, plan.Workflow.Title), err.Error())
 			}
 			plan.NextTime = plan.Expr.Next(now) // 更新下一次执行时间
 		}
@@ -1193,6 +1240,20 @@ func (a *app) GetWorkflowState(workflowID int64) (*PlanState, error) {
 	return plan.planState, nil
 }
 
+func (a *workflowRunner) RefreshPlan() error {
+	list, _, err := a.app.GetWorkflowList(common.GetWorkflowListOptions{}, 0, 0)
+	if err != nil {
+		wlog.Error("failed to refresh workflow list", zap.Error(err))
+		return err
+	}
+
+	for _, v := range list {
+		a.SetPlan(v)
+	}
+
+	return nil
+}
+
 func (a *workflowRunner) Loop(closeChan <-chan struct{}) {
 	var (
 		taskEvent     *common.TaskEvent
@@ -1219,6 +1280,7 @@ BreakHere:
 			go a.handleTaskEvent(taskEvent)
 		case <-daemonTimer.C:
 			// 每10s
+			a.app.Metrics().CustomInc("workflow_schedule_loop", "", "")
 			a.PlanRange(func(key int64, value *WorkflowPlan) bool {
 				if ok, _ := value.IsRunning(); ok {
 					if value.LatestScheduleTime.Before(time.Now().Add(-time.Second * 10)) {
@@ -1228,6 +1290,8 @@ BreakHere:
 				return true
 			})
 		case <-scheduleTimer.C: // 最近的一个调度任务到期执行
+		case <-a.reCalcScheduleTimeChan:
+			wlog.Debug("got recalculate schedule time event")
 		}
 
 		if a.isClose {
@@ -1271,7 +1335,7 @@ func (a *workflowRunner) handleTaskResultV1(agentIP string, data protocol.TaskFi
 		}
 	}
 
-	if !next {
+	if !next || !a.isLeader {
 		return nil
 	}
 	plan := a.GetPlan(data.WorkflowID)
@@ -1358,7 +1422,6 @@ func (p *WorkflowPlan) SetRunning() error {
 		return err
 	}
 	p.planState = newState
-	p.metrics = p.runner.app.metrics.CustomHistogramSet("workflow_plan_duration", strconv.FormatInt(p.Workflow.ID, 10), p.Workflow.Title)
 	p.runner.app.PublishMessage(messageWorkflowStatusChanged(p.Workflow.ID, common.TASK_STATUS_RUNNING_V2))
 	return nil
 }

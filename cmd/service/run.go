@@ -16,6 +16,7 @@ import (
 	"github.com/holdno/gopherCron/pkg/cronpb"
 	"github.com/holdno/gopherCron/pkg/infra"
 	"github.com/holdno/gopherCron/pkg/warning"
+	"github.com/holdno/gopherCron/protocol"
 	"github.com/holdno/gopherCron/utils"
 
 	"github.com/gin-gonic/gin"
@@ -91,7 +92,7 @@ func apiServer(srv app.App, conf *config.ServiceConfig) {
 	server.Use(func(ctx context.Context) error {
 		agentIP, exist := GetAgentIPFromContext(ctx)
 		if !exist {
-			return status.Error(codes.Aborted, "header: gophercron-agent-ip is not found")
+			return status.Error(codes.Aborted, "header: "+protocol.GOPHERCRON_AGENT_HEADER_IP+" is not found")
 		}
 		middleware.SetAgentIP(ctx, agentIP)
 		return nil

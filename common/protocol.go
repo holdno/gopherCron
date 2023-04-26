@@ -18,6 +18,8 @@ const (
 	REMOTE_EVENT_WORKFLOW_SCHEDULE    = "remote_event_workflow_schedule"
 	REMOTE_EVENT_TASK_STOP            = "remote_event_task_stop"
 	REMOTE_EVENT_CHECK_TASK_ISRUNNING = "remote_event_check_task_isrunning"
+
+	CENTER_EVENT_WORKFLOW_REFRESH = "workflow_refresh"
 )
 
 // TaskInfo 任务详情

@@ -27,6 +27,7 @@ func (m *Metrics) NewCounterVec(name, ns, system string, labels []string) *prome
 	if !strings.HasSuffix(name, "_count") {
 		name += "_count"
 	}
+
 	// counterVec monitor error count
 	var counterVec = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -41,6 +42,10 @@ func (m *Metrics) NewCounterVec(name, ns, system string, labels []string) *prome
 	m.registry.MustRegister(counterVec)
 	return counterVec
 }
+
+// func (m *Metrics) NewMetricVew(name, ns, system string, labels []string) {
+// 	prometheus.NewMetricVec(prometheus.NewDesc(fmt.Sprintf("%s_%s_%s", ns, system, name, labels), fmt.Sprintf("%s count of /%s/%s", name, ns, system), labels, nil))
+// }
 
 func (m *Metrics) NewGaugeVec(name, ns, system string, labels []string) *prometheus.GaugeVec {
 	if !strings.HasSuffix(name, "_gauge") {

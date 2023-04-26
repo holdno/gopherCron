@@ -408,7 +408,7 @@ func (a *app) SaveTask(task *common.TaskInfo, opts ...clientv3.OpOption) (*commo
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, errors.NewError(http.StatusLocked, "任务已被锁定，可能正在执行中，请稍后再试")
 	}
 
 	defer locker.Unlock()
