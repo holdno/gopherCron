@@ -37,7 +37,7 @@ func GetAgentIPFromContext(ctx context.Context) (string, bool) {
 		return "", exist
 	}
 
-	agentIP := md.Get(protocol.GOPHERCRON_AGENT_HEADER_IP)
+	agentIP := md.Get(common.GOPHERCRON_AGENT_IP_MD_KEY)
 	if len(agentIP) == 0 {
 		return "", false
 	}
@@ -62,7 +62,10 @@ func (s *cronRpc) TryLock(req cronpb.Center_TryLockServer) error {
 	if !exist {
 		return status.Error(codes.PermissionDenied, codes.PermissionDenied.String())
 	}
-	var locker *etcd.Locker
+	var (
+		locker    *etcd.Locker
+		heartbeat = time.NewTicker(time.Second * 5)
+	)
 	defer func() {
 		if locker != nil {
 			time.Sleep(time.Second * 3)
@@ -73,6 +76,13 @@ func (s *cronRpc) TryLock(req cronpb.Center_TryLockServer) error {
 		select {
 		case <-req.Context().Done():
 			return req.Context().Err()
+		case <-heartbeat.C:
+			if err := req.Send(&cronpb.TryLockReply{
+				Result:  true,
+				Message: "heartbeat",
+			}); err != nil {
+				return err
+			}
 		default:
 			task, err := req.Recv()
 			if err != nil || task == nil {

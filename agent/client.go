@@ -111,7 +111,7 @@ func (agent *client) loadConfigAndSetupAgentFunc() func() error {
 
 		if cfg.ReportAddr != "" {
 			agent.logger.Info(fmt.Sprintf("init http task log reporter, address: %s", cfg.ReportAddr))
-			reporter := NewHttpReporter(cfg.ReportAddr)
+			reporter := warning.NewHttpReporter(cfg.ReportAddr)
 			agent.ClientTaskReporter = reporter
 			agent.Warner = reporter
 		} else {
@@ -200,7 +200,7 @@ func (c *client) Close() {
 		c.daemon.Close()
 		c.scheduler.Stop()
 		<-c.closeChan
-		fmt.Println("shut down")
+		wlog.Info("agent has been shut down")
 	}
 }
 

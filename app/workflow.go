@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -702,7 +701,7 @@ func NewWorkflowRunner(app *app, cli *clientv3.Client) (*workflowRunner, error) 
 		scheduleEventChan:      make(chan *common.TaskEvent, 100),
 		reCalcScheduleTimeChan: make(chan struct{}, 10),
 		// addr, taskid, witherr, errdesc
-		scheduleAgentMetric: app.metrics.NewCounter("workflow_schedule_agent_task", "address", "taskid", "witherr", "desc"),
+		scheduleAgentMetric: app.metrics.NewCounter("workflow_schedule_agent_task", "taskid", "witherr"),
 	}
 
 	if err := runner.RefreshPlan(); err != nil {
@@ -754,15 +753,16 @@ func (p *WorkflowPlan) Finished(withError error) error {
 		return err
 	}
 
-	failedReason := strings.Builder{}
+	failedReason := utils.NewReasonWriter()
 
 	defer func() {
 		if failedReason.Len() > 0 {
+			failedReason.WriteStringPrefix(fmt.Sprintf("Workflow \"%s\" 运行失败", p.Workflow.Title))
 			p.runner.app.Warning(warning.WarningData{
 				Type:      warning.WarningTypeTask,
 				TaskName:  p.Workflow.Title,
 				ProjectID: states[0].ProjectID,
-				Data:      "workflow运行失败: " + failedReason.String(),
+				Data:      failedReason.String(),
 			})
 		}
 	}()
@@ -778,27 +778,24 @@ func (p *WorkflowPlan) Finished(withError error) error {
 		if v.CurrentStatus == common.TASK_STATUS_FAIL_V2 {
 			p.planState.Status = common.TASK_STATUS_FAIL_V2
 			failedReason.WriteString(taskDetail.TaskName)
-			failedReason.WriteString(" 任务执行失败")
+			failedReason.WriteString("任务执行失败")
 		} else if v.CurrentStatus == common.TASK_STATUS_STARTING_V2 {
 			killList = append(killList, WorkflowTaskInfo{
 				ProjectID: v.ProjectID,
 				TaskID:    v.TaskID,
 			})
 			failedReason.WriteString(taskDetail.TaskName)
-			failedReason.WriteString(" 任务启动失败")
+			failedReason.WriteString("任务启动失败")
 		} else if v.CurrentStatus == common.TASK_STATUS_RUNNING_V2 {
 			killList = append(killList, WorkflowTaskInfo{
 				ProjectID: v.ProjectID,
 				TaskID:    v.TaskID,
 			})
 			failedReason.WriteString(taskDetail.TaskName)
-			failedReason.WriteString(" 任务执行失败")
+			failedReason.WriteString("任务执行失败")
 		}
 	}
 	if withError != nil {
-		if failedReason.Len() > 0 {
-			failedReason.WriteString("，")
-		}
 		failedReason.WriteString(withError.Error())
 	}
 

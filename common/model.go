@@ -7,6 +7,7 @@ import (
 type ClientInfo struct {
 	ClientIP string `json:"client_ip"`
 	Version  string `json:"version"`
+	Region   string `json:"region"`
 }
 
 type User struct {

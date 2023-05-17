@@ -99,7 +99,7 @@ func (s *Server[T]) WithWeight(weight int32) infra.Option[NodeMetaRemote] {
 }
 
 // ClientConn is a function to create grpc client connection
-type ClientConn[T infra.ClientServiceNameGenerator] func(serviceName string, opts ...infra.ClientOptions[T]) (*grpc.ClientConn, error)
+type ClientConn[T infra.ClientServiceNameGenerator] func(serviceName string, opts ...infra.ClientOptions[T]) (*infra.ClientConn, error)
 
 // NewClientConn is a function to create a cc instance
 func NewClientConn() ClientConn[ResolveMeta] {

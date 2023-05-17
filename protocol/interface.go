@@ -75,8 +75,7 @@ func (a *comm) GetTask(projectID int64, taskID string) (*common.TaskInfo, error)
 }
 
 const (
-	version                    = "v2.1.1"
-	GOPHERCRON_AGENT_HEADER_IP = "gophercron-agent-ip"
+	version = "v2.1.1"
 )
 
 func GetVersion() string {

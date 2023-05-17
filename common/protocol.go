@@ -20,6 +20,10 @@ const (
 	REMOTE_EVENT_CHECK_TASK_ISRUNNING = "remote_event_check_task_isrunning"
 
 	CENTER_EVENT_WORKFLOW_REFRESH = "workflow_refresh"
+
+	GOPHERCRON_PROXY_TO_MD_KEY      = "gophercron-proxy-to"
+	GOPHERCRON_PROXY_PROJECT_MD_KEY = "gophercron-proxy-project"
+	GOPHERCRON_AGENT_IP_MD_KEY      = "gophercron-agent-ip"
 )
 
 // TaskInfo 任务详情
@@ -84,6 +88,7 @@ type PlanType string
 
 const (
 	NormalPlan   PlanType = "normal"
+	ActivePlan   PlanType = "active" // 人工触发
 	WorkflowPlan PlanType = "workflow"
 )
 
@@ -335,7 +340,7 @@ func BuildTaskEvent(eventType int, task *TaskInfo) *TaskEvent {
 }
 
 // 构造执行计划
-func BuildTaskSchedulerPlan(task *TaskInfo) (*TaskSchedulePlan, error) {
+func BuildTaskSchedulerPlan(task *TaskInfo, planType PlanType) (*TaskSchedulePlan, error) {
 	var (
 		expr *cronexpr.Expression
 		err  error
@@ -349,7 +354,7 @@ func BuildTaskSchedulerPlan(task *TaskInfo) (*TaskSchedulePlan, error) {
 		Task:     task,
 		Expr:     expr,
 		NextTime: expr.Next(time.Now()),
-		Type:     NormalPlan,
+		Type:     planType,
 		TmpID:    task.TmpID,
 	}, nil
 }

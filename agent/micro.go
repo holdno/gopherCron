@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"syscall"
 	"time"
 
@@ -44,7 +43,6 @@ func (a *client) SetupMicroService() *winfra.Srv[infra.NodeMetaRemote] {
 		}),
 		newsrv.WithServiceRegister(register))
 	go func() {
-		wlog.Info(fmt.Sprintf("start grpc service, on %s", cfg.Address))
 		srv.RunUntil(syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL)
 	}()
 	return srv
@@ -53,7 +51,7 @@ func (a *client) SetupMicroService() *winfra.Srv[infra.NodeMetaRemote] {
 func (a *client) MustSetupRemoteRegister() wregister.ServiceRegister[infra.NodeMetaRemote] {
 
 	genMetadata := func(ctx context.Context) context.Context {
-		return metadata.NewOutgoingContext(ctx, metadata.New(map[string]string{protocol.GOPHERCRON_AGENT_HEADER_IP: a.localip}))
+		return metadata.NewOutgoingContext(ctx, metadata.New(map[string]string{common.GOPHERCRON_AGENT_IP_MD_KEY: a.localip}))
 	}
 
 	r, err := register.NewRemoteRegister(a.localip, func() (register.CenterClient, error) {
@@ -131,12 +129,12 @@ func (a *client) Schedule(ctx context.Context, req *cronpb.ScheduleRequest) (*cr
 		// 	return nil, status.Error(codes.NotFound, "task plan is not found")
 		// }
 
-		plan, err := common.BuildTaskSchedulerPlan(task)
+		plan, err := common.BuildTaskSchedulerPlan(task, common.ActivePlan)
 		if err != nil {
 			return nil, status.Error(codes.Aborted, "failed to build task plan: "+err.Error())
 		}
 		if err = a.TryStartTask(plan); err != nil {
-			return nil, err
+			return nil, status.Error(codes.Aborted, "failed to execute task: "+err.Error())
 		}
 	case common.REMOTE_EVENT_WORKFLOW_SCHEDULE:
 		task, err := unmarshalTask(req.Event.Value)

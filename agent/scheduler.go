@@ -60,14 +60,15 @@ func initScheduler() *TaskScheduler {
 }
 
 func (ts *TaskScheduler) Stop() {
-	fmt.Println("scheduler is about to close")
+	wlog.Info("starting to shut down the scheduler")
 	for {
 		count := ts.TaskExecutingCount()
-		fmt.Println("current executing task:", count)
 		if count == 0 {
 			ts.PushTaskResult(nil)
+			wlog.Info("the scheduler has been shut down")
 			return
 		}
+		wlog.Info(fmt.Sprintf("scheduler shutting down, waiting for %d tasks to finish", count))
 		time.Sleep(time.Second)
 	}
 }
@@ -241,7 +242,7 @@ func (a *client) handleTaskEvent(event *common.TaskEvent) {
 	// 临时调度
 	case common.TASK_EVENT_TEMPORARY:
 		// 构建执行计划
-		if taskSchedulePlan, err = common.BuildTaskSchedulerPlan(event.Task); err != nil {
+		if taskSchedulePlan, err = common.BuildTaskSchedulerPlan(event.Task, common.ActivePlan); err != nil {
 			logrus.WithField("Error", err.Error()).Error("build task schedule plan error")
 			return
 		}
@@ -256,7 +257,7 @@ func (a *client) handleTaskEvent(event *common.TaskEvent) {
 	case common.TASK_EVENT_SAVE:
 		// 构建执行计划
 		if event.Task.Status == common.TASK_STATUS_START {
-			if taskSchedulePlan, err = common.BuildTaskSchedulerPlan(event.Task); err != nil {
+			if taskSchedulePlan, err = common.BuildTaskSchedulerPlan(event.Task, common.NormalPlan); err != nil {
 				logrus.WithField("Error", err.Error()).Error("build task schedule plan error")
 				return
 			}
@@ -353,6 +354,17 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 	}
 
 	plan.Task.ClientIP = a.localip
+	taskExecuteInfo = common.BuildTaskExecuteInfo(plan)
+	errSignal := utils.NewSignalChannel[error]()
+	if plan.Type != common.ActivePlan {
+		// 如果不是主动调用，则不需要等待几处可能前置的错误来响应web客户端
+		errSignal.Close()
+	} else {
+		wlog.Debug("got active plan",
+			zap.String("task_id", taskExecuteInfo.Task.TaskID),
+			zap.Int64("project_id", taskExecuteInfo.Task.ProjectID),
+			zap.String("task_name", taskExecuteInfo.Task.Name))
+	}
 
 	go func() {
 
@@ -377,9 +389,8 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 			}
 		}()
 
-		cancelReason := ""
+		cancelReason := utils.NewReasonWriter()
 		// 构建执行状态信息
-		taskExecuteInfo = common.BuildTaskExecuteInfo(plan)
 		defer func() {
 			taskExecuteInfo.CancelFunc()
 		}()
@@ -396,17 +407,14 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 			go func() {
 				tryTimes := 0
 				defer func() {
-					cancelReason = "keep lock failure"
 					taskExecuteInfo.CancelFunc()
 				}()
+
 				for {
 					if taskExecuteInfo.CancelCtx.Err() != nil {
 						return
 					}
 					unLockFunc, err = tryLock(a.GetCenterSrv(), plan, taskExecuteInfo.CancelCtx, lockError)
-					once.Do(func() {
-						resultChan <- err
-					})
 					tryTimes++
 
 					if err != nil {
@@ -416,18 +424,20 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 							zap.String("task_name", taskExecuteInfo.Task.Name),
 							zap.Error(err))
 						if tryTimes == 3 {
-							a.Warning(warning.WarningData{
-								Type:      warning.WarningTypeSystem,
-								AgentIP:   a.localip,
-								TaskName:  plan.Task.Name,
-								ProjectID: plan.Task.ProjectID,
-								Data:      fmt.Sprintf("failed to keep execute lock, error: %s, the task will be cancelled", err.Error()),
+							errDetail := fmt.Errorf("任务执行中锁维持失败,%s,终止任务", err.Error())
+							once.Do(func() {
+								resultChan <- errDetail
 							})
+							cancelReason.WriteString(errDetail.Error())
 							return
 						}
-						time.Sleep(time.Duration(rand.Intn(1000)) * time.Millisecond)
+						time.Sleep(time.Second)
 						continue
 					}
+
+					once.Do(func() {
+						close(resultChan)
+					})
 
 					tryTimes = 0
 
@@ -444,6 +454,7 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 			}()
 
 			if err = <-resultChan; err != nil {
+				errSignal.Send(err)
 				return
 			}
 
@@ -467,22 +478,21 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 		defer func() {
 			// 删除任务的正在执行状态
 			a.scheduler.DeleteExecutingTask(plan.Task.SchedulerKey())
-
+			f := protocol.TaskFinishedV1{
+				TaskID:    taskExecuteInfo.Task.TaskID,
+				ProjectID: taskExecuteInfo.Task.ProjectID,
+				Status:    common.TASK_STATUS_DONE_V2,
+				TmpID:     taskExecuteInfo.Task.TmpID,
+			}
+			if taskExecuteInfo.Task.FlowInfo != nil {
+				f.WorkflowID = taskExecuteInfo.Task.FlowInfo.WorkflowID
+			}
+			if result != nil && result.Err != "" {
+				f.Status = common.TASK_STATUS_FAIL_V2
+				f.Result = result.Err
+			}
+			value, _ := json.Marshal(f)
 			if err := rego.Retry(func() error {
-				f := protocol.TaskFinishedV1{
-					TaskID:    taskExecuteInfo.Task.TaskID,
-					ProjectID: taskExecuteInfo.Task.ProjectID,
-					Status:    common.TASK_STATUS_DONE_V2,
-					TmpID:     taskExecuteInfo.Task.TmpID,
-				}
-				if taskExecuteInfo.Task.FlowInfo != nil {
-					f.WorkflowID = taskExecuteInfo.Task.FlowInfo.WorkflowID
-				}
-				if result != nil && result.Err != "" {
-					f.Status = common.TASK_STATUS_FAIL_V2
-					f.Result = result.Err
-				}
-				value, _ := json.Marshal(f)
 				ctx, cancel := context.WithTimeout(context.Background(), time.Duration(a.cfg.Timeout)*time.Second)
 				defer cancel()
 				_, err := a.GetStatusReporter()(ctx, &cronpb.ScheduleReply{
@@ -521,27 +531,25 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 			})
 			return err
 		}, rego.WithTimes(3), rego.WithLatestError()); err != nil {
-			a.Warning(warning.WarningData{
-				Type:      warning.WarningTypeTask,
-				AgentIP:   a.localip,
-				TaskName:  plan.Task.Name,
-				ProjectID: plan.Task.ProjectID,
-				Data:      "设置任务运行状态失败:" + err.Error(),
-			})
 			a.logger.Error(fmt.Sprintf("task: %s, id: %s, tmp_id: %s, change running status error, %v", plan.Task.Name,
 				plan.Task.TaskID, plan.Task.TmpID, err))
-			return
+			errDetail := fmt.Errorf("agent上报任务运行状态失败: %s", err.Error())
+			cancelReason.WriteString(errDetail.Error())
+			errSignal.Send(errDetail)
+			taskExecuteInfo.CancelFunc()
 		}
+
+		errSignal.Close()
 
 		// 执行任务
 		result = a.ExecuteTask(taskExecuteInfo)
-		if result.Err == "cancel" && cancelReason != "" {
-			result.Err += ", " + cancelReason
-		}
+		cancelReason.WriteStringPrefix(result.Err)
+		result.Err = cancelReason.String()
 		// 执行结束后 返回给scheduler
 		a.scheduler.PushTaskResult(result)
 	}()
-	return nil
+
+	return errSignal.WaitOne()
 }
 
 // 处理任务结果

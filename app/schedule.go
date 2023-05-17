@@ -85,7 +85,7 @@ func (a *workflowRunner) scheduleTask(taskInfo *common.TaskInfo) error {
 		},
 	})
 	// addr, taskid, witherr, errdesc
-	a.scheduleAgentMetric(client.addr, fmt.Sprintf("%d_%s", taskInfo.ProjectID, taskInfo.TaskID), fmt.Sprint(err == nil), utils.PrintError(err))
+	a.scheduleAgentMetric(fmt.Sprintf("%d_%s", taskInfo.ProjectID, taskInfo.TaskID), fmt.Sprint(err != nil))
 	if err != nil {
 		wlog.With(zap.Any("fields", map[string]interface{}{
 			"workflow_id": taskInfo.FlowInfo.WorkflowID,
@@ -661,6 +661,12 @@ func (a *app) TemporarySchedulerTask(task *common.TaskInfo) error {
 	}
 	defer client.Close()
 
+	a.PublishMessage(messageTaskStatusChanged(
+		task.ProjectID,
+		task.TaskID,
+		task.TmpID,
+		common.TASK_STATUS_STARTING_V2))
+
 	ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
 	defer cancel()
 
@@ -684,12 +690,6 @@ func (a *app) TemporarySchedulerTask(task *common.TaskInfo) error {
 				fmt.Sprintf("调度任务失败, project_id: %d, task_id: %s", task.ProjectID, task.TaskID)).WithLog(err.Error())
 		}
 	}
-
-	a.PublishMessage(messageTaskStatusChanged(
-		task.ProjectID,
-		task.TaskID,
-		task.TmpID,
-		common.TASK_STATUS_STARTING_V2))
 
 	return nil
 }

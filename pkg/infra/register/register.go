@@ -57,6 +57,9 @@ func NewRemoteRegister(localIP string, connect func() (CenterClient, error), eve
 	}
 
 	rr.reConnect = func() (err error) {
+		if rr.client.Cc != nil {
+			rr.client.Cc.Close()
+		}
 		rr.client, err = connect()
 		return
 	}
@@ -90,8 +93,8 @@ func (s *remoteRegistry) Register() error {
 		s.log.Error("failed to register service", zap.Error(err))
 		if err == io.EOF {
 			time.Sleep(time.Second)
-			if err = s.reConnect(); err != nil {
-				s.log.Error("failed to reconnect registry", zap.Error(err))
+			if innererr := s.reConnect(); innererr == nil {
+				s.log.Error("failed to reconnect registry", zap.Error(innererr))
 			}
 		}
 		return err

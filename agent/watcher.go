@@ -35,6 +35,12 @@ func (a *client) handlerEventFromCenter(event *cronpb.Event) {
 			return
 		}
 		taskEvent = common.BuildTaskEvent(common.TASK_EVENT_DELETE, task)
+	case common.REMOTE_EVENT_TASK_STOP:
+		var err error
+		if task, err = common.Unmarshal(event.Value); err != nil {
+			return
+		}
+		taskEvent = common.BuildTaskEvent(common.TASK_EVENT_KILL, task)
 	default:
 		return
 	}

@@ -25,10 +25,10 @@ require (
 require (
 	github.com/cloudevents/sdk-go/v2 v2.13.0
 	github.com/gin-contrib/pprof v1.4.0
-	github.com/holdno/keypool v0.1.3
+	github.com/mwitkow/grpc-proxy v0.0.0-20230212185441-f345521cb9c9
 	github.com/oklog/ulid/v2 v2.1.0
 	github.com/prometheus/client_golang v1.14.0
-	github.com/spacegrower/watermelon v0.1.1-alpha.17
+	github.com/spacegrower/watermelon v0.1.1-alpha.19
 	go.etcd.io/etcd/api/v3 v3.5.5
 	go.etcd.io/etcd/client/v3 v3.5.5
 	google.golang.org/grpc v1.53.0
@@ -68,6 +68,7 @@ require (
 	go.uber.org/multierr v1.6.0 // indirect
 	golang.org/x/crypto v0.0.0-20220315160706-3147a52a75dd // indirect
 	golang.org/x/net v0.8.0 // indirect
+	golang.org/x/sync v0.0.0-20220601150217-0de741cfad7f // indirect
 	golang.org/x/sys v0.6.0 // indirect
 	golang.org/x/text v0.8.0 // indirect
 	google.golang.org/appengine v1.6.7 // indirect

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -22,21 +21,20 @@ import (
 	"github.com/holdno/gopherCron/pkg/warning"
 	"github.com/holdno/gopherCron/protocol"
 	"github.com/holdno/gopherCron/utils"
-	"go.uber.org/zap"
 
 	"github.com/gin-gonic/gin"
 	"github.com/holdno/gocommons/selection"
-	"github.com/holdno/keypool"
 	"github.com/jinzhu/gorm"
 	"github.com/spacegrower/watermelon/infra/wlog"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/client/v3/concurrency"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
 type App interface {
+	Run()
 	Log() wlog.Logger
 	CreateProject(tx *gorm.DB, p common.Project) (int64, error)
 	GetProject(pid int64) (*common.Project, error)
@@ -137,6 +135,9 @@ type App interface {
 	RemoveClientRegister(client string) error
 	HandleCenterEvent(event *cronpb.Event) error
 
+	// proxy
+	GetGrpcDirector() func(ctx context.Context, fullMethodName string) (context.Context, *grpc.ClientConn, error)
+
 	// task status
 	SetTaskRunning(agentIP string, execInfo *common.TaskExecutingInfo) error
 	CheckTaskIsRunning(projectID int64, taskID string) ([]common.TaskRunningInfo, error)
@@ -150,7 +151,7 @@ func GetApp(c *gin.Context) App {
 type app struct {
 	ctx        context.Context
 	cancelFunc context.CancelFunc
-	connPool   keypool.Pool[*grpc.ClientConn]
+	// connPool   keypool.Pool[*grpc.ClientConn]
 	clusterID  int64
 	httpClient *http.Client
 	store      sqlStore.SqlStore
@@ -169,23 +170,29 @@ type app struct {
 	protocol.CommonInterface
 	warning.Warner
 
-	pusher *SystemPusher
-
+	pusher        *SystemPusher
 	streamManager *streamManager
 }
 
 func (a *app) GetAgentClient(region string, projectID int64) (*AgentClient, error) {
-	key := fmt.Sprintf("client_%s_%d", region, projectID)
-	conn, err := a.connPool.Get(key)
+	// client 的连接对象由调用时提供初始化
+
+	newConn := infra.NewClientConn()
+	cc, err := newConn(cronpb.Agent_ServiceDesc.ServiceName,
+		newConn.WithRegion(region),
+		newConn.WithSystem(projectID),
+		newConn.WithOrg(a.cfg.Micro.OrgID),
+		newConn.WithGrpcDialOptions(grpc.WithTransportCredentials(insecure.NewCredentials())),
+		newConn.WithServiceResolver(infra.MustSetupEtcdResolver()))
 	if err != nil {
-		return nil, err
+		return nil, errors.NewError(http.StatusInternalServerError, fmt.Sprintf("连接agent失败，project_id: %d", projectID)).WithLog(err.Error())
 	}
 
 	client := &AgentClient{
-		AgentClient: cronpb.NewAgentClient(conn.Conn()),
-		addr:        key,
+		AgentClient: cronpb.NewAgentClient(cc),
+		addr:        fmt.Sprintf("resolve_%s_%d", region, projectID),
 		cancel: func() {
-			a.connPool.Put(key, conn)
+			cc.Close()
 		},
 	}
 
@@ -200,22 +207,16 @@ func (a *app) GetEtcdClient() *clientv3.Client {
 	return a.etcd.Client()
 }
 
-type AppOptions func(a *app)
-
-func WithWarning(w warning.Warner) AppOptions {
-	return func(a *app) {
-		a.Warner = w
-	}
-}
-
 var (
 	POOL_ERROR_FACTORY_NOT_FOUND = fmt.Errorf("factory not found")
 )
 
-func NewApp(configPath string, opts ...AppOptions) App {
+func NewApp(configPath string) App {
 	var err error
 
 	conf := config.InitServiceConfig(configPath)
+
+	infra.RegisterETCDRegisterPrefixKey(conf.Etcd.Prefix + "/registry")
 	wlog.SetGlobalLogger(wlog.NewLogger(&wlog.Config{
 		Level: wlog.ParseLevel(conf.LogLevel),
 		RotateConfig: &wlog.RotateConfig{
@@ -224,12 +225,17 @@ func NewApp(configPath string, opts ...AppOptions) App {
 		},
 		File: conf.LogPath, // print to sedout if config.File undefined
 	}))
-	app := &app{}
+	app := &app{
+		Warner: warning.NewDefaultWarner(wlog.With(zap.String("component", "warner"))),
+		cfg:    conf,
+	}
 	app.ctx, app.cancelFunc = context.WithCancel(context.Background())
+	if conf.ReportAddr != "" {
+		app.Warner = warning.NewHttpReporter(conf.ReportAddr)
+	}
 
-	app.cfg = conf
 	if conf.Mysql != nil && conf.Mysql.Service != "" {
-		app.store = sqlStore.MustSetup(conf.Mysql, wlog.With(zap.String("component", "sqlprovider")), true)
+		app.store = sqlStore.MustSetup(conf.Mysql, wlog.With(zap.String("component", "sqlprovider")), false)
 	}
 
 	if app.localip, err = utils.GetLocalIP(); err != nil {
@@ -238,66 +244,66 @@ func NewApp(configPath string, opts ...AppOptions) App {
 
 	app.metrics = metrics.NewMetrics("center", app.GetIP())
 
-	app.connPool, err = keypool.NewChannelPool(&keypool.Config[*grpc.ClientConn]{
-		MaxCap: 10000,
-		//最大空闲连接
-		MaxIdle: 10,
-		//生成连接的方法
-		Factory: func(key string) (*grpc.ClientConn, error) {
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second*time.Duration(conf.Deploy.Timeout))
-			defer cancel()
-			addr := key
-			if strings.Contains(key, "agent_") {
-				addr = strings.TrimPrefix(key, "agent_")
-			} else if strings.Contains(key, "client_") {
-				// client 的连接对象由调用时提供初始化
-				keys := strings.Split(key, "_")
-				if len(keys) != 3 {
-					return nil, POOL_ERROR_FACTORY_NOT_FOUND
-				}
-				projectID, err := strconv.ParseInt(keys[2], 10, 64)
-				if err != nil {
-					return nil, err
-				}
-				newConn := infra.NewClientConn()
-				cc, err := newConn(cronpb.Agent_ServiceDesc.ServiceName,
-					newConn.WithRegion(keys[1]),
-					newConn.WithSystem(projectID),
-					newConn.WithOrg("gophercron"),
-					newConn.WithGrpcDialOptions(grpc.WithTransportCredentials(insecure.NewCredentials())),
-					newConn.WithServiceResolver(infra.MustSetupEtcdResolver()))
-				if err != nil {
-					return nil, errors.NewError(http.StatusInternalServerError, fmt.Sprintf("连接agent失败，project_id: %d", projectID)).WithLog(err.Error())
-				}
-				return cc, nil
-			}
-			return grpc.DialContext(ctx, addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-		},
-		//关闭连接的方法
-		Close: func(cc *grpc.ClientConn) error {
-			return cc.Close()
-		},
-		//检查连接是否有效的方法
-		Ping: func(cc *grpc.ClientConn) error {
-			state := cc.GetState().String()
-			switch state {
-			case connectivity.Shutdown.String():
-				fallthrough
-			case connectivity.TransientFailure.String():
-				fallthrough
-			case "INVALID_STATE":
-				return fmt.Errorf("error state %s", cc.GetState().String())
-			default:
-				wlog.Debug("ping conn status", zap.String("status", state), zap.String("component", "conn-pool"))
-				return nil
-			}
-		},
-		//连接最大空闲时间，超过该事件则将失效
-		IdleTimeout: time.Minute * 10,
-	})
-	if err != nil {
-		panic(err)
-	}
+	// app.connPool, err = keypool.NewChannelPool(&keypool.Config[*grpc.ClientConn]{
+	// 	MaxCap: 10000,
+	// 	//最大空闲连接
+	// 	MaxIdle: 10,
+	// 	//生成连接的方法
+	// 	Factory: func(key string) (*grpc.ClientConn, error) {
+	// 		ctx, cancel := context.WithTimeout(context.Background(), time.Second*time.Duration(conf.Deploy.Timeout))
+	// 		defer cancel()
+	// 		addr := key
+	// 		if strings.Contains(key, "agent_") {
+	// 			addr = strings.TrimPrefix(key, "agent_")
+	// 		} else if strings.Contains(key, "client_") {
+	// 			// client 的连接对象由调用时提供初始化
+	// 			keys := strings.Split(key, "_")
+	// 			if len(keys) != 3 {
+	// 				return nil, POOL_ERROR_FACTORY_NOT_FOUND
+	// 			}
+	// 			projectID, err := strconv.ParseInt(keys[2], 10, 64)
+	// 			if err != nil {
+	// 				return nil, err
+	// 			}
+	// 			newConn := infra.NewClientConn()
+	// 			cc, err := newConn(cronpb.Agent_ServiceDesc.ServiceName,
+	// 				newConn.WithRegion(keys[1]),
+	// 				newConn.WithSystem(projectID),
+	// 				newConn.WithOrg(app.cfg.Micro.OrgID),
+	// 				newConn.WithGrpcDialOptions(grpc.WithTransportCredentials(insecure.NewCredentials())),
+	// 				newConn.WithServiceResolver(infra.MustSetupEtcdResolver()))
+	// 			if err != nil {
+	// 				return nil, errors.NewError(http.StatusInternalServerError, fmt.Sprintf("连接agent失败，project_id: %d", projectID)).WithLog(err.Error())
+	// 			}
+	// 			return cc, nil
+	// 		}
+	// 		return grpc.DialContext(ctx, addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	// 	},
+	// 	//关闭连接的方法
+	// 	Close: func(cc *grpc.ClientConn) error {
+	// 		return cc.Close()
+	// 	},
+	// 	//检查连接是否有效的方法
+	// 	Ping: func(cc *grpc.ClientConn) error {
+	// 		state := cc.GetState().String()
+	// 		switch state {
+	// 		case connectivity.Shutdown.String():
+	// 			fallthrough
+	// 		case connectivity.TransientFailure.String():
+	// 			fallthrough
+	// 		case "INVALID_STATE":
+	// 			return fmt.Errorf("error state %s", cc.GetState().String())
+	// 		default:
+	// 			wlog.Debug("ping conn status", zap.String("status", state), zap.String("component", "conn-pool"))
+	// 			return nil
+	// 		}
+	// 	},
+	// 	//连接最大空闲时间，超过该时间则将失效
+	// 	IdleTimeout: time.Minute * 10,
+	// })
+	// if err != nil {
+	// 	panic(err)
+	// }
 
 	app.httpClient = &http.Client{
 		Timeout: time.Second * 5,
@@ -353,10 +359,6 @@ func NewApp(configPath string, opts ...AppOptions) App {
 		}
 	})
 
-	for _, opt := range opts {
-		opt(app)
-	}
-
 	if app.cfg.Publish.Enable {
 		wlog.Info("enable publish service", zap.String("endpoint", app.cfg.Publish.Endpoint))
 		app.pusher = &SystemPusher{
@@ -380,19 +382,17 @@ func NewApp(configPath string, opts ...AppOptions) App {
 		})
 	}
 
-	if app.Warner == nil {
-		app.Warner = warning.NewDefaultWarner(wlog.With(zap.String("component", "warner")))
-	}
-
 	jwt.InitJWT(conf.JWT)
 
-	startCleanupTask(app)
-	startWebhook(app)
-	startWorkflow(app)
-	startTemporaryTaskWorker(app)
-	startCalcDataConsistency(app)
-
 	return app
+}
+
+func (a *app) Run() {
+	startCleanupTask(a)
+	startWebhook(a)
+	startWorkflow(a)
+	startTemporaryTaskWorker(a)
+	startCalcDataConsistency(a)
 }
 
 func (a *app) GetVersion() string {
@@ -1077,16 +1077,14 @@ func (a *app) ReloadWorkerConfig(host string) error {
 	ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
 	defer cancel()
 
-	conn, err := a.connPool.Get("agent_" + host)
+	cc, err := grpc.DialContext(ctx, host, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return errors.NewError(http.StatusInternalServerError, "获取agent连接失败").WithLog(err.Error())
 	}
-	defer func() {
-		err := a.connPool.Put("agent_"+host, conn)
-		fmt.Println("put back", "agent_"+host, err)
-	}()
 
-	client := cronpb.NewAgentClient(conn.Conn())
+	defer cc.Close()
+
+	client := cronpb.NewAgentClient(cc)
 	if _, err = client.Command(ctx, &cronpb.CommandRequest{
 		Command: common.AGENT_COMMAND_RELOAD_CONFIG,
 	}); err != nil {

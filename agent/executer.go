@@ -78,7 +78,7 @@ func (a *client) ExecuteTask(info *common.TaskExecutingInfo) *common.TaskExecute
 		if ctxErr == context.DeadlineExceeded {
 			result.Err = "timeout"
 		} else if ctxErr == context.Canceled {
-			result.Err = "cancel"
+			result.Err = "canceled"
 		} else {
 			switch cmd.ProcessState.ExitCode() {
 			case 1:

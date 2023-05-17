@@ -22,7 +22,10 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 )
 
 func (a *app) RemoveClientRegister(client string) error {
@@ -172,34 +175,25 @@ func (a *app) FindAgents(region string, projectID int64) ([]*AgentClient, error)
 	}
 	var list []*AgentClient
 	for _, addr := range addrs {
-		conn, err := a.connPool.Get("agent_" + addr.Address())
-		var (
-			client *AgentClient
-		)
-		if err != nil {
-			ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
-			defer cancel()
-			cc, err := grpc.DialContext(ctx, addr.Address(), grpc.WithTransportCredentials(insecure.NewCredentials()))
-			if err != nil {
-				return nil, fmt.Errorf("failed to connect agent %s, error: %s", addr.Address(), err.Error())
-			}
-			client = &AgentClient{
-				AgentClient: cronpb.NewAgentClient(cc),
-				addr:        addr.Address(),
-				cancel: func() {
-					cc.Close()
-				},
-			}
-		} else {
-			client = &AgentClient{
-				AgentClient: cronpb.NewAgentClient(conn.Conn()),
-				addr:        addr.Address(),
-				cancel: func() {
-					a.connPool.Put("agent_"+addr.Address(), conn)
-				},
-			}
-		}
 
+		ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
+		defer cancel()
+		gopts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
+		dialAddress := addr.Address()
+		if addr.Attr().Region != a.cfg.Micro.Region {
+			dialAddress, gopts = BuildProxyDialerInfo(ctx, addr.Attr().Region, addr.Address(), gopts)
+		}
+		cc, err := grpc.DialContext(ctx, dialAddress, gopts...)
+		if err != nil {
+			return nil, fmt.Errorf("failed to connect agent %s, error: %s", addr.Address(), err.Error())
+		}
+		client := &AgentClient{
+			AgentClient: cronpb.NewAgentClient(cc),
+			addr:        addr.Address(),
+			cancel: func() {
+				cc.Close()
+			},
+		}
 		list = append(list, client)
 	}
 
@@ -221,7 +215,7 @@ func (c *CenterClient) Close() {
 func (a *app) GetCenterSrvList() ([]*CenterClient, error) {
 	mtimer := a.metrics.CustomHistogramSet("get_center_srv_list")
 	defer mtimer.ObserveDuration()
-	finder := etcd.MustSetupEtcdFinder()
+	finder := etcd.NewFinder[infra.NodeMeta](infra.ResolveEtcdClient())
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
 	defer cancel()
 	findKey := filepath.ToSlash(filepath.Join(etcdregister.GetETCDPrefixKey(), "gophercron", "0", cronpb.Center_ServiceDesc.ServiceName)) + "/"
@@ -238,31 +232,23 @@ func (a *app) GetCenterSrvList() ([]*CenterClient, error) {
 			cc        *grpc.ClientConn
 			centerSrv *CenterClient
 		)
-		idle, err := a.connPool.Get(addr.Address())
+		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
+		defer cancel()
+		gopts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
+		dialAddress := addr.Address()
+		if addr.Attr().Region != a.cfg.Micro.Region {
+			dialAddress, gopts = BuildProxyDialerInfo(ctx, addr.Attr().Region, addr.Address(), gopts)
+		}
+		cc, err = grpc.DialContext(ctx, dialAddress, gopts...)
 		if err != nil {
-			wlog.Error("failed to get client conn from conn-pool", zap.Error(err))
-			ctx, cancel := context.WithTimeout(context.Background(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
-			defer cancel()
-			cc, err = grpc.DialContext(ctx, addr.Address(), grpc.WithTransportCredentials(insecure.NewCredentials()))
-			if err != nil {
-				return nil, fmt.Errorf("failed to connect center %s, error: %s", addr.Address(), err.Error())
-			}
-			centerSrv = &CenterClient{
-				CenterClient: cronpb.NewCenterClient(cc),
-				addr:         addr.Address(),
-				cancel: func() {
-					cc.Close()
-				},
-			}
-		} else {
-			cc = idle.Conn()
-			centerSrv = &CenterClient{
-				CenterClient: cronpb.NewCenterClient(cc),
-				addr:         addr.Address(),
-				cancel: func() {
-					a.connPool.Put(addr.Address(), idle)
-				},
-			}
+			return nil, fmt.Errorf("failed to connect center %s, error: %s", addr.Address(), err.Error())
+		}
+		centerSrv = &CenterClient{
+			CenterClient: cronpb.NewCenterClient(cc),
+			addr:         addr.Address(),
+			cancel: func() {
+				cc.Close()
+			},
 		}
 		centers = append(centers, centerSrv)
 	}
@@ -299,4 +285,68 @@ func (a *app) DispatchEvent(event *cronpb.SendEventRequest) error {
 		}
 	}
 	return nil
+}
+
+func (a *app) GetGrpcDirector() func(ctx context.Context, fullMethodName string) (context.Context, *grpc.ClientConn, error) {
+	return func(ctx context.Context, fullMethodName string) (context.Context, *grpc.ClientConn, error) {
+		md, _ := metadata.FromIncomingContext(ctx)
+		addrs := md.Get(common.GOPHERCRON_PROXY_TO_MD_KEY)
+		dialOptions := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
+		if len(addrs) > 0 {
+			addr := addrs[0]
+			wlog.Debug("got proxy request", zap.String("proxy_to", addr), zap.String("full_method", fullMethodName))
+			cc, err := grpc.Dial(addr, dialOptions...)
+			if err != nil {
+				return nil, nil, err
+			}
+
+			md.Set(common.GOPHERCRON_AGENT_IP_MD_KEY, "gophercron_proxy")
+			outCtx := metadata.NewOutgoingContext(ctx, md.Copy())
+			return outCtx, cc, nil
+		} else {
+			projectIDs := md.Get(common.GOPHERCRON_PROXY_PROJECT_MD_KEY)
+			if len(projectIDs) == 0 {
+				return nil, nil, status.Error(codes.Unknown, "undefined project id")
+			}
+			projectID, err := strconv.ParseInt(projectIDs[0], 10, 64)
+			if err != nil {
+				return nil, nil, status.Error(codes.Unknown, "invalid project id")
+			}
+			ls := strings.Split(fullMethodName, "/")
+			if len(ls) != 3 {
+				return nil, nil, status.Error(codes.Unknown, "unknown full method name")
+			}
+			newCC := infra.NewClientConn()
+			cc, err := newCC(ls[1], newCC.WithSystem(projectID), newCC.WithOrg(a.cfg.Micro.OrgID), newCC.WithRegion(a.cfg.Micro.Region),
+				newCC.WithServiceResolver(infra.MustSetupEtcdResolver()),
+				newCC.WithGrpcDialOptions(dialOptions...))
+			if err != nil {
+				return nil, nil, err
+			}
+			outCtx := metadata.NewOutgoingContext(ctx, md.Copy())
+			return outCtx, cc.ClientConn, nil
+		}
+	}
+}
+
+func BuildProxyDialerInfo(ctx context.Context, region, address string, opts []grpc.DialOption) (dialAddress string, gopts []grpc.DialOption) {
+	dialAddress = infra.ResolveProxy(region)
+	if dialAddress == "" {
+		wlog.Error("proxy address not found", zap.String("region", region))
+	}
+	genMetadata := func(ctx context.Context) context.Context {
+		md, exist := metadata.FromOutgoingContext(ctx)
+		if !exist {
+			md = metadata.New(map[string]string{})
+		}
+		md.Set(common.GOPHERCRON_PROXY_TO_MD_KEY, address)
+		return metadata.NewOutgoingContext(ctx, md)
+	}
+	gopts = append(opts, grpc.WithUnaryInterceptor(func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+		return invoker(genMetadata(ctx), method, req, reply, cc, opts...)
+	}),
+		grpc.WithStreamInterceptor(func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+			return streamer(genMetadata(ctx), desc, cc, method, opts...)
+		}))
+	return dialAddress, gopts
 }

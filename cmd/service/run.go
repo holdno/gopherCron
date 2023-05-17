@@ -5,21 +5,22 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"runtime/pprof"
 	"syscall"
 	"time"
 
 	"github.com/holdno/gopherCron/app"
 	"github.com/holdno/gopherCron/cmd/service/middleware"
 	"github.com/holdno/gopherCron/cmd/service/router"
+	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/config"
 	"github.com/holdno/gopherCron/pkg/cronpb"
 	"github.com/holdno/gopherCron/pkg/infra"
 	"github.com/holdno/gopherCron/pkg/warning"
-	"github.com/holdno/gopherCron/protocol"
 	"github.com/holdno/gopherCron/utils"
 
 	"github.com/gin-gonic/gin"
+	"github.com/mwitkow/grpc-proxy/proxy"
+	"github.com/mwitkow/grpc-proxy/testservice"
 	"github.com/spacegrower/watermelon/infra/graceful"
 	"github.com/spacegrower/watermelon/infra/wlog"
 	"google.golang.org/grpc"
@@ -29,30 +30,8 @@ import (
 
 var shutdownFunc func()
 
-func setupPprof() {
-	{
-		file, err := os.Create("./cpu.pprof")
-		if err != nil {
-			fmt.Printf("create cpu pprof failed, err:%v\n", err)
-			return
-		}
-		pprof.StartCPUProfile(file)
-	}
-
-	{
-		file, err := os.Create("./mem.pprof")
-		if err != nil {
-			fmt.Printf("create mem pprof failed, err:%v\n", err)
-			return
-		}
-		pprof.WriteHeapProfile(file)
-	}
-
-}
-
 // 初始化服务
 func apiServer(srv app.App, conf *config.ServiceConfig) {
-
 	if utils.ReleaseMode() {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -62,7 +41,12 @@ func apiServer(srv app.App, conf *config.ServiceConfig) {
 	router.SetupRoute(srv, engine, conf.Deploy)
 
 	// rpc server
-	infra.RegisterETCDRegisterPrefixKey(conf.Etcd.Prefix + "/registry")
+	fmt.Println(conf.Micro.RegionProxy)
+	// 注册不同region对应的grpc proxy地址
+	for region, proxy := range conf.Micro.RegionProxy {
+		infra.RegisterRegionProxy(region, proxy)
+	}
+
 	newServer := infra.NewCenterServer()
 	server := newServer(func(grpcServer *grpc.Server) {
 		cronpb.RegisterCenterServer(grpcServer, &cronRpc{
@@ -92,7 +76,7 @@ func apiServer(srv app.App, conf *config.ServiceConfig) {
 	server.Use(func(ctx context.Context) error {
 		agentIP, exist := GetAgentIPFromContext(ctx)
 		if !exist {
-			return status.Error(codes.Aborted, "header: "+protocol.GOPHERCRON_AGENT_HEADER_IP+" is not found")
+			return status.Error(codes.Aborted, "header: "+common.GOPHERCRON_AGENT_IP_MD_KEY+" is not found")
 		}
 		middleware.SetAgentIP(ctx, agentIP)
 		return nil
@@ -105,6 +89,8 @@ func apiServer(srv app.App, conf *config.ServiceConfig) {
 		srv.Close()
 	})
 
+	srv.Run()
+	go setupProxy(srv, srv.GetConfig())
 	wlog.Info(fmt.Sprintf("%s, start grpc server, listen on %s\n", utils.GetCurrentTimeText(), conf.Deploy.Host))
 	server.RunUntil(syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL)
 	graceful.ShutDown()
@@ -126,12 +112,7 @@ func resolveServerAddress(addr []string) string {
 }
 
 func Run(opts *SetupOptions) error {
-	// 加载配置
-	var o []app.AppOptions
-	// if opts.Firetower {
-	// 	o = append(o, app.WithFiretower())
-	// }
-	srv := app.NewApp(opts.ConfigPath, o...)
+	srv := app.NewApp(opts.ConfigPath)
 
 	defer func() {
 		if r := recover(); r != nil {
@@ -147,6 +128,24 @@ func Run(opts *SetupOptions) error {
 		srv.GetConfig().Deploy.Environment = "debug"
 	}
 	os.Setenv("GOPHERENV", srv.GetConfig().Deploy.Environment)
+
+	if opts.ProxyOnly {
+		setupProxy(srv, srv.GetConfig())
+		return nil
+	}
 	apiServer(srv, srv.GetConfig())
 	return nil
+}
+
+func setupProxy(srv app.App, conf *config.ServiceConfig) {
+	if conf.Deploy.ProxyHost == "" {
+		return
+	}
+	newServer := infra.NewCenterServer()
+	server := newServer(func(srv *grpc.Server) {
+		testservice.RegisterTestServiceServer(srv, testservice.DefaultTestServiceServer)
+	}, newServer.WithAddress([]infra.Address{{ListenAddress: conf.Deploy.ProxyHost}}),
+		newServer.WithGrpcServerOptions(grpc.UnknownServiceHandler(proxy.TransparentHandler(srv.GetGrpcDirector()))))
+	wlog.Info(fmt.Sprintf("%s, start grpc proxy, listen on %s\n", utils.GetCurrentTimeText(), conf.Deploy.ProxyHost))
+	server.RunUntil(syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL)
 }

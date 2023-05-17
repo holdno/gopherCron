@@ -13,6 +13,8 @@ import (
 	"reflect"
 	"sort"
 	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/holdno/gopherCron/common"
@@ -245,4 +247,85 @@ func IsNil(v any) bool {
 		return rv.IsNil()
 	}
 	return false
+}
+
+// 适用于一等多的场景，只要有一处发生异常(信号)即可满足业务需求，其他的信号将被忽略
+func NewSignalChannel[T any]() *rChannel[T] {
+	return &rChannel[T]{
+		channel: make(chan T, 1),
+		lock:    sync.RWMutex{},
+	}
+}
+
+type rChannel[T any] struct {
+	isClose bool
+	channel chan T
+	lock    sync.RWMutex
+}
+
+func (r *rChannel[T]) Send(t T) {
+	r.lock.RLock()
+	defer r.lock.RUnlock()
+	if r.isClose {
+		return
+	}
+
+	select {
+	case r.channel <- t:
+	default:
+		return
+	}
+}
+
+func (r *rChannel[T]) WaitOne() T {
+	defer r.Close()
+	return <-r.channel
+}
+
+func (r *rChannel[T]) Close() {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+	if r.isClose {
+		return
+	}
+	r.isClose = true
+	close(r.channel)
+}
+
+type reasonWriter struct {
+	s *strings.Builder
+}
+
+func (r *reasonWriter) WriteString(s string) {
+	if r.s.Len() != 0 {
+		r.s.WriteString(",")
+	}
+	r.s.WriteString(s)
+}
+
+func (r *reasonWriter) WriteStringPrefix(s string) {
+	if r.s.Len() == 0 {
+		r.s.WriteString(s)
+		return
+	}
+	news := strings.Builder{}
+	news.WriteString(s)
+
+	old := r.s.String()
+	r.s = &news
+	r.WriteString(old)
+}
+
+func (r *reasonWriter) String() string {
+	return r.s.String()
+}
+
+func (r *reasonWriter) Len() int {
+	return r.s.Len()
+}
+
+func NewReasonWriter() *reasonWriter {
+	return &reasonWriter{
+		s: &strings.Builder{},
+	}
 }

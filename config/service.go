@@ -23,8 +23,9 @@ type Project struct {
 
 // APIConfig 配置文件Root
 type ServiceConfig struct {
-	LogLevel string `toml:"log_level"`
-	LogPath  string `toml:"log_path"`
+	LogLevel   string `toml:"log_level"`
+	LogPath    string `toml:"log_path"`
+	ReportAddr string `toml:"report_addr"`
 
 	Publish Publish     `toml:"publish"`
 	Deploy  *DeployConf `toml:"deploy"` // host配置
@@ -40,10 +41,11 @@ type Publish struct {
 }
 
 type Micro struct {
-	Endpoint string `toml:"endpoint"`
-	OrgID    string `toml:"org_id"`
-	Region   string `toml:"region"`
-	Weigth   int32  `toml:"weigth"`
+	Endpoint    string            `toml:"endpoint"`
+	OrgID       string            `toml:"org_id"`
+	Region      string            `toml:"region"`
+	Weigth      int32             `toml:"weigth"`
+	RegionProxy map[string]string `toml:"region_proxy"`
 }
 
 // DeployConf 部署配置
@@ -52,6 +54,7 @@ type DeployConf struct {
 	Timeout     int    `toml:"timeout"`
 	ViewPath    string `toml:"view_path"`
 	Host        string `toml:"host"`
+	ProxyHost   string `toml:"proxy_host"`
 }
 
 // EtcdConf etcd配置

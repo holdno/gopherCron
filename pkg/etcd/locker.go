@@ -162,7 +162,6 @@ func (tl *Locker) TryLockWithOwner(agentIP string) error {
 			failFunc()
 			return err
 		}
-		return nil
 	}
 
 	tl.leaseID = leaseGrantResp.ID
