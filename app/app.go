@@ -174,31 +174,6 @@ type app struct {
 	streamManager *streamManager
 }
 
-func (a *app) GetAgentClient(region string, projectID int64) (*AgentClient, error) {
-	// client 的连接对象由调用时提供初始化
-
-	newConn := infra.NewClientConn()
-	cc, err := newConn(cronpb.Agent_ServiceDesc.ServiceName,
-		newConn.WithRegion(region),
-		newConn.WithSystem(projectID),
-		newConn.WithOrg(a.cfg.Micro.OrgID),
-		newConn.WithGrpcDialOptions(grpc.WithTransportCredentials(insecure.NewCredentials())),
-		newConn.WithServiceResolver(infra.MustSetupEtcdResolver()))
-	if err != nil {
-		return nil, errors.NewError(http.StatusInternalServerError, fmt.Sprintf("连接agent失败，project_id: %d", projectID)).WithLog(err.Error())
-	}
-
-	client := &AgentClient{
-		AgentClient: cronpb.NewAgentClient(cc),
-		addr:        fmt.Sprintf("resolve_%s_%d", region, projectID),
-		cancel: func() {
-			cc.Close()
-		},
-	}
-
-	return client, nil
-}
-
 type WebClientPusher interface {
 	Publish(messageId, source, topic string, data json.RawMessage) error
 }
