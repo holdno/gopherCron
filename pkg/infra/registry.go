@@ -37,6 +37,19 @@ func DefaultAllowFunc(query url.Values, attr NodeMeta, addr *resolver.Address) b
 	return true
 }
 
+func ProxyAllowFunc(query url.Values, attr NodeMeta, addr *resolver.Address) bool {
+	region := query.Get("region")
+
+	if region == "" {
+		return true
+	}
+
+	if attr.Region != region {
+		return false
+	}
+	return true
+}
+
 func MustSetupEtcdResolver() wresolver.Resolver {
 	return eresolve.NewEtcdResolver(infra.ResolveEtcdClient(), DefaultAllowFunc)
 }

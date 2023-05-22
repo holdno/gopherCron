@@ -79,7 +79,7 @@ func (a *app) RemoveClientRegister(client string) error {
 	return nil
 }
 
-func (a *app) DispatchAgentJob(region string, projectID int64, withStream ...*Stream) error {
+func (a *app) DispatchAgentJob(projectID int64, withStream ...*Stream) error {
 	mtimer := a.metrics.CustomHistogramSet("dispatch_agent_jobs")
 	defer mtimer.ObserveDuration()
 	preKey := common.BuildKey(projectID, "")
@@ -106,7 +106,7 @@ func (a *app) DispatchAgentJob(region string, projectID int64, withStream ...*St
 	}
 
 	if len(withStream) == 0 {
-		streams := a.StreamManager().GetStreams(region, projectID, cronpb.Agent_ServiceDesc.ServiceName)
+		streams := a.StreamManager().GetStreams(projectID, cronpb.Agent_ServiceDesc.ServiceName)
 		if streams == nil {
 			return fmt.Errorf("failed to get grpc streams")
 		}
@@ -115,7 +115,7 @@ func (a *app) DispatchAgentJob(region string, projectID int64, withStream ...*St
 		}
 	}
 
-	wlog.Info("dispatch agent job", zap.String("region", region), zap.Int64("project_id", projectID), zap.Int("streams", len(withStream)), zap.Int("tasks", len(getResp.Kvs)))
+	wlog.Info("dispatch agent job", zap.Int64("project_id", projectID), zap.Int("streams", len(withStream)), zap.Int("tasks", len(getResp.Kvs)))
 	for _, kvPair := range getResp.Kvs {
 		// if task, err := common.Unmarshal(kvPair.Value); err == nil {
 		// 	continue
@@ -290,11 +290,12 @@ func (a *app) DispatchEvent(event *cronpb.SendEventRequest) error {
 func (a *app) GetGrpcDirector() func(ctx context.Context, fullMethodName string) (context.Context, *grpc.ClientConn, error) {
 	return func(ctx context.Context, fullMethodName string) (context.Context, *grpc.ClientConn, error) {
 		md, _ := metadata.FromIncomingContext(ctx)
+		wlog.Debug("got proxy request", zap.String("full_method", fullMethodName))
 		addrs := md.Get(common.GOPHERCRON_PROXY_TO_MD_KEY)
 		dialOptions := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
 		if len(addrs) > 0 {
 			addr := addrs[0]
-			wlog.Debug("got proxy request", zap.String("proxy_to", addr), zap.String("full_method", fullMethodName))
+			wlog.Debug("address proxy", zap.String("proxy_to", addr), zap.String("full_method", fullMethodName))
 			cc, err := grpc.Dial(addr, dialOptions...)
 			if err != nil {
 				return nil, nil, err
@@ -305,6 +306,7 @@ func (a *app) GetGrpcDirector() func(ctx context.Context, fullMethodName string)
 			return outCtx, cc, nil
 		} else {
 			projectIDs := md.Get(common.GOPHERCRON_PROXY_PROJECT_MD_KEY)
+			wlog.Debug("resolve proxy", zap.Any("project", projectIDs), zap.String("full_method", fullMethodName))
 			if len(projectIDs) == 0 {
 				return nil, nil, status.Error(codes.Unknown, "undefined project id")
 			}
@@ -318,7 +320,7 @@ func (a *app) GetGrpcDirector() func(ctx context.Context, fullMethodName string)
 			}
 			newCC := infra.NewClientConn()
 			cc, err := newCC(ls[1], newCC.WithSystem(projectID), newCC.WithOrg(a.cfg.Micro.OrgID), newCC.WithRegion(a.cfg.Micro.Region),
-				newCC.WithServiceResolver(infra.MustSetupEtcdResolver()),
+				newCC.WithServiceResolver(etcd.NewEtcdResolver(infra.ResolveEtcdClient(), infra.ProxyAllowFunc)),
 				newCC.WithGrpcDialOptions(dialOptions...))
 			if err != nil {
 				return nil, nil, err

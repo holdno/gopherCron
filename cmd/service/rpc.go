@@ -67,6 +67,7 @@ func (s *cronRpc) TryLock(req cronpb.Center_TryLockServer) error {
 		heartbeat = time.NewTicker(time.Second * 5)
 	)
 	defer func() {
+		heartbeat.Stop()
 		if locker != nil {
 			time.Sleep(time.Second * 3)
 			locker.Unlock()
@@ -168,7 +169,7 @@ func (s *cronRpc) SendEvent(ctx context.Context, req *cronpb.SendEventRequest) (
 			return nil, status.Error(codes.Internal, err.Error())
 		}
 	} else {
-		for _, v := range s.app.StreamManager().GetStreams(req.Region, req.ProjectId, cronpb.Agent_ServiceDesc.ServiceName) {
+		for _, v := range s.app.StreamManager().GetStreams(req.ProjectId, cronpb.Agent_ServiceDesc.ServiceName) {
 			if err := v.Send(req.Event); err != nil {
 				return nil, errors.NewError(http.StatusInternalServerError, "下发任务删除操作失败")
 			}
@@ -265,7 +266,7 @@ Here:
 			for _, info := range multiService.Agents {
 				for _, v := range info.Systems {
 					// Dispatch 依赖 gRPC stream, 所以需要先 SaveStream 再 DispatchAgentJob
-					if err := s.app.DispatchAgentJob(info.Region, v); err != nil {
+					if err := s.app.DispatchAgentJob(v); err != nil {
 						return err
 					}
 				}
