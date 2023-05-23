@@ -17,6 +17,7 @@ import (
 	"github.com/holdno/gopherCron/pkg/infra"
 	"github.com/holdno/gopherCron/pkg/warning"
 	"github.com/holdno/gopherCron/utils"
+	"go.uber.org/zap"
 
 	"github.com/gin-gonic/gin"
 	"github.com/mwitkow/grpc-proxy/proxy"
@@ -41,7 +42,6 @@ func apiServer(srv app.App, conf *config.ServiceConfig) {
 	router.SetupRoute(srv, engine, conf.Deploy)
 
 	// rpc server
-	fmt.Println(conf.Micro.RegionProxy)
 	// 注册不同region对应的grpc proxy地址
 	for region, proxy := range conf.Micro.RegionProxy {
 		infra.RegisterRegionProxy(region, proxy)
@@ -61,7 +61,11 @@ func apiServer(srv app.App, conf *config.ServiceConfig) {
 			Handler:     engine,
 			ReadTimeout: time.Duration(5) * time.Second,
 		}),
-		newServer.WithServiceRegister(infra.MustSetupEtcdRegister()))
+		newServer.WithServiceRegister(infra.MustSetupEtcdRegister()),
+		newServer.WithGrpcServerOptions(grpc.UnknownServiceHandler(proxy.TransparentHandler(func(ctx context.Context, fullMethodName string) (context.Context, *grpc.ClientConn, error) {
+			wlog.Info("6306 got unknown request", zap.String("fullmethod", fullMethodName))
+			return nil, nil, fmt.Errorf("got invalid service %s", fullMethodName)
+		}))))
 
 	grpcRequestCounter := srv.Metrics().NewCounter("grpc_request", "method")
 	grpcRequestDuration := srv.Metrics().NewHistogram("grpc_request", "method")
@@ -147,5 +151,9 @@ func setupProxy(srv app.App, conf *config.ServiceConfig) {
 	}, newServer.WithAddress([]infra.Address{{ListenAddress: conf.Deploy.ProxyHost}}),
 		newServer.WithGrpcServerOptions(grpc.UnknownServiceHandler(proxy.TransparentHandler(srv.GetGrpcDirector()))))
 	wlog.Info(fmt.Sprintf("%s, start grpc proxy, listen on %s\n", utils.GetCurrentTimeText(), conf.Deploy.ProxyHost))
+	graceful.RegisterPreShutDownHandlers(func() {
+		wlog.Info("proxy shutting down")
+		server.ShutDown()
+	})
 	server.RunUntil(syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL)
 }

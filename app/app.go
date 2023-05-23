@@ -131,7 +131,7 @@ type App interface {
 
 	// registry
 	StreamManager() *streamManager
-	DispatchAgentJob(region string, projectID int64, withStream ...*Stream) error
+	DispatchAgentJob(projectID int64, withStream ...*Stream) error
 	RemoveClientRegister(client string) error
 	HandleCenterEvent(event *cronpb.Event) error
 

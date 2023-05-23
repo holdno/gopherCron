@@ -51,7 +51,10 @@ func (a *client) SetupMicroService() *winfra.Srv[infra.NodeMetaRemote] {
 func (a *client) MustSetupRemoteRegister() wregister.ServiceRegister[infra.NodeMetaRemote] {
 
 	genMetadata := func(ctx context.Context) context.Context {
-		return metadata.NewOutgoingContext(ctx, metadata.New(map[string]string{common.GOPHERCRON_AGENT_IP_MD_KEY: a.localip}))
+		return metadata.NewOutgoingContext(ctx, metadata.New(map[string]string{
+			common.GOPHERCRON_AGENT_IP_MD_KEY:   a.localip,
+			common.GOPHERCRON_AGENT_VERSION_KEY: protocol.GetVersion(),
+		}))
 	}
 
 	r, err := register.NewRemoteRegister(a.localip, func() (register.CenterClient, error) {

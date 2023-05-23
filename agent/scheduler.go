@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand"
@@ -19,6 +20,8 @@ import (
 	"github.com/holdno/gopherCron/utils"
 	"github.com/spacegrower/watermelon/infra/wlog"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/holdno/rego"
 	"github.com/sirupsen/logrus"
@@ -324,33 +327,18 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 	)
 
 	if taskExecuteInfo, taskExecuting = a.scheduler.CheckTaskExecuting(plan.Task.SchedulerKey()); taskExecuting {
-		value, _ := json.Marshal(common.TaskExecuteResult{
-			ExecuteInfo: common.BuildTaskExecuteInfo(plan),
-			Output:      "the latest task was not completed",
-			Err:         fmt.Sprintf("task %s execute error: the latest task was not completed", plan.Task.Name),
-			StartTime:   time.Now(),
-			EndTime:     time.Now(),
-		})
-		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(a.cfg.Timeout)*time.Second)
-		defer cancel()
-		_, err := a.GetStatusReporter()(ctx, &cronpb.ScheduleReply{
-			Event: &cronpb.Event{
-				Type:      "task_execute_result",
-				Version:   "v1",
-				Value:     value,
-				EventTime: time.Now().Unix(),
-			},
-		})
-		if err != nil {
-			a.Warning(warning.WarningData{
-				Type:      warning.WarningTypeSystem,
-				AgentIP:   a.localip,
-				TaskName:  plan.Task.Name,
-				ProjectID: plan.Task.ProjectID,
-				Data:      fmt.Sprintf("任务执行结果上报失败: %v", err),
-			})
+		errMsg := "任务执行中，重复调度，请确保任务超时时间配置合理或检查任务是否运行正常"
+		if plan.Type == common.ActivePlan {
+			errMsg = "任务执行中，请勿重复执行或稍后再试"
 		}
-		return err
+		a.Warning(warning.WarningData{
+			Type:      warning.WarningTypeTask,
+			AgentIP:   a.localip,
+			TaskName:  plan.Task.Name,
+			ProjectID: plan.Task.ProjectID,
+			Data:      errMsg,
+		})
+		return errors.New(errMsg)
 	}
 
 	plan.Task.ClientIP = a.localip
@@ -409,7 +397,8 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 				defer func() {
 					taskExecuteInfo.CancelFunc()
 				}()
-
+				// 避免分布式集群上锁偏斜 (每台机器的时钟可能不是特别的准确 导致某一台机器总能抢到锁)
+				time.Sleep(time.Duration(rand.Intn(300)) * time.Millisecond)
 				for {
 					if taskExecuteInfo.CancelCtx.Err() != nil {
 						return
@@ -423,12 +412,15 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 							zap.Int64("project_id", taskExecuteInfo.Task.ProjectID),
 							zap.String("task_name", taskExecuteInfo.Task.Name),
 							zap.Error(err))
-						if tryTimes == 3 {
-							errDetail := fmt.Errorf("任务执行中锁维持失败,%s,终止任务", err.Error())
+						if gerr, ok := status.FromError(err); ok && gerr.Code() == codes.Aborted || tryTimes == 3 {
+							first := false
 							once.Do(func() {
-								resultChan <- errDetail
+								first = true
+								resultChan <- err
 							})
-							cancelReason.WriteString(errDetail.Error())
+							if !first {
+								cancelReason.WriteString(fmt.Sprintf("任务执行中锁维持失败,%s,终止任务", err.Error()))
+							}
 							return
 						}
 						time.Sleep(time.Second)
@@ -590,10 +582,6 @@ func (ts *TaskScheduler) PushEvent(event *common.TaskEvent) {
 }
 
 func tryLock(cli cronpb.CenterClient, plan *common.TaskSchedulePlan, ctx context.Context, disconnectChan chan error) (func(), error) {
-	// 保存执行状态
-	// 避免分布式集群上锁偏斜 (每台机器的时钟可能不是特别的准确 导致某一台机器总能抢到锁)
-	time.Sleep(time.Duration(rand.Intn(300)) * time.Millisecond)
-
 	locker, err := cli.TryLock(ctx)
 	if err != nil {
 		return nil, err

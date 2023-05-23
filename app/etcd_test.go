@@ -6,8 +6,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gorhill/cronexpr"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
+
+func TestCron(t *testing.T) {
+	e, err := cronexpr.Parse("0 51 18 * * 5 *")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Log(e.Next(time.Now()))
+}
 
 func TestEtcdLease(t *testing.T) {
 	client, err := clientv3.New(clientv3.Config{

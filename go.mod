@@ -28,7 +28,7 @@ require (
 	github.com/mwitkow/grpc-proxy v0.0.0-20230212185441-f345521cb9c9
 	github.com/oklog/ulid/v2 v2.1.0
 	github.com/prometheus/client_golang v1.14.0
-	github.com/spacegrower/watermelon v0.1.1-alpha.19
+	github.com/spacegrower/watermelon v0.1.1-alpha.21
 	go.etcd.io/etcd/api/v3 v3.5.5
 	go.etcd.io/etcd/client/v3 v3.5.5
 	google.golang.org/grpc v1.53.0

@@ -51,8 +51,8 @@ func (s *Stream) Send(e *cronpb.Event) error {
 	return s.stream.Send(e)
 }
 
-func (c *streamManager) generateKey(region string, projectID int64, srvName string) string {
-	return fmt.Sprintf("%s_%d/%s", region, projectID, srvName)
+func (c *streamManager) generateKey(projectID int64, srvName string) string {
+	return fmt.Sprintf("%s_%d/%s", projectID, srvName)
 }
 
 func (c *streamManager) generateServiceKey(info infra.NodeMeta) string {
@@ -64,7 +64,7 @@ func (c *streamManager) SaveStream(info infra.NodeMeta, stream interface {
 }, cancelFunc func()) {
 	c.streamStoreLock.Lock()
 	defer c.streamStoreLock.Unlock()
-	k := c.generateKey(info.Region, info.System, info.ServiceName)
+	k := c.generateKey(info.System, info.ServiceName)
 	srvList, exist := c.aliveSrv[k]
 	if !exist {
 		srvList = make(map[string]*Stream)
@@ -92,7 +92,7 @@ func (c *streamManager) SaveStream(info infra.NodeMeta, stream interface {
 func (c *streamManager) RemoveStream(info infra.NodeMeta) {
 	c.streamStoreLock.Lock()
 	defer c.streamStoreLock.Unlock()
-	k := c.generateKey(info.Region, info.System, info.ServiceName)
+	k := c.generateKey(info.System, info.ServiceName)
 	srvList, exist := c.aliveSrv[k]
 	if !exist {
 		return
@@ -112,10 +112,10 @@ func (c *streamManager) GetStreamsByHost(host string) *Stream {
 	return nil
 }
 
-func (c *streamManager) GetStreams(region string, system int64, srvName string) map[string]*Stream {
+func (c *streamManager) GetStreams(system int64, srvName string) map[string]*Stream {
 	c.streamStoreLock.RLock()
 	defer c.streamStoreLock.RUnlock()
-	srvList, exist := c.aliveSrv[c.generateKey(region, system, srvName)]
+	srvList, exist := c.aliveSrv[c.generateKey(system, srvName)]
 	if !exist {
 		return nil
 	}
@@ -219,5 +219,3 @@ func (a *app) CalcAgentDataConsistency(done <-chan struct{}) error {
 		}
 	}
 }
-
-
