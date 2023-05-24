@@ -535,8 +535,10 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 
 		// 执行任务
 		result = a.ExecuteTask(taskExecuteInfo)
-		cancelReason.WriteStringPrefix("任务执行结果:" + result.Err)
-		result.Err = cancelReason.String()
+		if result.Err != "" {
+			cancelReason.WriteStringPrefix("任务执行结果:" + result.Err)
+			result.Err = cancelReason.String()
+		}
 		// 执行结束后 返回给scheduler
 		a.scheduler.PushTaskResult(result)
 	}()
