@@ -12,6 +12,9 @@
 
 可以通过配置文件指定某个节点所受理的业务线，从而做到业务统一管理但隔离调度
 
+### Discussions
+[关于“为系统增加内置环境变量”的讨论](https://github.com/holdno/gopherCron/discussions/21)
+
 ### V2
 
 全新 V2 版本支持 workflow，重写任务调度方式，移除 client 对 etcd 的依赖
