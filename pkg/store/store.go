@@ -72,6 +72,7 @@ type WorkflowSchedulePlanStore interface {
 	Commons
 	Create(tx *gorm.DB, data *common.WorkflowSchedulePlan) error
 	GetList(workflowID int64) ([]common.WorkflowSchedulePlan, error)
+	GetLatestTaskCreateTime(workflowID int64) (*common.WorkflowSchedulePlan, error)
 	GetTaskWorkflowIDs(index []string) ([]common.WorkflowSchedulePlan, error)
 	Delete(tx *gorm.DB, id int64) error
 	DeleteAllWorkflowSchedulePlan(tx *gorm.DB, workflowID int64) error

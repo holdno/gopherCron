@@ -13,7 +13,7 @@ type workflowSchedulePlanStore struct {
 	commonFields
 }
 
-//NewWebHookStore
+// NewWebHookStore
 func NewWorkflowSchedulePlanStore(provider SqlProviderInterface) store.WorkflowSchedulePlanStore {
 	repo := &workflowSchedulePlanStore{}
 
@@ -49,6 +49,19 @@ func (s *workflowSchedulePlanStore) GetList(workflowID int64) ([]common.Workflow
 	}
 
 	return res, nil
+}
+
+func (s *workflowSchedulePlanStore) GetLatestTaskCreateTime(workflowID int64) (*common.WorkflowSchedulePlan, error) {
+	var (
+		err error
+		res common.WorkflowSchedulePlan
+	)
+	err = s.GetReplica().Table(s.GetTable()).Where("workflow_id = ?", workflowID).Limit(1).Order("create_time DESC").First(&res).Error
+	if err != nil {
+		return nil, err
+	}
+
+	return &res, nil
 }
 
 func (s *workflowSchedulePlanStore) GetTaskWorkflowIDs(index []string) ([]common.WorkflowSchedulePlan, error) {

@@ -52,7 +52,7 @@ func (s *Stream) Send(e *cronpb.Event) error {
 }
 
 func (c *streamManager) generateKey(projectID int64, srvName string) string {
-	return fmt.Sprintf("%s_%d/%s", projectID, srvName)
+	return fmt.Sprintf("%d/%s", projectID, srvName)
 }
 
 func (c *streamManager) generateServiceKey(info infra.NodeMeta) string {
