@@ -517,13 +517,12 @@ func startTemporaryTaskWorker(app *app) {
 		app.metrics.CustomInc("temporary_scheduler_leader", app.localip, "")
 
 		c := time.NewTicker(time.Minute)
+		defer c.Stop()
 		for {
 			select {
 			case <-s.Done():
-				c.Stop()
 				return nil
 			case <-app.ctx.Done():
-				c.Stop()
 				return nil
 			case <-c.C:
 			}

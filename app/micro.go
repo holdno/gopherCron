@@ -19,6 +19,7 @@ import (
 	etcdregister "github.com/spacegrower/watermelon/infra/register/etcd"
 	"github.com/spacegrower/watermelon/infra/resolver/etcd"
 	"github.com/spacegrower/watermelon/infra/wlog"
+	"github.com/spacegrower/watermelon/pkg/safe"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -314,6 +315,22 @@ func (a *app) DispatchEvent(event *cronpb.SendEventRequest) error {
 
 func (a *app) GetGrpcDirector() func(ctx context.Context, fullMethodName string) (context.Context, *grpc.ClientConn, error) {
 	return func(ctx context.Context, fullMethodName string) (context.Context, *grpc.ClientConn, error) {
+		var (
+			cc  *grpc.ClientConn
+			err error
+		)
+		go safe.Run(func() {
+			// 根据上下文关闭链接
+			for {
+				select {
+				case <-ctx.Done():
+					if cc != nil {
+						cc.Close()
+					}
+					return
+				}
+			}
+		})
 		md, _ := metadata.FromIncomingContext(ctx)
 		wlog.Debug("got proxy request", zap.String("full_method", fullMethodName))
 		addrs := md.Get(common.GOPHERCRON_PROXY_TO_MD_KEY)
@@ -321,8 +338,7 @@ func (a *app) GetGrpcDirector() func(ctx context.Context, fullMethodName string)
 		if len(addrs) > 0 {
 			addr := addrs[0]
 			wlog.Debug("address proxy", zap.String("proxy_to", addr), zap.String("full_method", fullMethodName))
-			cc, err := grpc.Dial(addr, dialOptions...)
-			if err != nil {
+			if cc, err = grpc.DialContext(ctx, addr, dialOptions...); err != nil {
 				return nil, nil, err
 			}
 
@@ -344,14 +360,15 @@ func (a *app) GetGrpcDirector() func(ctx context.Context, fullMethodName string)
 				return nil, nil, status.Error(codes.Unknown, "unknown full method name")
 			}
 			newCC := infra.NewClientConn()
-			cc, err := newCC(ls[1], newCC.WithSystem(projectID), newCC.WithOrg(a.cfg.Micro.OrgID), newCC.WithRegion(a.cfg.Micro.Region),
+			watermelonCC, err := newCC(ls[1], newCC.WithSystem(projectID), newCC.WithOrg(a.cfg.Micro.OrgID), newCC.WithRegion(a.cfg.Micro.Region),
 				newCC.WithServiceResolver(etcd.NewEtcdResolver(infra.ResolveEtcdClient(), infra.ProxyAllowFunc)),
 				newCC.WithGrpcDialOptions(dialOptions...))
 			if err != nil {
 				return nil, nil, err
 			}
+			cc = watermelonCC.ClientConn
 			outCtx := metadata.NewOutgoingContext(ctx, md.Copy())
-			return outCtx, cc.ClientConn, nil
+			return outCtx, cc, nil
 		}
 	}
 }

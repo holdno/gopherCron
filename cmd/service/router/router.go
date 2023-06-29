@@ -15,6 +15,7 @@ import (
 	"github.com/holdno/gopherCron/config"
 	"github.com/holdno/gopherCron/pkg/metrics"
 	"github.com/holdno/gopherCron/utils"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spacegrower/watermelon/infra/wlog"
 
@@ -22,8 +23,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func prometheusHandler() gin.HandlerFunc {
-	h := promhttp.Handler()
+func prometheusHandler(r *prometheus.Registry) gin.HandlerFunc {
+	h := promhttp.InstrumentMetricHandler(
+		r, promhttp.HandlerFor(r, promhttp.HandlerOpts{}),
+	)
 
 	return func(c *gin.Context) {
 		h.ServeHTTP(c.Writer, c.Request)
@@ -51,7 +54,7 @@ func SetupRoute(srv app.App, r *gin.Engine, conf *config.DeployConf) {
 	r.GET("/healthy", func(c *gin.Context) {
 		c.String(http.StatusOK, "healthy")
 	})
-	r.GET("/metrics", prometheusHandler())
+	r.GET("/metrics", prometheusHandler(srv.Metrics().Registry()))
 
 	api := r.Group("/api/v1")
 	{

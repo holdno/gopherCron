@@ -75,7 +75,8 @@ func (a *comm) GetTask(projectID int64, taskID string) (*common.TaskInfo, error)
 }
 
 const (
-	version = "v2.1.1"
+	version        = "v2.1.2"
+	GrpcBufferSize = 1024 * 4
 )
 
 func GetVersion() string {

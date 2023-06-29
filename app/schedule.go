@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/holdno/gopherCron/common"
-	"github.com/holdno/gopherCron/config"
 	"github.com/holdno/gopherCron/errors"
 	"github.com/holdno/gopherCron/pkg/cronpb"
 	"github.com/holdno/gopherCron/protocol"
@@ -18,8 +17,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/holdno/rego"
-	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/client/v3/concurrency"
 )
@@ -421,66 +418,6 @@ func putSchedule(kv concurrency.STM, leaseID clientv3.LeaseID, taskInfo *common.
 	// save to etcd
 	kv.Put(scheduleKey, string(saveByte), clientv3.WithLease(leaseID))
 	return nil
-}
-
-func waitingAck(cli *clientv3.Client, ackKey string, waitingFor func() error, onAck func(*clientv3.Event) bool) error {
-	// ackKey := common.BuildWorkflowAckKey(taskInfo.FlowInfo.WorkflowID, taskInfo.ProjectID, taskInfo.TaskID, taskInfo.TmpID)
-	ctx, cancel := context.WithCancel(context.TODO())
-	defer cancel()
-	// 开始监听
-	watchChan := cli.Watcher.Watch(ctx, ackKey, clientv3.WithPrefix())
-	var ticker *time.Ticker
-	waitingChan := make(chan error, 1)
-	defer close(waitingChan)
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				waitingChan <- fmt.Errorf("waiting got a panic, %v", r)
-			}
-		}()
-		if err := waitingFor(); err != nil {
-			waitingChan <- err
-			return
-		}
-		ticker = time.NewTicker(time.Duration(config.GetServiceConfig().Deploy.Timeout+2) * time.Second)
-		<-ticker.C
-		cancel()
-	}()
-	for {
-		select {
-		case err := <-waitingChan:
-			if ticker != nil {
-				ticker.Stop()
-			}
-			cancel()
-			return err
-		case w, ok := <-watchChan:
-			if !ok {
-				return fmt.Errorf("任务调度超时, agent无响应, ack key: %s, %w", ackKey, ctx.Err())
-			}
-
-			if w.Err() != nil {
-				return w.Err()
-			}
-
-			for _, watchEvent := range w.Events {
-				switch watchEvent.Type {
-				// case mvccpb.PUT: // 任务开始执行
-				case mvccpb.PUT: // 任务开始执行
-					err := rego.Retry(func() error {
-						if ok := onAck(watchEvent); ok {
-							return nil
-						}
-						return fmt.Errorf("failed to retry onAck, ack key: %s", ackKey)
-					}, rego.WithTimes(3), rego.WithPeriod(time.Second), rego.WithLatestError())
-					if err != nil {
-						return err
-					}
-					return nil
-				}
-			}
-		}
-	}
 }
 
 func getWorkflowTaskStateWithSTM(kv concurrency.STM, key string) (*WorkflowTaskStates, error) {

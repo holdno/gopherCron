@@ -44,6 +44,10 @@ type Metrics struct {
 	pusher   *push.Pusher
 }
 
+func (m *Metrics) Registry() *prometheus.Registry {
+	return m.registry
+}
+
 func (m *Metrics) CustomInc(name string, key, desc string) {
 	m.lock.Lock()
 	counter, exist := m.counter[name]

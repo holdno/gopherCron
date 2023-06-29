@@ -136,10 +136,10 @@ func setupPusherFromEnv(ctx context.Context, service string) *push.Pusher {
 
 	go func() {
 		ticker := time.NewTicker(time.Second * 5)
+		defer ticker.Stop()
 		for {
 			select {
 			case <-ctx.Done():
-				ticker.Stop()
 				return
 			case <-ticker.C:
 				if err := pusher.Push(); err != nil {

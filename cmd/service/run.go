@@ -16,6 +16,7 @@ import (
 	"github.com/holdno/gopherCron/pkg/cronpb"
 	"github.com/holdno/gopherCron/pkg/infra"
 	"github.com/holdno/gopherCron/pkg/warning"
+	"github.com/holdno/gopherCron/protocol"
 	"github.com/holdno/gopherCron/utils"
 
 	"github.com/gin-gonic/gin"
@@ -60,7 +61,8 @@ func apiServer(srv app.App, conf *config.ServiceConfig) {
 			Handler:     engine,
 			ReadTimeout: time.Duration(5) * time.Second,
 		}),
-		newServer.WithServiceRegister(infra.MustSetupEtcdRegister()))
+		newServer.WithServiceRegister(infra.MustSetupEtcdRegister()),
+		newServer.WithGrpcServerOptions(grpc.ReadBufferSize(protocol.GrpcBufferSize), grpc.WriteBufferSize(protocol.GrpcBufferSize)))
 
 	grpcRequestCounter := srv.Metrics().NewCounter("grpc_request", "method")
 	grpcRequestDuration := srv.Metrics().NewHistogram("grpc_request", "method")
@@ -144,7 +146,7 @@ func setupProxy(srv app.App, conf *config.ServiceConfig) {
 	server := newServer(func(srv *grpc.Server) {
 		testservice.RegisterTestServiceServer(srv, testservice.DefaultTestServiceServer)
 	}, newServer.WithAddress([]infra.Address{{ListenAddress: conf.Deploy.ProxyHost}}),
-		newServer.WithGrpcServerOptions(grpc.UnknownServiceHandler(proxy.TransparentHandler(srv.GetGrpcDirector()))))
+		newServer.WithGrpcServerOptions(grpc.ReadBufferSize(protocol.GrpcBufferSize), grpc.WriteBufferSize(protocol.GrpcBufferSize), grpc.UnknownServiceHandler(proxy.TransparentHandler(srv.GetGrpcDirector()))))
 	wlog.Info(fmt.Sprintf("%s, start grpc proxy, listen on %s\n", utils.GetCurrentTimeText(), conf.Deploy.ProxyHost))
 	server.RunUntil(syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL)
 }

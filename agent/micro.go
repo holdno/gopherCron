@@ -3,14 +3,18 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"syscall"
 	"time"
 
+	"github.com/gin-contrib/pprof"
+	"github.com/gin-gonic/gin"
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/pkg/cronpb"
 	"github.com/holdno/gopherCron/pkg/infra"
 	"github.com/holdno/gopherCron/pkg/infra/register"
 	"github.com/holdno/gopherCron/protocol"
+	"github.com/holdno/gopherCron/utils"
 	"go.uber.org/zap"
 
 	winfra "github.com/spacegrower/watermelon/infra"
@@ -30,6 +34,13 @@ func (a *client) SetupMicroService() *winfra.Srv[infra.NodeMetaRemote] {
 	if cfg.Address == "" {
 		cfg.Address = a.GetIP()
 	}
+
+	httpEngine := gin.New()
+	if utils.DebugMode() {
+		wlog.Info("debug mode will open pprof tools")
+		pprof.Register(httpEngine)
+	}
+
 	newsrv := infra.NewAgentServer()
 	srv := newsrv(func(srv *grpc.Server) {
 		cronpb.RegisterAgentServer(srv, a)
@@ -37,11 +48,15 @@ func (a *client) SetupMicroService() *winfra.Srv[infra.NodeMetaRemote] {
 		newsrv.WithRegion(cfg.Micro.Region),
 		newsrv.WithSystems(cfg.Projects),
 		newsrv.WithWeight(cfg.Micro.Weigth),
+		newsrv.WithHttpServer(&http.Server{
+			Handler: httpEngine,
+		}),
 		newsrv.WithAddress([]infra.Address{{ListenAddress: cfg.Address}}),
 		newsrv.WithTags(map[string]string{
 			"agent-version": protocol.GetVersion(),
 		}),
-		newsrv.WithServiceRegister(register))
+		newsrv.WithServiceRegister(register),
+		newsrv.WithGrpcServerOptions(grpc.ReadBufferSize(protocol.GrpcBufferSize), grpc.WriteBufferSize(protocol.GrpcBufferSize)))
 	go func() {
 		srv.RunUntil(syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL)
 	}()

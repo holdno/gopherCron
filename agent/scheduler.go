@@ -355,7 +355,6 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 	}
 
 	go func() {
-
 		defer func() {
 			if r := recover(); r != nil {
 				var buf [4096]byte

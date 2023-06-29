@@ -2,7 +2,6 @@ package panicgroup
 
 import (
 	"fmt"
-	"sync"
 )
 
 type PanicGroup interface {
@@ -20,20 +19,15 @@ func (p *panicgroup) Close() {
 }
 
 func (p *panicgroup) Go(f func()) {
-
 	go func() {
 		for {
-			wait := &sync.WaitGroup{}
 			func() {
-				wait.Add(1)
 				defer func() {
 					if r := recover(); r != nil {
 						p.err <- fmt.Errorf("%+v", r)
 					}
-					wait.Done()
 				}()
 				f()
-				wait.Wait()
 			}()
 			if p.close {
 				return

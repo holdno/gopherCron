@@ -130,7 +130,7 @@ type AgentProjectCompareInfo struct {
 
 func (a *app) CalcAgentDataConsistency(done <-chan struct{}) error {
 	c := time.NewTicker(time.Minute)
-
+	defer c.Stop()
 	calc := func() error {
 		mtimer := a.metrics.CustomHistogramSet("calc_agent_data_consistency")
 		defer mtimer.ObserveDuration()

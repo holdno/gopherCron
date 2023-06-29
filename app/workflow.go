@@ -1298,6 +1298,10 @@ func (a *workflowRunner) Loop(closeChan <-chan struct{}) {
 	// 调度定时器
 	scheduleTimer = time.NewTimer(scheduleAfter)
 	daemonTimer = time.NewTicker(time.Second * 10)
+	defer func() {
+		daemonTimer.Stop()
+		scheduleTimer.Stop()
+	}()
 
 	wlog.Info(fmt.Sprintf("start workflow, next schedule after %d seconds", scheduleAfter/time.Second))
 BreakHere:
@@ -1404,10 +1408,6 @@ func (a *workflowRunner) handleTaskEvent(event *common.TaskEvent) {
 
 		err := a.scheduleTask(event.Task)
 		if err != nil {
-			// if err := a.GetPlan(event.Task.FlowInfo.WorkflowID).Finished(fmt.Errorf("workflow任务(%s)调度失败, %w", event.Task.Name, err)); err != nil {
-			// 	// todo log
-			// 	fmt.Println("finished error", err.Error())
-			// }
 			wlog.Error("failed to schedule workflow task", zap.Error(err))
 			a.app.Warning(warning.WarningData{
 				Data: fmt.Sprintf("workflow任务调度失败，workflow_id: %d\n%s",
