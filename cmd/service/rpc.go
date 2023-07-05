@@ -249,7 +249,7 @@ Here:
 						Weight:       info.Weight,
 						System:       v,
 						Tags:         info.Tags,
-						RegisterTime: time.Now().Unix(),
+						RegisterTime: time.Now().UnixNano(),
 					}
 					if err := r.Append(meta); err != nil {
 						return err

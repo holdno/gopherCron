@@ -56,7 +56,7 @@ func (c *streamManager) generateKey(projectID int64, srvName string) string {
 }
 
 func (c *streamManager) generateServiceKey(info infra.NodeMeta) string {
-	return fmt.Sprintf("%s_%d_%s_%s_%d", info.Region, info.System, info.ServiceName, info.Host, info.Port)
+	return fmt.Sprintf("%s_%d_%s_%s_%d_%d", info.Region, info.System, info.ServiceName, info.Host, info.Port, info.RegisterTime)
 }
 
 func (c *streamManager) SaveStream(info infra.NodeMeta, stream interface {
@@ -75,7 +75,7 @@ func (c *streamManager) SaveStream(info infra.NodeMeta, stream interface {
 	srvList[kk] = &Stream{
 		cancelFunc:  cancelFunc,
 		stream:      stream,
-		CreateTime:  time.Now(),
+		CreateTime:  time.Unix(0, info.RegisterTime),
 		Host:        info.Host,
 		Port:        int32(info.Port),
 		ServiceName: info.ServiceName,

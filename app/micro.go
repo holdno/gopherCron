@@ -57,7 +57,7 @@ func (a *app) RemoveClientRegister(client string) error {
 
 	for _, v := range list {
 		if strings.Contains(v.addr, a.GetIP()) {
-			stream := a.StreamManager().GetStreamsByHost(v.addr)
+			stream := a.StreamManager().GetStreamsByHost(client)
 			if stream != nil {
 				stream.Cancel()
 			}
