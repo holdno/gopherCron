@@ -117,6 +117,7 @@ type App interface {
 	// temporary task
 	CreateTemporaryTask(data common.TemporaryTask) error
 	GetTemporaryTaskListWithUser(projectID int64) ([]TemporaryTaskListWithUser, error)
+	DeleteTemporaryTask(id int64) error
 	TemporaryTaskSchedule(tmpTask common.TemporaryTask) error
 	AutoCleanScheduledTemporaryTask()
 

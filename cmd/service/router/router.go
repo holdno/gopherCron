@@ -99,6 +99,7 @@ func SetupRoute(srv app.App, r *gin.Engine, conf *config.DeployConf) {
 		{
 			temporaryTask.Use(middleware.TokenVerify())
 			temporaryTask.POST("/create", controller.CreateTemporaryTask)
+			temporaryTask.POST("/delete", controller.DeleteTemporaryTask)
 			temporaryTask.GET("/list", controller.GetTemporaryTaskList)
 		}
 

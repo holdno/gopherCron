@@ -14,7 +14,7 @@ type temporaryTaskStore struct {
 	commonFields
 }
 
-//NewProjectStore
+// NewProjectStore
 func NewTemporaryTaskStoreStore(provider SqlProviderInterface) store.TemporaryTaskStore {
 	repo := &temporaryTaskStore{}
 
@@ -43,6 +43,13 @@ func (s *temporaryTaskStore) UpdateTaskScheduleStatus(tx *gorm.DB, projectID int
 	}
 	return tx.Table(s.GetTable()).Where("project_id = ? AND task_id = ?", projectID, taskID).
 		Update("schedule_status", scheduleStatus).Error
+}
+
+func (s *temporaryTaskStore) Delete(tx *gorm.DB, id int64) error {
+	if tx == nil {
+		tx = s.GetMaster()
+	}
+	return tx.Table(s.GetTable()).Where("id = ?", id).Delete(nil).Error
 }
 
 func (s *temporaryTaskStore) GetList(selector selection.Selector) ([]*common.TemporaryTask, error) {

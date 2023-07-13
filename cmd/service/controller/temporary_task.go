@@ -72,3 +72,26 @@ func GetTemporaryTaskList(c *gin.Context) {
 
 	response.APISuccess(c, list)
 }
+
+type DeleteTemporaryTaskReq struct {
+	ID int64 `json:"id" form:"id" binding:"required"`
+}
+
+func DeleteTemporaryTask(c *gin.Context) {
+	var (
+		err error
+		req DeleteTemporaryTaskReq
+	)
+	if err = utils.BindArgsWithGin(c, &req); err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	srv := app.GetApp(c)
+	if err := srv.DeleteTemporaryTask(req.ID); err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	response.APISuccess(c, nil)
+}

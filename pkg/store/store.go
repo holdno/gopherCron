@@ -56,6 +56,7 @@ type TemporaryTaskStore interface {
 	GetList(selector selection.Selector) ([]*common.TemporaryTask, error)
 	UpdateTaskScheduleStatus(tx *gorm.DB, projectID int64, taskID string, scheduleStatus int32) error
 	Clean(tx *gorm.DB, selector selection.Selector) error
+	Delete(tx *gorm.DB, id int64) error
 }
 
 type UserWorkflowRelevanceStore interface {
