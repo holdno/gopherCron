@@ -298,7 +298,7 @@ func (a *app) DeleteTask(projectID int64, taskID string) (*common.TaskInfo, erro
 		},
 	})
 	if err != nil {
-		return nil, errors.NewError(http.StatusInternalServerError, "下发任务删除事件失败").WithLog(err.Error())
+		return nil, errors.NewError(http.StatusInternalServerError, "下发任务删除事件失败，可能出现数据不一致，请重试无效后联系系统管理员处理").WithLog(err.Error())
 	}
 
 	deleteKey = common.BuildKey(projectID, taskID)
@@ -433,14 +433,6 @@ func (a *app) SaveTask(task *common.TaskInfo, opts ...clientv3.OpOption) (*commo
 		errObj.Log = "[Etcd - SaveTask] json.mashal task error:" + err.Error()
 		return nil, errObj
 	}
-	ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
-	defer cancel()
-	// save to etcd
-	if putResp, err = a.etcd.KV().Put(ctx, saveKey, string(saveByte), clientv3.WithPrevKV()); err != nil {
-		errObj = errors.ErrInternalError
-		errObj.Log = "[Etcd - SaveTask] etcd client kv put error:" + err.Error()
-		return nil, errObj
-	}
 
 	err = a.DispatchEvent(&cronpb.SendEventRequest{
 		Region:    a.cfg.Micro.Region,
@@ -453,7 +445,16 @@ func (a *app) SaveTask(task *common.TaskInfo, opts ...clientv3.OpOption) (*commo
 		},
 	})
 	if err != nil {
-		return nil, errors.NewError(http.StatusInternalServerError, "下发任务更新事件失败").WithLog(err.Error())
+		return nil, errors.NewError(http.StatusInternalServerError, "下发任务更新事件失败，可能出现数据不一致，请重试无效后联系系统管理员处理").WithLog(err.Error())
+	}
+
+	ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
+	defer cancel()
+	// save to etcd
+	if putResp, err = a.etcd.KV().Put(ctx, saveKey, string(saveByte), clientv3.WithPrevKV()); err != nil {
+		errObj = errors.ErrInternalError
+		errObj.Log = "[Etcd - SaveTask] etcd client kv put error:" + err.Error()
+		return nil, errObj
 	}
 
 	// oldtask exist

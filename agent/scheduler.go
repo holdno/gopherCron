@@ -355,7 +355,6 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 	}
 
 	go func() {
-
 		defer func() {
 			if r := recover(); r != nil {
 				var buf [4096]byte
@@ -419,7 +418,7 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 								resultChan <- err
 							})
 							if !first {
-								cancelReason.WriteString(fmt.Sprintf("任务执行中锁维持失败,%s,终止任务", err.Error()))
+								cancelReason.WriteString(fmt.Sprintf("任务执行过程中锁维持失败,错误信息:%s,agent主动终止任务", err.Error()))
 							}
 							return
 						}
@@ -502,7 +501,7 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 					AgentIP:   a.localip,
 					TaskName:  plan.Task.Name,
 					ProjectID: plan.Task.ProjectID,
-					Data:      "变更任务运行状态失败:" + err.Error(),
+					Data:      "agent上报任务运行结束状态失败:" + err.Error(),
 				})
 				a.logger.Error(fmt.Sprintf("task: %s, id: %s, tmp_id: %s, failed to change running status, the task is finished, error: %v",
 					plan.Task.Name, plan.Task.TaskID, plan.Task.TmpID, err))
@@ -525,7 +524,7 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 		}, rego.WithTimes(3), rego.WithLatestError()); err != nil {
 			a.logger.Error(fmt.Sprintf("task: %s, id: %s, tmp_id: %s, change running status error, %v", plan.Task.Name,
 				plan.Task.TaskID, plan.Task.TmpID, err))
-			errDetail := fmt.Errorf("agent上报任务运行状态失败: %s", err.Error())
+			errDetail := fmt.Errorf("agent上报任务开始运行状态失败: %s", err.Error())
 			cancelReason.WriteString(errDetail.Error())
 			errSignal.Send(errDetail)
 			taskExecuteInfo.CancelFunc()
@@ -535,8 +534,10 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 
 		// 执行任务
 		result = a.ExecuteTask(taskExecuteInfo)
-		cancelReason.WriteStringPrefix(result.Err)
-		result.Err = cancelReason.String()
+		if result.Err != "" {
+			cancelReason.WriteStringPrefix("任务执行结果:" + result.Err)
+			result.Err = cancelReason.String()
+		}
 		// 执行结束后 返回给scheduler
 		a.scheduler.PushTaskResult(result)
 	}()

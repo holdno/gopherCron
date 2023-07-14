@@ -1,5 +1,5 @@
 FROM alpine
-MAINTAINER <wby@ojbk.io>
+MAINTAINER label <wby@ojbk.io>
 
 WORKDIR /gophercron
 COPY ./_build/config /gophercron/config

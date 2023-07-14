@@ -39,6 +39,7 @@ func Run(opts *SetupOptions) error {
 		for {
 			select {
 			case <-client.Down():
+				return
 			default:
 				restart()
 			}

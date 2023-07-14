@@ -40,7 +40,7 @@ func (s *workflowTaskStore) Save(tx *gorm.DB, data *common.WorkflowTask) error {
 	if tx == nil {
 		tx = s.GetMaster()
 	}
-	return tx.Table(s.GetTable()).Where("project_id = ? AND task_id = ?", data.ProjectID, data.TaskID).Debug().Save(data).Error
+	return tx.Table(s.GetTable()).Where("project_id = ? AND task_id = ?", data.ProjectID, data.TaskID).Save(data).Error
 }
 
 func (s *workflowTaskStore) GetList(projectID int64) ([]common.WorkflowTask, error) {

@@ -479,6 +479,15 @@ func (a *app) GetWorkflowScheduleTasks(workflowID int64) ([]common.WorkflowSched
 	return list, nil
 }
 
+func (a *app) GetLatestTaskCreateTime(workflowID int64) (*common.WorkflowSchedulePlan, error) {
+	task, err := a.store.WorkflowSchedulePlan().GetLatestTaskCreateTime(workflowID)
+	if err != nil && err != gorm.ErrRecordNotFound {
+		return nil, errors.NewError(http.StatusInternalServerError, "获取workflow任务列表失败").WithLog(err.Error())
+	}
+
+	return task, nil
+}
+
 func (a *app) ClearWorkflowLog(workflowID int64) error {
 	err := a.store.WorkflowLog().Clear(nil, selection.NewSelector(selection.NewRequirement("workflow_id", selection.Equals, workflowID)))
 	if err != nil {
@@ -720,13 +729,14 @@ func (r *workflowRunner) Close() {
 }
 
 type WorkflowPlan struct {
-	runner    *workflowRunner
-	Workflow  common.Workflow
-	Expr      *cronexpr.Expression // 解析后的cron表达式
-	NextTime  time.Time
-	Tasks     map[WorkflowTaskInfo]*common.WorkflowTask
-	TaskFlow  map[WorkflowTaskInfo][]WorkflowTaskInfo // map[任务][]依赖
-	planState *PlanState
+	runner         *workflowRunner
+	Workflow       common.Workflow
+	Expr           *cronexpr.Expression // 解析后的cron表达式
+	NextTime       time.Time
+	Tasks          map[WorkflowTaskInfo]*common.WorkflowTask
+	TaskFlow       map[WorkflowTaskInfo][]WorkflowTaskInfo // map[任务][]依赖
+	PlanUpdateTime int64
+	planState      *PlanState
 
 	LatestScheduleTime time.Time
 
@@ -856,6 +866,11 @@ type taskFlowItem struct {
 }
 
 func (a *workflowRunner) scheduleWorkflowPlan(plan *WorkflowPlan) error {
+	// check task consistency
+	if err := plan.RefreshPlanTasks(); err != nil {
+		return err
+	}
+
 	needToScheduleTasks, finished, err := plan.CanSchedule(a)
 	if err != nil && err != ErrWorkflowFailed {
 		if err != ErrWorkflowInProcess {
@@ -906,13 +921,13 @@ func (a *workflowRunner) TryStartPlan(plan *WorkflowPlan) error {
 		return err
 	}
 
-	// 重置任务依赖
-	if err := plan.RefreshPlanTasks(); err != nil {
+	if err = plan.SetRunning(); err != nil {
 		return err
 	}
 
-	if err = plan.SetRunning(); err != nil {
-		return err
+	if !a.isLeader {
+		// after setting the running status, wait for the workflow leader to schedule
+		return nil
 	}
 
 	return a.scheduleWorkflowPlan(plan)
@@ -922,13 +937,30 @@ func (s *WorkflowPlan) RefreshPlanTasks() error {
 	s.locker.Lock()
 	defer s.locker.Unlock()
 
-	tasks, err := s.runner.app.GetWorkflowScheduleTasks(s.Workflow.ID)
+	latestCreateTask, err := s.runner.app.GetLatestTaskCreateTime(s.Workflow.ID)
 	if err != nil {
 		return err
 	}
 
 	depsMap := make(map[WorkflowTaskInfo][]WorkflowTaskInfo)
 	tasksMap := make(map[WorkflowTaskInfo]*common.WorkflowTask)
+
+	if latestCreateTask == nil {
+		// from existence to non-existence?
+		s.TaskFlow = depsMap
+		s.Tasks = tasksMap
+		s.PlanUpdateTime = 0
+		return nil
+	} else if s.PlanUpdateTime == latestCreateTask.CreateTime {
+		// no new tasks, no need to update
+		return nil
+	}
+
+	tasks, err := s.runner.app.GetWorkflowScheduleTasks(s.Workflow.ID)
+	if err != nil {
+		return err
+	}
+
 	for _, v := range tasks {
 		key := WorkflowTaskInfo{
 			TaskID:    v.TaskID,
@@ -949,6 +981,8 @@ func (s *WorkflowPlan) RefreshPlanTasks() error {
 
 	s.TaskFlow = depsMap
 	s.Tasks = tasksMap
+	s.PlanUpdateTime = latestCreateTask.CreateTime
+
 	return nil
 }
 
@@ -1264,6 +1298,10 @@ func (a *workflowRunner) Loop(closeChan <-chan struct{}) {
 	// 调度定时器
 	scheduleTimer = time.NewTimer(scheduleAfter)
 	daemonTimer = time.NewTicker(time.Second * 10)
+	defer func() {
+		daemonTimer.Stop()
+		scheduleTimer.Stop()
+	}()
 
 	wlog.Info(fmt.Sprintf("start workflow, next schedule after %d seconds", scheduleAfter/time.Second))
 BreakHere:
@@ -1370,10 +1408,6 @@ func (a *workflowRunner) handleTaskEvent(event *common.TaskEvent) {
 
 		err := a.scheduleTask(event.Task)
 		if err != nil {
-			// if err := a.GetPlan(event.Task.FlowInfo.WorkflowID).Finished(fmt.Errorf("workflow任务(%s)调度失败, %w", event.Task.Name, err)); err != nil {
-			// 	// todo log
-			// 	fmt.Println("finished error", err.Error())
-			// }
 			wlog.Error("failed to schedule workflow task", zap.Error(err))
 			a.app.Warning(warning.WarningData{
 				Data: fmt.Sprintf("workflow任务调度失败，workflow_id: %d\n%s",

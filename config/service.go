@@ -33,6 +33,16 @@ type ServiceConfig struct {
 	Micro   Micro       `toml:"micro"`
 	JWT     *JWTConf    `toml:"jwt"`
 	Mysql   *MysqlConf  `toml:"mysql"`
+	OIDC    OIDC        `toml:"oidc"`
+}
+
+type OIDC struct {
+	ClientID     string   `toml:"client_id"`
+	ClientSecret string   `toml:"client_secret"`
+	Endpoint     string   `toml:"endpoint"`
+	RedirectURL  string   `toml:"redirect_url"`
+	Scopes       []string `toml:"scopes"`
+	UserNameKey  string   `toml:"user_name_key"`
 }
 
 type Publish struct {
@@ -78,10 +88,11 @@ type MongoDBConf struct {
 }
 
 type MysqlConf struct {
-	Service  string `toml:"service"`
-	Username string `toml:"username"`
-	Password string `toml:"password"`
-	Database string `toml:"database"`
+	Service    string `toml:"service"`
+	Username   string `toml:"username"`
+	Password   string `toml:"password"`
+	Database   string `toml:"database"`
+	AutoCreate bool   `toml:"auto_create"`
 }
 
 // JWTConf 签名方法配置

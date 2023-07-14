@@ -186,12 +186,17 @@ func (s *cronRpc) RegisterAgent(req cronpb.Center_RegisterAgentServer) error {
 	newRegister := make(chan *cronpb.RegisterAgentReq)
 	go safe.Run(func() {
 		for {
-			info, err := req.Recv()
-			if err != nil {
-				close(newRegister)
+			select {
+			case <-req.Context().Done():
 				return
+			default:
+				info, err := req.Recv()
+				if err != nil {
+					close(newRegister)
+					return
+				}
+				newRegister <- info
 			}
-			newRegister <- info
 		}
 	})
 
@@ -244,7 +249,7 @@ Here:
 						Weight:       info.Weight,
 						System:       v,
 						Tags:         info.Tags,
-						RegisterTime: time.Now().Unix(),
+						RegisterTime: time.Now().UnixNano(),
 					}
 					if err := r.Append(meta); err != nil {
 						return err

@@ -11,7 +11,6 @@ import (
 	"github.com/holdno/gopherCron/pkg/daemon"
 	"github.com/holdno/gopherCron/pkg/infra"
 	"github.com/holdno/gopherCron/pkg/infra/register"
-	"github.com/holdno/gopherCron/pkg/panicgroup"
 	"github.com/holdno/gopherCron/pkg/warning"
 	"github.com/holdno/gopherCron/utils"
 	"go.uber.org/zap"
@@ -34,7 +33,6 @@ type client struct {
 	isClose   bool
 	closeChan chan struct{}
 
-	panicgroup.PanicGroup
 	ClientTaskReporter
 	// etcd       protocol.EtcdManager
 	// protocol.ClientEtcdManager
@@ -48,7 +46,6 @@ type client struct {
 }
 
 type Client interface {
-	Go(f func())
 	GetIP() string
 	Loop()
 	Close()
@@ -149,20 +146,6 @@ func NewClient(configPath string) Client {
 		closeChan:  make(chan struct{}),
 	}
 	setupFunc := agent.loadConfigAndSetupAgentFunc()
-
-	agent.PanicGroup = panicgroup.NewPanicGroup(func(err error) {
-		reserr := agent.Warning(warning.WarningData{
-			Data:    err.Error(),
-			Type:    warning.WarningTypeSystem,
-			AgentIP: agent.localip,
-		})
-		if reserr != nil {
-			agent.logger.With(zap.Any("fields", map[string]interface{}{
-				"desc":         reserr,
-				"source_error": err,
-			})).Error("panicgroup: failed to warning panic error")
-		}
-	})
 
 	setupFunc()
 

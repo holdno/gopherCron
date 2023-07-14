@@ -56,6 +56,14 @@ func (a *app) GetTemporaryTaskList(projectID int64) ([]*common.TemporaryTask, er
 	return list, nil
 }
 
+func (a *app) DeleteTemporaryTask(id int64) error {
+	err := a.store.TemporaryTask().Delete(nil, id)
+	if err != nil {
+		return errors.NewError(http.StatusInternalServerError, "删除临时调度任务失败").WithLog(err.Error())
+	}
+	return nil
+}
+
 type TemporaryTaskListWithUser struct {
 	*common.TemporaryTask
 	UserName  string `json:"user_name"`

@@ -19,6 +19,7 @@ import (
 	etcdregister "github.com/spacegrower/watermelon/infra/register/etcd"
 	"github.com/spacegrower/watermelon/infra/resolver/etcd"
 	"github.com/spacegrower/watermelon/infra/wlog"
+	"github.com/spacegrower/watermelon/pkg/safe"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -56,7 +57,7 @@ func (a *app) RemoveClientRegister(client string) error {
 
 	for _, v := range list {
 		if strings.Contains(v.addr, a.GetIP()) {
-			stream := a.StreamManager().GetStreamsByHost(v.addr)
+			stream := a.StreamManager().GetStreamsByHost(client)
 			if stream != nil {
 				stream.Cancel()
 			}
@@ -151,6 +152,31 @@ func (a *AgentClient) Close() {
 	if a.cancel != nil {
 		a.cancel()
 	}
+}
+
+func (a *app) GetAgentClient(region string, projectID int64) (*AgentClient, error) {
+	// client 的连接对象由调用时提供初始化
+
+	newConn := infra.NewClientConn()
+	cc, err := newConn(cronpb.Agent_ServiceDesc.ServiceName,
+		newConn.WithRegion(region),
+		newConn.WithSystem(projectID),
+		newConn.WithOrg(a.cfg.Micro.OrgID),
+		newConn.WithGrpcDialOptions(grpc.WithTransportCredentials(insecure.NewCredentials())),
+		newConn.WithServiceResolver(infra.MustSetupEtcdResolver()))
+	if err != nil {
+		return nil, errors.NewError(http.StatusInternalServerError, fmt.Sprintf("连接agent失败，project_id: %d", projectID)).WithLog(err.Error())
+	}
+
+	client := &AgentClient{
+		AgentClient: cronpb.NewAgentClient(cc),
+		addr:        fmt.Sprintf("resolve_%s_%d", region, projectID),
+		cancel: func() {
+			cc.Close()
+		},
+	}
+
+	return client, nil
 }
 
 func (a *app) getAgentAddrs(region string, projectID int64) ([]etcd.FindedResult[infra.NodeMetaRemote], error) {
@@ -289,6 +315,22 @@ func (a *app) DispatchEvent(event *cronpb.SendEventRequest) error {
 
 func (a *app) GetGrpcDirector() func(ctx context.Context, fullMethodName string) (context.Context, *grpc.ClientConn, error) {
 	return func(ctx context.Context, fullMethodName string) (context.Context, *grpc.ClientConn, error) {
+		var (
+			cc  *grpc.ClientConn
+			err error
+		)
+		go safe.Run(func() {
+			// 根据上下文关闭链接
+			for {
+				select {
+				case <-ctx.Done():
+					if cc != nil {
+						cc.Close()
+					}
+					return
+				}
+			}
+		})
 		md, _ := metadata.FromIncomingContext(ctx)
 		wlog.Debug("got proxy request", zap.String("full_method", fullMethodName))
 		addrs := md.Get(common.GOPHERCRON_PROXY_TO_MD_KEY)
@@ -296,8 +338,7 @@ func (a *app) GetGrpcDirector() func(ctx context.Context, fullMethodName string)
 		if len(addrs) > 0 {
 			addr := addrs[0]
 			wlog.Debug("address proxy", zap.String("proxy_to", addr), zap.String("full_method", fullMethodName))
-			cc, err := grpc.Dial(addr, dialOptions...)
-			if err != nil {
+			if cc, err = grpc.DialContext(ctx, addr, dialOptions...); err != nil {
 				return nil, nil, err
 			}
 
@@ -319,14 +360,15 @@ func (a *app) GetGrpcDirector() func(ctx context.Context, fullMethodName string)
 				return nil, nil, status.Error(codes.Unknown, "unknown full method name")
 			}
 			newCC := infra.NewClientConn()
-			cc, err := newCC(ls[1], newCC.WithSystem(projectID), newCC.WithOrg(a.cfg.Micro.OrgID), newCC.WithRegion(a.cfg.Micro.Region),
+			watermelonCC, err := newCC(ls[1], newCC.WithSystem(projectID), newCC.WithOrg(a.cfg.Micro.OrgID), newCC.WithRegion(a.cfg.Micro.Region),
 				newCC.WithServiceResolver(etcd.NewEtcdResolver(infra.ResolveEtcdClient(), infra.ProxyAllowFunc)),
 				newCC.WithGrpcDialOptions(dialOptions...))
 			if err != nil {
 				return nil, nil, err
 			}
+			cc = watermelonCC.ClientConn
 			outCtx := metadata.NewOutgoingContext(ctx, md.Copy())
-			return outCtx, cc.ClientConn, nil
+			return outCtx, cc, nil
 		}
 	}
 }
