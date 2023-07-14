@@ -70,6 +70,12 @@ func SetupRoute(srv app.App, r *gin.Engine, conf *config.DeployConf) {
 			user.GET("/list", user_func.GetUserList)
 		}
 
+		oidc := api.Group("/oidc")
+		{
+			oidc.POST("/login", user_func.OIDCLogin)
+			oidc.GET("/auth_url", user_func.OIDCAuthURL)
+		}
+
 		webhook := api.Group("/webhook")
 		{
 			webhook.Use(middleware.TokenVerify())

@@ -143,6 +143,8 @@ type App interface {
 	SetTaskRunning(agentIP string, execInfo *common.TaskExecutingInfo) error
 	CheckTaskIsRunning(projectID int64, taskID string) ([]common.TaskRunningInfo, error)
 	HandlerTaskFinished(agentIP string, result protocol.TaskFinishedV1) error
+
+	GetOIDCService() *OIDCService
 }
 
 func GetApp(c *gin.Context) App {
@@ -173,6 +175,8 @@ type app struct {
 
 	pusher        *SystemPusher
 	streamManager *streamManager
+
+	oidcSrv *OIDCService
 }
 
 type WebClientPusher interface {
@@ -181,6 +185,10 @@ type WebClientPusher interface {
 
 func (a *app) GetEtcdClient() *clientv3.Client {
 	return a.etcd.Client()
+}
+
+func (a *app) GetOIDCService() *OIDCService {
+	return a.oidcSrv
 }
 
 var (
@@ -220,66 +228,11 @@ func NewApp(configPath string) App {
 
 	app.metrics = metrics.NewMetrics("center", app.GetIP())
 
-	// app.connPool, err = keypool.NewChannelPool(&keypool.Config[*grpc.ClientConn]{
-	// 	MaxCap: 10000,
-	// 	//最大空闲连接
-	// 	MaxIdle: 10,
-	// 	//生成连接的方法
-	// 	Factory: func(key string) (*grpc.ClientConn, error) {
-	// 		ctx, cancel := context.WithTimeout(context.Background(), time.Second*time.Duration(conf.Deploy.Timeout))
-	// 		defer cancel()
-	// 		addr := key
-	// 		if strings.Contains(key, "agent_") {
-	// 			addr = strings.TrimPrefix(key, "agent_")
-	// 		} else if strings.Contains(key, "client_") {
-	// 			// client 的连接对象由调用时提供初始化
-	// 			keys := strings.Split(key, "_")
-	// 			if len(keys) != 3 {
-	// 				return nil, POOL_ERROR_FACTORY_NOT_FOUND
-	// 			}
-	// 			projectID, err := strconv.ParseInt(keys[2], 10, 64)
-	// 			if err != nil {
-	// 				return nil, err
-	// 			}
-	// 			newConn := infra.NewClientConn()
-	// 			cc, err := newConn(cronpb.Agent_ServiceDesc.ServiceName,
-	// 				newConn.WithRegion(keys[1]),
-	// 				newConn.WithSystem(projectID),
-	// 				newConn.WithOrg(app.cfg.Micro.OrgID),
-	// 				newConn.WithGrpcDialOptions(grpc.WithTransportCredentials(insecure.NewCredentials())),
-	// 				newConn.WithServiceResolver(infra.MustSetupEtcdResolver()))
-	// 			if err != nil {
-	// 				return nil, errors.NewError(http.StatusInternalServerError, fmt.Sprintf("连接agent失败，project_id: %d", projectID)).WithLog(err.Error())
-	// 			}
-	// 			return cc, nil
-	// 		}
-	// 		return grpc.DialContext(ctx, addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	// 	},
-	// 	//关闭连接的方法
-	// 	Close: func(cc *grpc.ClientConn) error {
-	// 		return cc.Close()
-	// 	},
-	// 	//检查连接是否有效的方法
-	// 	Ping: func(cc *grpc.ClientConn) error {
-	// 		state := cc.GetState().String()
-	// 		switch state {
-	// 		case connectivity.Shutdown.String():
-	// 			fallthrough
-	// 		case connectivity.TransientFailure.String():
-	// 			fallthrough
-	// 		case "INVALID_STATE":
-	// 			return fmt.Errorf("error state %s", cc.GetState().String())
-	// 		default:
-	// 			wlog.Debug("ping conn status", zap.String("status", state), zap.String("component", "conn-pool"))
-	// 			return nil
-	// 		}
-	// 	},
-	// 	//连接最大空闲时间，超过该时间则将失效
-	// 	IdleTimeout: time.Minute * 10,
-	// })
-	// if err != nil {
-	// 	panic(err)
-	// }
+	if conf.OIDC.ClientID != "" {
+		if app.oidcSrv, err = NewOIDCService(app, conf.OIDC); err != nil {
+			wlog.Panic("failed to setup oidc service", zap.Any("config", conf.OIDC), zap.Error(err))
+		}
+	}
 
 	app.httpClient = &http.Client{
 		Timeout: time.Second * 5,

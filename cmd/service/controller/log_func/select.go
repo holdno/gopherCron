@@ -56,6 +56,11 @@ func GetErrorLogs(c *gin.Context) {
 		}
 	}
 
+	if !isAdmin && len(projectIDs) == 0 {
+		response.APISuccess(c, GetErrorLogsResponse{})
+		return
+	}
+
 	logs, total, err := srv.GetErrorLogs(projectIDs, req.Page, req.Pagesize)
 	if err != nil {
 		response.APIError(c, err)
