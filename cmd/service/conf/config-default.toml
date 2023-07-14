@@ -10,6 +10,10 @@ timeout = 5  # 秒为单位
 # 前端文件路径
 view_path = "./view"
 
+[publish] # 任务状态实时推送，主要结合V2界面使用，任务状态会即时刷新，这块具体实现后面有时间再单独介绍一下，不配置不影响定时任务的使用
+enable = false 
+endpoint = "" # 实现了推送协议的地址
+
 [micro]
 region = "center" # 无特殊调整建议固定
 org_id = "gophercron"  # 无特殊调整建议固定，为日后多租户feature做前提
@@ -28,9 +32,18 @@ service="0.0.0.0:3306"
 username=""
 password=""
 database=""
+auto_create=true # 是否自动建表
 
 # jwt用来做api的身份校验
 [jwt]
 # jwt签名的secret 建议修改
 secret = "fjskfjls2ifeew2mn"
 exp = 168  # token 有效期(小时)
+
+[oidc] # oidc协议登录，授权后转为gophercron自身的登录模式，所以当前版本oidc退出登录不会影响gophercron
+client_id = ""
+client_secret = ""
+endpoint = ""
+redirect_url = ""
+scopes = [""]
+user_name_key = "" # 可以在 claims 中拿到用户昵称的 key

@@ -88,10 +88,11 @@ type MongoDBConf struct {
 }
 
 type MysqlConf struct {
-	Service  string `toml:"service"`
-	Username string `toml:"username"`
-	Password string `toml:"password"`
-	Database string `toml:"database"`
+	Service    string `toml:"service"`
+	Username   string `toml:"username"`
+	Password   string `toml:"password"`
+	Database   string `toml:"database"`
+	AutoCreate bool   `toml:"auto_create"`
 }
 
 // JWTConf 签名方法配置

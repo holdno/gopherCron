@@ -219,7 +219,7 @@ func NewApp(configPath string) App {
 	}
 
 	if conf.Mysql != nil && conf.Mysql.Service != "" {
-		app.store = sqlStore.MustSetup(conf.Mysql, wlog.With(zap.String("component", "sqlprovider")), false)
+		app.store = sqlStore.MustSetup(conf.Mysql, wlog.With(zap.String("component", "sqlprovider")), conf.Mysql.AutoCreate)
 	}
 
 	if app.localip, err = utils.GetLocalIP(); err != nil {
