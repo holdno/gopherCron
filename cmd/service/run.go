@@ -13,6 +13,7 @@ import (
 	"github.com/holdno/gopherCron/cmd/service/router"
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/config"
+	"github.com/holdno/gopherCron/jwt"
 	"github.com/holdno/gopherCron/pkg/cronpb"
 	"github.com/holdno/gopherCron/pkg/infra"
 	"github.com/holdno/gopherCron/pkg/warning"
@@ -39,7 +40,7 @@ func apiServer(srv app.App, conf *config.ServiceConfig) {
 
 	engine := gin.New()
 	//URI路由设置
-	router.SetupRoute(srv, engine, conf.Deploy)
+	router.SetupRoute(srv, engine, conf)
 
 	// rpc server
 	// 注册不同region对应的grpc proxy地址
@@ -82,7 +83,11 @@ func apiServer(srv app.App, conf *config.ServiceConfig) {
 		middleware.SetAgentIP(ctx, agentIP)
 		return nil
 	})
-	server.Handler(cronpb.CenterServer.RegisterAgent,
+
+	agentApi := server.Group()
+	// agent 鉴权
+	agentApi.Use(jwt.CenterAuthMiddleware([]byte(srv.GetConfig().JWT.PublicKey)))
+	agentApi.Handler(cronpb.CenterServer.RegisterAgent,
 		cronpb.CenterServer.StatusReporter,
 		cronpb.CenterServer.TryLock)
 
@@ -90,6 +95,7 @@ func apiServer(srv app.App, conf *config.ServiceConfig) {
 		srv.Close()
 	})
 
+	server.Use(jwt.AgentAuthMiddleware([]byte(srv.GetConfig().JWT.PublicKey))) // center间鉴权复用agent验证center身份的中间件
 	srv.Run()
 	go setupProxy(srv, srv.GetConfig())
 	wlog.Info(fmt.Sprintf("%s, start grpc server, listen on %s\n", utils.GetCurrentTimeText(), conf.Deploy.Host))

@@ -25,6 +25,8 @@ const (
 	GOPHERCRON_PROXY_PROJECT_MD_KEY = "gophercron-proxy-project"
 	GOPHERCRON_AGENT_IP_MD_KEY      = "gophercron-agent-ip"
 	GOPHERCRON_AGENT_VERSION_KEY    = "gophercron-agent-version"
+	GOPHERCRON_AGENT_AUTH_KEY       = "gophercron-agent-auth"
+	GOPHERCRON_CENTER_AUTH_KEY      = "gophercron-center-auth"
 )
 
 // TaskInfo 任务详情

@@ -59,12 +59,18 @@ func Login(c *gin.Context) {
 		return
 	}
 
+	token, err := jwt.BuildUserJWT(user.ID, srv.GetConfig().JWT.Exp, []byte(srv.GetConfig().JWT.PrivateKey))
+	if err != nil {
+		response.APIError(c, err)
+		return
+	}
+
 	response.APISuccess(c, &LoginResponse{
 		ID:         user.ID,
 		Name:       user.Name,
 		Account:    user.Account,
 		Permission: user.Permission,
-		Token:      jwt.Build(user.ID),
+		Token:      token,
 		TTL:        time.Now().Add(time.Duration(srv.GetConfig().JWT.Exp) * time.Second).Unix(),
 	})
 }

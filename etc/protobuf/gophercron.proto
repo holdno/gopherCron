@@ -4,11 +4,22 @@ package cronpb;
 option go_package = ".;cronpb";
 
 service Center {
+    rpc Auth (AuthReq) returns (AuthReply) {}
     rpc TryLock (stream TryLockRequest) returns (stream TryLockReply) {}
     rpc RegisterAgent (stream RegisterAgentReq) returns (stream Event) {}
     rpc StatusReporter (ScheduleReply) returns (Result) {}
+    // 面向中心的接口
     rpc SendEvent (SendEventRequest) returns (Result) {}
     rpc RemoveStream (RemoveStreamRequest) returns (Result) {}
+}
+
+message AuthReq {
+    map<int64, string> kvs = 1;
+}
+
+message AuthReply {
+    string jwt = 1;
+    int64 expire_time = 2;
 }
 
 message RemoveStreamRequest {
@@ -112,5 +123,6 @@ message ScheduleRequest {
 }
 
 message ScheduleReply {
+    int64 project_id = 2;
     Event event = 1;
 }

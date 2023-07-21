@@ -487,6 +487,7 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 				ctx, cancel := context.WithTimeout(context.Background(), time.Duration(a.cfg.Timeout)*time.Second)
 				defer cancel()
 				_, err := a.GetStatusReporter()(ctx, &cronpb.ScheduleReply{
+					ProjectId: plan.Task.ProjectID,
 					Event: &cronpb.Event{
 						Type:      common.TASK_STATUS_FINISHED_V2,
 						Version:   "v1",
@@ -513,6 +514,7 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 			ctx, cancel := context.WithTimeout(context.Background(), time.Duration(a.cfg.Timeout)*time.Second)
 			defer cancel()
 			_, err := a.GetStatusReporter()(ctx, &cronpb.ScheduleReply{
+				ProjectId: plan.Task.ProjectID,
 				Event: &cronpb.Event{
 					Type:      common.TASK_STATUS_RUNNING_V2,
 					Version:   "v1",

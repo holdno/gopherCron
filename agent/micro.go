@@ -10,6 +10,8 @@ import (
 	"github.com/gin-contrib/pprof"
 	"github.com/gin-gonic/gin"
 	"github.com/holdno/gopherCron/common"
+	"github.com/holdno/gopherCron/config"
+	"github.com/holdno/gopherCron/jwt"
 	"github.com/holdno/gopherCron/pkg/cronpb"
 	"github.com/holdno/gopherCron/pkg/infra"
 	"github.com/holdno/gopherCron/pkg/infra/register"
@@ -42,11 +44,15 @@ func (a *client) SetupMicroService() *winfra.Srv[infra.NodeMetaRemote] {
 	}
 
 	newsrv := infra.NewAgentServer()
+	var pids []int64
+	for _, v := range cfg.Auth.Projects {
+		pids = append(pids, v.ProjectID)
+	}
 	srv := newsrv(func(srv *grpc.Server) {
 		cronpb.RegisterAgentServer(srv, a)
 	}, newsrv.WithOrg(cfg.Micro.OrgID),
 		newsrv.WithRegion(cfg.Micro.Region),
-		newsrv.WithSystems(cfg.Projects),
+		newsrv.WithSystems(pids),
 		newsrv.WithWeight(cfg.Micro.Weigth),
 		newsrv.WithHttpServer(&http.Server{
 			Handler: httpEngine,
@@ -57,6 +63,8 @@ func (a *client) SetupMicroService() *winfra.Srv[infra.NodeMetaRemote] {
 		}),
 		newsrv.WithServiceRegister(register),
 		newsrv.WithGrpcServerOptions(grpc.ReadBufferSize(protocol.GrpcBufferSize), grpc.WriteBufferSize(protocol.GrpcBufferSize)))
+
+	srv.Use(jwt.AgentAuthMiddleware([]byte(a.cfg.Auth.PublicKey)))
 	go func() {
 		srv.RunUntil(syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL)
 	}()
@@ -65,10 +73,11 @@ func (a *client) SetupMicroService() *winfra.Srv[infra.NodeMetaRemote] {
 
 func (a *client) MustSetupRemoteRegister() wregister.ServiceRegister[infra.NodeMetaRemote] {
 
-	genMetadata := func(ctx context.Context) context.Context {
+	genMetadata := func(ctx context.Context, cc *grpc.ClientConn) context.Context {
 		return metadata.NewOutgoingContext(ctx, metadata.New(map[string]string{
 			common.GOPHERCRON_AGENT_IP_MD_KEY:   a.localip,
 			common.GOPHERCRON_AGENT_VERSION_KEY: protocol.GetVersion(),
+			common.GOPHERCRON_AGENT_AUTH_KEY:    a.author.Auth(ctx, cc),
 		}))
 	}
 
@@ -85,10 +94,10 @@ func (a *client) MustSetupRemoteRegister() wregister.ServiceRegister[infra.NodeM
 				Timeout: time.Second * 3,
 			}),
 			grpc.WithUnaryInterceptor(func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
-				return invoker(genMetadata(ctx), method, req, reply, cc, opts...)
+				return invoker(genMetadata(ctx, cc), method, req, reply, cc, opts...)
 			}),
 			grpc.WithStreamInterceptor(func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
-				return streamer(genMetadata(ctx), desc, cc, method, opts...)
+				return streamer(genMetadata(ctx, cc), desc, cc, method, opts...)
 			}))
 		if err != nil {
 			wlog.Error("failed to dial center service", zap.String("endpoint", a.cfg.Micro.Endpoint), zap.Error(err))
@@ -205,4 +214,38 @@ func (a *client) ProjectTaskHash(ctx context.Context, req *cronpb.ProjectTaskHas
 		Hash:             hash,
 		LatestUpdateTime: latestUpdateTime,
 	}, nil
+}
+
+type Author struct {
+	authMeta map[int64]string
+	token    string
+	expTime  time.Time
+}
+
+func NewAuthor(projectAuths []config.ProjectAuth) *Author {
+	authKvs := make(map[int64]string)
+	for _, v := range projectAuths {
+		authKvs[v.ProjectID] = v.Token
+	}
+	return &Author{
+		authMeta: authKvs,
+	}
+}
+
+func (a *Author) Auth(ctx context.Context, cc *grpc.ClientConn) string {
+	if !a.expTime.IsZero() && a.expTime.Before(time.Now().Add(time.Second*10)) {
+		return a.token
+	}
+
+	resp, err := cronpb.NewCenterClient(cc).Auth(ctx, &cronpb.AuthReq{
+		Kvs: a.authMeta,
+	})
+	if err != nil {
+		wlog.Error("failed to get agent auth token", zap.Error(err))
+	}
+
+	a.token = resp.Jwt
+	a.expTime = time.Unix(resp.ExpireTime, 0)
+
+	return a.token
 }

@@ -57,6 +57,7 @@ func Create(c *gin.Context) {
 		Title:  req.Title,
 		Remark: req.Remark,
 		UID:    uid,
+		Token:  utils.RandomStr(32),
 	}); err != nil {
 		response.APIError(c, err)
 		return

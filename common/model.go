@@ -25,6 +25,7 @@ type Project struct {
 	UID    int64  `json:"uid" gorm:"column:uid;index:uid;type:bigint(20);not null;comment:'关联用户id'"`
 	Title  string `json:"title" gorm:"column:title;index:title;type:varchar(100);not null;comment:'项目名称'"`
 	Remark string `json:"remark" gorm:"column:remark;type:varchar(255);not null;comment:'项目备注'"`
+	Token  string `json:"token" gorm:"column:token;type:varchar(32);not null;default:'';comment:'项目token,用于请求中心接口'"`
 }
 
 type ProjectRelevance struct {

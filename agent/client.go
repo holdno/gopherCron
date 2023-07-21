@@ -32,15 +32,13 @@ type client struct {
 
 	isClose   bool
 	closeChan chan struct{}
-
 	ClientTaskReporter
 	// etcd       protocol.EtcdManager
 	// protocol.ClientEtcdManager
 	warning.Warner
-
 	centerSrv register.CenterClient
-
 	onCommand func(*cronpb.CommandRequest) (*cronpb.Result, error)
+	author    *Author
 
 	cronpb.UnimplementedAgentServer
 }
@@ -120,7 +118,7 @@ func (agent *client) loadConfigAndSetupAgentFunc() func() error {
 			agent.Warner = warning.NewDefaultWarner(agent.logger)
 		}
 
-		addProjects, _ := agent.daemon.DiffAndAddProjects(cfg.Projects)
+		addProjects, _ := agent.daemon.DiffAndAddProjects(cfg.Auth.Projects)
 		agent.logger.Debug("diff projects", zap.Any("projects", addProjects))
 
 		// remove all plan
@@ -130,6 +128,7 @@ func (agent *client) loadConfigAndSetupAgentFunc() func() error {
 		if shutDown != nil {
 			shutDown()
 		}
+		agent.author = NewAuthor(cfg.Auth.Projects)
 		srv := agent.SetupMicroService()
 		shutDown = func() {
 			srv.ShutDown()
