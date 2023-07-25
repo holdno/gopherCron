@@ -7,8 +7,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/gin-contrib/pprof"
-	"github.com/gin-gonic/gin"
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/config"
 	"github.com/holdno/gopherCron/jwt"
@@ -17,11 +15,13 @@ import (
 	"github.com/holdno/gopherCron/pkg/infra/register"
 	"github.com/holdno/gopherCron/protocol"
 	"github.com/holdno/gopherCron/utils"
-	"go.uber.org/zap"
 
+	"github.com/gin-contrib/pprof"
+	"github.com/gin-gonic/gin"
 	winfra "github.com/spacegrower/watermelon/infra"
 	wregister "github.com/spacegrower/watermelon/infra/register"
 	"github.com/spacegrower/watermelon/infra/wlog"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -77,7 +77,6 @@ func (a *client) MustSetupRemoteRegister() wregister.ServiceRegister[infra.NodeM
 		return metadata.NewOutgoingContext(ctx, metadata.New(map[string]string{
 			common.GOPHERCRON_AGENT_IP_MD_KEY:   a.localip,
 			common.GOPHERCRON_AGENT_VERSION_KEY: protocol.GetVersion(),
-			common.GOPHERCRON_AGENT_AUTH_KEY:    a.author.Auth(ctx, cc),
 		}))
 	}
 
@@ -94,10 +93,18 @@ func (a *client) MustSetupRemoteRegister() wregister.ServiceRegister[infra.NodeM
 				Timeout: time.Second * 3,
 			}),
 			grpc.WithUnaryInterceptor(func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
-				return invoker(genMetadata(ctx, cc), method, req, reply, cc, opts...)
+				ctx = genMetadata(ctx, cc)
+				if method != cronpb.Center_Auth_FullMethodName {
+					ctx = metadata.AppendToOutgoingContext(ctx, common.GOPHERCRON_AGENT_AUTH_KEY, a.author.Auth(ctx, cc))
+				}
+				return invoker(ctx, method, req, reply, cc, opts...)
 			}),
 			grpc.WithStreamInterceptor(func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
-				return streamer(genMetadata(ctx, cc), desc, cc, method, opts...)
+				ctx = genMetadata(ctx, cc)
+				if method != cronpb.Center_Auth_FullMethodName {
+					ctx = metadata.AppendToOutgoingContext(ctx, common.GOPHERCRON_AGENT_AUTH_KEY, a.author.Auth(ctx, cc))
+				}
+				return streamer(ctx, desc, cc, method, opts...)
 			}))
 		if err != nil {
 			wlog.Error("failed to dial center service", zap.String("endpoint", a.cfg.Micro.Endpoint), zap.Error(err))
@@ -107,7 +114,6 @@ func (a *client) MustSetupRemoteRegister() wregister.ServiceRegister[infra.NodeM
 			CenterClient: cronpb.NewCenterClient(cc),
 			Cc:           cc,
 		}
-
 		return a.centerSrv, nil
 	}, func(e *cronpb.Event) {
 		a.handlerEventFromCenter(e)
@@ -242,10 +248,10 @@ func (a *Author) Auth(ctx context.Context, cc *grpc.ClientConn) string {
 	})
 	if err != nil {
 		wlog.Error("failed to get agent auth token", zap.Error(err))
+	} else {
+		a.token = resp.Jwt
+		a.expTime = time.Unix(resp.ExpireTime, 0)
 	}
-
-	a.token = resp.Jwt
-	a.expTime = time.Unix(resp.ExpireTime, 0)
 
 	return a.token
 }

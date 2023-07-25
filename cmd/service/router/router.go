@@ -154,6 +154,7 @@ func SetupRoute(srv app.App, r *gin.Engine, conf *config.ServiceConfig) {
 			project.Use(middleware.TokenVerify([]byte(conf.JWT.PublicKey)))
 			project.POST("/create", project_func.Create)
 			project.GET("/list", project_func.GetUserProjects)
+			project.GET("/token", project_func.GetProjectToken)
 			project.POST("/update", project_func.Update)
 			project.POST("/delete", project_func.DeleteOne)
 			project.GET("/users", user_func.GetUsersUnderTheProject)

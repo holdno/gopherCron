@@ -84,6 +84,7 @@ func apiServer(srv app.App, conf *config.ServiceConfig) {
 		return nil
 	})
 
+	server.Handler(cronpb.CenterServer.Auth)
 	agentApi := server.Group()
 	// agent 鉴权
 	agentApi.Use(jwt.CenterAuthMiddleware([]byte(srv.GetConfig().JWT.PublicKey)))

@@ -1,7 +1,6 @@
 log_level = "debug"
 report_addr=""
 shell = "/bin/bash"
-token = ""
 
 timeout = 5
 
@@ -29,5 +28,5 @@ tfKsupw9rpPkF25b9UOHL3h0KPdXaQgj866Dzc483JPcquRlJsrEOhfpY1vCt6Wq
 """
 
 [[auth.projects]]
-pid = 1 # project id
+pid = 0 # project id
 token = ""

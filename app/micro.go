@@ -398,17 +398,28 @@ func BuildProxyDialerInfo(ctx context.Context, region, address string, opts []gr
 
 type Author struct {
 	privateKey []byte
+	token      string
+	expireTime time.Time
 }
 
 func (s *Author) GetRequestMetadata(ctx context.Context, uri ...string) (map[string]string, error) {
-	token, err := jwt.BuildCenterJWT(jwt.CenterTokenClaims{
+	if s.expireTime.After(time.Now().Add(time.Second * 10)) {
+		return map[string]string{
+			common.GOPHERCRON_CENTER_AUTH_KEY: s.token,
+		}, nil
+	}
+	claims := jwt.CenterTokenClaims{
 		Biz: jwt.DefaultBIZ,
 		Iat: time.Now().Unix(),
 		Exp: time.Now().Add(time.Hour).Unix(),
-	}, s.privateKey)
+	}
+	token, err := jwt.BuildCenterJWT(claims, s.privateKey)
 	if err != nil {
 		return nil, err
 	}
+
+	s.token = token
+	s.expireTime = time.Unix(claims.Exp, 0)
 
 	return map[string]string{
 		common.GOPHERCRON_CENTER_AUTH_KEY: token,
@@ -416,5 +427,5 @@ func (s *Author) GetRequestMetadata(ctx context.Context, uri ...string) (map[str
 }
 
 func (s *Author) RequireTransportSecurity() bool {
-	return true
+	return false
 }

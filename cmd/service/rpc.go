@@ -92,7 +92,7 @@ func (s *cronRpc) TryLock(req cronpb.Center_TryLockServer) error {
 			if err != nil || task == nil {
 				return err
 			}
-			if !author.Allow(task.ProjectId) {
+			if author != nil && !author.Allow(task.ProjectId) {
 				return status.Error(codes.Unauthenticated, codes.Unauthenticated.String())
 			}
 			locker = s.app.GetTaskLocker(&common.TaskInfo{TaskID: task.TaskId, ProjectID: task.ProjectId})
@@ -134,7 +134,7 @@ func (s *cronRpc) TryLock(req cronpb.Center_TryLockServer) error {
 
 func (s *cronRpc) StatusReporter(ctx context.Context, req *cronpb.ScheduleReply) (*cronpb.Result, error) {
 	author := jwt.GetProjectAuthor(ctx)
-	if !author.Allow(req.ProjectId) {
+	if author != nil && !author.Allow(req.ProjectId) {
 		return nil, status.Error(codes.Unauthenticated, codes.Unauthenticated.String())
 	}
 	agentIP, _ := middleware.GetAgentIP(ctx)
@@ -275,7 +275,7 @@ Here:
 				}
 
 				for _, v := range info.Systems {
-					if !author.Allow(v) {
+					if author != nil && !author.Allow(v) {
 						return status.Error(codes.Unauthenticated, fmt.Sprintf("registry: project id %d is unauthenticated, register failure", v))
 					}
 					meta := infra.NodeMeta{
