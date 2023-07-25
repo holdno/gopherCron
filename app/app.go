@@ -11,7 +11,6 @@ import (
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/config"
 	"github.com/holdno/gopherCron/errors"
-	"github.com/holdno/gopherCron/jwt"
 	"github.com/holdno/gopherCron/pkg/cronpb"
 	"github.com/holdno/gopherCron/pkg/etcd"
 	"github.com/holdno/gopherCron/pkg/infra"
@@ -177,6 +176,7 @@ type app struct {
 	streamManager *streamManager
 
 	oidcSrv *OIDCService
+	author  *Author
 }
 
 type WebClientPusher interface {
@@ -212,6 +212,9 @@ func NewApp(configPath string) App {
 	app := &app{
 		Warner: warning.NewDefaultWarner(wlog.With(zap.String("component", "warner"))),
 		cfg:    conf,
+		author: &Author{
+			privateKey: []byte(conf.JWT.PrivateKey),
+		},
 	}
 	app.ctx, app.cancelFunc = context.WithCancel(context.Background())
 	if conf.ReportAddr != "" {
@@ -310,8 +313,6 @@ func NewApp(configPath string) App {
 			}
 		})
 	}
-
-	jwt.InitJWT(conf.JWT)
 
 	return app
 }

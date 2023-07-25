@@ -11,6 +11,7 @@ import (
 
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/errors"
+	"github.com/holdno/gopherCron/jwt"
 	"github.com/holdno/gopherCron/pkg/cronpb"
 	"github.com/holdno/gopherCron/pkg/infra"
 	"github.com/holdno/gopherCron/pkg/warning"
@@ -162,7 +163,7 @@ func (a *app) GetAgentClient(region string, projectID int64) (*AgentClient, erro
 		newConn.WithRegion(region),
 		newConn.WithSystem(projectID),
 		newConn.WithOrg(a.cfg.Micro.OrgID),
-		newConn.WithGrpcDialOptions(grpc.WithTransportCredentials(insecure.NewCredentials())),
+		newConn.WithGrpcDialOptions(grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithPerRPCCredentials(a.author)),
 		newConn.WithServiceResolver(infra.MustSetupEtcdResolver()))
 	if err != nil {
 		return nil, errors.NewError(http.StatusInternalServerError, fmt.Sprintf("连接agent失败，project_id: %d", projectID)).WithLog(err.Error())
@@ -204,7 +205,7 @@ func (a *app) FindAgents(region string, projectID int64) ([]*AgentClient, error)
 
 		ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
 		defer cancel()
-		gopts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
+		gopts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithPerRPCCredentials(a.author)}
 		dialAddress := addr.Address()
 		if addr.Attr().Region != a.cfg.Micro.Region {
 			dialAddress, gopts = BuildProxyDialerInfo(ctx, addr.Attr().Region, addr.Address(), gopts)
@@ -260,7 +261,7 @@ func (a *app) GetCenterSrvList() ([]*CenterClient, error) {
 		)
 		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
 		defer cancel()
-		gopts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
+		gopts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithPerRPCCredentials(a.author)}
 		dialAddress := addr.Address()
 		if addr.Attr().Region != a.cfg.Micro.Region {
 			dialAddress, gopts = BuildProxyDialerInfo(ctx, addr.Attr().Region, addr.Address(), gopts)
@@ -393,4 +394,38 @@ func BuildProxyDialerInfo(ctx context.Context, region, address string, opts []gr
 			return streamer(genMetadata(ctx), desc, cc, method, opts...)
 		}))
 	return dialAddress, gopts
+}
+
+type Author struct {
+	privateKey []byte
+	token      string
+	expireTime time.Time
+}
+
+func (s *Author) GetRequestMetadata(ctx context.Context, uri ...string) (map[string]string, error) {
+	if s.expireTime.After(time.Now().Add(time.Second * 10)) {
+		return map[string]string{
+			common.GOPHERCRON_CENTER_AUTH_KEY: s.token,
+		}, nil
+	}
+	claims := jwt.CenterTokenClaims{
+		Biz: jwt.DefaultBIZ,
+		Iat: time.Now().Unix(),
+		Exp: time.Now().Add(time.Hour).Unix(),
+	}
+	token, err := jwt.BuildCenterJWT(claims, s.privateKey)
+	if err != nil {
+		return nil, err
+	}
+
+	s.token = token
+	s.expireTime = time.Unix(claims.Exp, 0)
+
+	return map[string]string{
+		common.GOPHERCRON_CENTER_AUTH_KEY: token,
+	}, nil
+}
+
+func (s *Author) RequireTransportSecurity() bool {
+	return false
 }

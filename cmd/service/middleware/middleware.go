@@ -43,10 +43,10 @@ func BuildResponse() gin.HandlerFunc {
 }
 
 // TokenVerify access token校验
-func TokenVerify() gin.HandlerFunc {
+func TokenVerify(pubKey []byte) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token := c.Request.Header.Get("access-token")
-		res := jwt.Verify(token)
+		res := jwt.Parse(token, pubKey)
 		if res.Code != 1000 {
 			response.APIError(c, errors.ErrUnauthorized)
 			c.Abort() // 阻止请求继续执行

@@ -3,17 +3,27 @@ package config
 var serviceConf *ServiceConfig
 
 type ClientConfig struct {
-	Shell      string  `toml:"shell,omitempty"`
-	LogLevel   string  `toml:"log_level"`
-	LogFile    string  `toml:"log_file"`
-	ReportAddr string  `toml:"report_addr"`
-	Projects   []int64 `toml:"projects,omitempty"`
-	Timeout    int     `toml:"timeout"`
+	Shell      string `toml:"shell,omitempty"`
+	LogLevel   string `toml:"log_level"`
+	LogFile    string `toml:"log_file"`
+	ReportAddr string `toml:"report_addr"`
+	Timeout    int    `toml:"timeout"`
+	Token      string `toml:"token"`
+	Address    string `toml:"address"`
 
-	Token   string     `toml:"token"`
-	Address string     `toml:"address"`
-	Micro   Micro      `toml:"micro"`
-	Mysql   *MysqlConf `toml:"mysql"`
+	Auth  AgentAuth  `toml:"auth"`
+	Micro Micro      `toml:"micro"`
+	Mysql *MysqlConf `toml:"mysql"`
+}
+
+type AgentAuth struct {
+	PublicKey string        `toml:"public_key"`
+	Projects  []ProjectAuth `toml:"projects,omitempty"`
+}
+
+type ProjectAuth struct {
+	ProjectID int64  `toml:"pid"`
+	Token     string `toml:"token"`
 }
 
 type Project struct {
@@ -97,8 +107,9 @@ type MysqlConf struct {
 
 // JWTConf 签名方法配置
 type JWTConf struct {
-	Secret string `toml:"secret"`
-	Exp    int    `toml:"exp"`
+	PrivateKey string `toml:"private_key"`
+	PublicKey  string `toml:"public_key"`
+	Exp        int    `toml:"exp"`
 }
 
 // InitServiceConfig 获取api相关配置

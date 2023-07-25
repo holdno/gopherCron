@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/holdno/gopherCron/config"
 	"github.com/spacegrower/watermelon/infra/wlog"
 	"go.uber.org/zap"
 )
@@ -33,14 +34,14 @@ func NewProjectDaemon(ids []int64, logger wlog.Logger) *ProjectDaemon {
 	return pd
 }
 
-func (d *ProjectDaemon) DiffAndAddProjects(ids []int64) (add, remove []int64) {
+func (d *ProjectDaemon) DiffAndAddProjects(ids []config.ProjectAuth) (add, remove []int64) {
 	var (
 		existPM = make(map[int64]bool)
 		newPM   = make(map[int64]bool)
 	)
 
 	for _, v := range ids {
-		newPM[v] = true
+		newPM[v.ProjectID] = true
 	}
 
 	for _, v := range d.projects {
@@ -52,8 +53,8 @@ func (d *ProjectDaemon) DiffAndAddProjects(ids []int64) (add, remove []int64) {
 	}
 
 	for _, v := range ids {
-		if !existPM[v] {
-			add = append(add, v)
+		if !existPM[v.ProjectID] {
+			add = append(add, v.ProjectID)
 		}
 	}
 

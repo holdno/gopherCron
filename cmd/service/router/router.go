@@ -15,12 +15,12 @@ import (
 	"github.com/holdno/gopherCron/config"
 	"github.com/holdno/gopherCron/pkg/metrics"
 	"github.com/holdno/gopherCron/utils"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/spacegrower/watermelon/infra/wlog"
 
 	"github.com/gin-contrib/pprof"
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/spacegrower/watermelon/infra/wlog"
 )
 
 func prometheusHandler(r *prometheus.Registry) gin.HandlerFunc {
@@ -33,7 +33,7 @@ func prometheusHandler(r *prometheus.Registry) gin.HandlerFunc {
 	}
 }
 
-func SetupRoute(srv app.App, r *gin.Engine, conf *config.DeployConf) {
+func SetupRoute(srv app.App, r *gin.Engine, conf *config.ServiceConfig) {
 	r.Use(gin.Recovery())
 	if utils.DebugMode() {
 		wlog.Info("debug mode will open pprof tools")
@@ -62,7 +62,7 @@ func SetupRoute(srv app.App, r *gin.Engine, conf *config.DeployConf) {
 		user := api.Group("/user")
 		{
 			user.POST("/login", user_func.Login)
-			user.Use(middleware.TokenVerify())
+			user.Use(middleware.TokenVerify([]byte(conf.JWT.PublicKey)))
 			user.GET("/info", user_func.GetUserInfo)
 			user.POST("/change_password", user_func.ChangePassword)
 			user.POST("/create", user_func.CreateUser)
@@ -78,7 +78,7 @@ func SetupRoute(srv app.App, r *gin.Engine, conf *config.DeployConf) {
 
 		webhook := api.Group("/webhook")
 		{
-			webhook.Use(middleware.TokenVerify())
+			webhook.Use(middleware.TokenVerify([]byte(conf.JWT.PublicKey)))
 			webhook.POST("/create", controller.CreateWebHook)
 			webhook.POST("/delete", controller.DeleteWebHook)
 			webhook.GET("/list", controller.GetWebHookList)
@@ -87,7 +87,7 @@ func SetupRoute(srv app.App, r *gin.Engine, conf *config.DeployConf) {
 
 		cron := api.Group("/crontab")
 		{
-			cron.Use(middleware.TokenVerify())
+			cron.Use(middleware.TokenVerify([]byte(conf.JWT.PublicKey)))
 			cron.POST("/save", etcd_func.SaveTask)
 			cron.POST("/delete", etcd_func.DeleteTask)
 			cron.GET("/list", etcd_func.GetTaskList)
@@ -103,7 +103,7 @@ func SetupRoute(srv app.App, r *gin.Engine, conf *config.DeployConf) {
 
 		temporaryTask := api.Group("/temporary_task")
 		{
-			temporaryTask.Use(middleware.TokenVerify())
+			temporaryTask.Use(middleware.TokenVerify([]byte(conf.JWT.PublicKey)))
 			temporaryTask.POST("/create", controller.CreateTemporaryTask)
 			temporaryTask.POST("/delete", controller.DeleteTemporaryTask)
 			temporaryTask.GET("/list", controller.GetTemporaryTaskList)
@@ -111,7 +111,7 @@ func SetupRoute(srv app.App, r *gin.Engine, conf *config.DeployConf) {
 
 		workflow := api.Group("/workflow")
 		{
-			workflow.Use(middleware.TokenVerify())
+			workflow.Use(middleware.TokenVerify([]byte(conf.JWT.PublicKey)))
 			workflow.POST("/create", controller.CreateWorkflow)
 			workflow.POST("/delete", controller.DeleteWorkflow)
 			workflow.POST("/update", controller.UpdateWorkflow)
@@ -139,7 +139,7 @@ func SetupRoute(srv app.App, r *gin.Engine, conf *config.DeployConf) {
 
 		worker := api.Group("/client")
 		{
-			worker.Use(middleware.TokenVerify())
+			worker.Use(middleware.TokenVerify([]byte(conf.JWT.PublicKey)))
 			worker.GET("/list", etcd_func.GetWorkerListInfo)
 			worker.POST("/reload/config", etcd_func.ReloadConfig)
 		}
@@ -151,9 +151,10 @@ func SetupRoute(srv app.App, r *gin.Engine, conf *config.DeployConf) {
 
 		project := api.Group("/project")
 		{
-			project.Use(middleware.TokenVerify())
+			project.Use(middleware.TokenVerify([]byte(conf.JWT.PublicKey)))
 			project.POST("/create", project_func.Create)
 			project.GET("/list", project_func.GetUserProjects)
+			project.GET("/token", project_func.GetProjectToken)
 			project.POST("/update", project_func.Update)
 			project.POST("/delete", project_func.DeleteOne)
 			project.GET("/users", user_func.GetUsersUnderTheProject)
@@ -170,7 +171,7 @@ func SetupRoute(srv app.App, r *gin.Engine, conf *config.DeployConf) {
 
 		log := api.Group("/log")
 		{
-			log.Use(middleware.TokenVerify())
+			log.Use(middleware.TokenVerify([]byte(conf.JWT.PublicKey)))
 			log.GET("/list", log_func.GetList)
 			log.GET("/detail", log_func.GetLogDetail)
 			log.POST("/clean", log_func.CleanLogs)
@@ -183,9 +184,9 @@ func SetupRoute(srv app.App, r *gin.Engine, conf *config.DeployConf) {
 		})
 	}
 
-	if conf.ViewPath == "" {
-		conf.ViewPath = "./view"
+	if conf.Deploy.ViewPath == "" {
+		conf.Deploy.ViewPath = "./view"
 	}
-	r.StaticFS("/admin", http.Dir(conf.ViewPath))
-	r.StaticFile("/favicon.ico", conf.ViewPath+"/favicon.ico")
+	r.StaticFS("/admin", http.Dir(conf.Deploy.ViewPath))
+	r.StaticFile("/favicon.ico", conf.Deploy.ViewPath+"/favicon.ico")
 }
