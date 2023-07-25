@@ -6,10 +6,24 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/holdno/gopherCron/config"
 )
 
 func TestProjectDaemon_WaitSignal(t *testing.T) {
-	projects := []int64{1, 2, 3, 4, 5}
+	projects := []config.ProjectAuth{{
+		ProjectID: 1,
+	},
+		{
+			ProjectID: 2,
+		}, {
+			ProjectID: 3,
+		}, {
+			ProjectID: 4,
+		}, {
+			ProjectID: 5,
+		}}
+
 	pd := NewProjectDaemon(nil, nil)
 	addProjects, _ := pd.DiffAndAddProjects(projects)
 	for _, v := range addProjects {

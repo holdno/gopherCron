@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/holdno/gopherCron/cmd/service/middleware"
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/errors"
+	"github.com/holdno/gopherCron/jwt"
 	"github.com/holdno/gopherCron/pkg/cronpb"
 	"github.com/holdno/gopherCron/pkg/etcd"
 	"github.com/holdno/gopherCron/pkg/infra"
@@ -58,6 +60,7 @@ func (s *cronRpc) RemoveStream(ctx context.Context, req *cronpb.RemoveStreamRequ
 }
 
 func (s *cronRpc) TryLock(req cronpb.Center_TryLockServer) error {
+	author := jwt.GetProjectAuthor(req.Context())
 	agentIP, exist := GetAgentIPFromContext(req.Context())
 	if !exist {
 		return status.Error(codes.PermissionDenied, codes.PermissionDenied.String())
@@ -88,6 +91,9 @@ func (s *cronRpc) TryLock(req cronpb.Center_TryLockServer) error {
 			task, err := req.Recv()
 			if err != nil || task == nil {
 				return err
+			}
+			if author != nil && !author.Allow(task.ProjectId) {
+				return status.Error(codes.Unauthenticated, codes.Unauthenticated.String())
 			}
 			locker = s.app.GetTaskLocker(&common.TaskInfo{TaskID: task.TaskId, ProjectID: task.ProjectId})
 			if err = locker.TryLockWithOwner(agentIP); err != nil {
@@ -127,6 +133,10 @@ func (s *cronRpc) TryLock(req cronpb.Center_TryLockServer) error {
 }
 
 func (s *cronRpc) StatusReporter(ctx context.Context, req *cronpb.ScheduleReply) (*cronpb.Result, error) {
+	author := jwt.GetProjectAuthor(ctx)
+	if author != nil && !author.Allow(req.ProjectId) {
+		return nil, status.Error(codes.Unauthenticated, codes.Unauthenticated.String())
+	}
 	agentIP, _ := middleware.GetAgentIP(ctx)
 	switch req.Event.Type {
 	case common.TASK_STATUS_RUNNING_V2:
@@ -182,7 +192,38 @@ func (s *cronRpc) SendEvent(ctx context.Context, req *cronpb.SendEventRequest) (
 	}, nil
 }
 
+func (s *cronRpc) Auth(ctx context.Context, req *cronpb.AuthReq) (*cronpb.AuthReply, error) {
+	var pids []int64
+	for pid, token := range req.Kvs {
+		pids = append(pids, pid)
+		project, err := s.app.GetProject(pid)
+		if err != nil {
+			return nil, status.Error(codes.Internal, err.Error())
+		}
+
+		if project.Token != token {
+			return nil, status.Error(codes.PermissionDenied, codes.PermissionDenied.String())
+		}
+	}
+
+	claims := jwt.AgentTokenClaims{
+		Biz:        jwt.DefaultBIZ,
+		ProjectIDs: pids,
+		Exp:        int64(time.Now().Add(time.Duration(s.app.GetConfig().JWT.Exp) * time.Hour).Unix()),
+		Iat:        time.Now().Unix(),
+	}
+	token, err := jwt.BuildAgentJWT(claims, []byte(s.app.GetConfig().JWT.PrivateKey))
+	if err != nil {
+		return nil, err
+	}
+	return &cronpb.AuthReply{
+		Jwt:        token,
+		ExpireTime: claims.Exp,
+	}, nil
+}
+
 func (s *cronRpc) RegisterAgent(req cronpb.Center_RegisterAgentServer) error {
+	author := jwt.GetProjectAuthor(req.Context())
 	newRegister := make(chan *cronpb.RegisterAgentReq)
 	go safe.Run(func() {
 		for {
@@ -224,7 +265,6 @@ Here:
 			var registerStreamOnce []infra.NodeMeta
 
 			for _, info := range multiService.Agents {
-
 				var methods []register.GrpcMethodInfo
 				for _, v := range info.Methods {
 					methods = append(methods, register.GrpcMethodInfo{
@@ -235,6 +275,9 @@ Here:
 				}
 
 				for _, v := range info.Systems {
+					if author != nil && !author.Allow(v) {
+						return status.Error(codes.Unauthenticated, fmt.Sprintf("registry: project id %d is unauthenticated, register failure", v))
+					}
 					meta := infra.NodeMeta{
 						NodeMeta: register.NodeMeta{
 							ServiceName: info.ServiceName,

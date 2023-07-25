@@ -40,6 +40,37 @@ func GetProjectWorkflowTasks(c *gin.Context) {
 	response.APISuccess(c, list)
 }
 
+type GetProjectTokenRequest struct {
+	ProjectID int64 `json:"project_id" form:"project_id" binding:"required"`
+}
+
+func GetProjectToken(c *gin.Context) {
+	var (
+		err error
+		req GetProjectTokenRequest
+		srv = app.GetApp(c)
+		uid = utils.GetUserID(c)
+	)
+
+	if err = utils.BindArgsWithGin(c, &req); err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	if err = srv.CheckPermissions(req.ProjectID, uid); err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	project, err := srv.GetProject(req.ProjectID)
+	if err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	response.APISuccess(c, project.Token)
+}
+
 type GetUserProjectsResponse struct {
 	ProjectID int64  `json:"project_id"`
 	UID       int64  `json:"uid"`
