@@ -20,6 +20,8 @@ import (
 	"github.com/holdno/gopherCron/pkg/warning"
 	"github.com/holdno/gopherCron/protocol"
 	"github.com/holdno/gopherCron/utils"
+	"github.com/mikespook/gorbac"
+	"github.com/ugurcsen/gods-generic/maps/hashmap"
 
 	"github.com/gin-gonic/gin"
 	"github.com/holdno/gocommons/selection"
@@ -37,10 +39,10 @@ type App interface {
 	Log() wlog.Logger
 	CreateProject(tx *gorm.DB, p common.Project) (int64, error)
 	GetProject(pid int64) (*common.Project, error)
-	GetUserProjects(uid int64) ([]*common.Project, error)
+	GetUserProjects(uid int64) ([]*common.ProjectWithUserRole, error)
 	CheckProjectExistByName(title string) (*common.Project, error)
-	CheckUserIsInProject(pid, uid int64) (bool, error)        // 确认该用户是否加入该项目
-	CheckUserProject(pid, uid int64) (*common.Project, error) // 确认项目是否属于该用户
+	CheckUserIsInProject(pid, uid int64) (*common.ProjectRelevance, error) // 确认该用户是否加入该项目
+	CheckUserProject(pid, uid int64) (*common.Project, error)              // 确认项目是否属于该用户
 	UpdateProject(pid int64, title, remark string) error
 	DeleteProject(tx *gorm.DB, pid, uid int64) error
 	SaveTask(task *common.TaskInfo, opts ...clientv3.OpOption) (*common.TaskInfo, error)
@@ -62,7 +64,7 @@ type App interface {
 	CleanProjectLog(tx *gorm.DB, pid int64) error
 	CleanLog(tx *gorm.DB, pid int64, tid string) error
 	DeleteAll() error
-	CreateProjectRelevance(tx *gorm.DB, pid, uid int64) error
+	CreateProjectRelevance(tx *gorm.DB, pid, uid int64, role string) error
 	DeleteProjectRelevance(tx *gorm.DB, pid, uid int64) error
 	GetProjectRelevanceUsers(pid int64) ([]*common.ProjectRelevance, error)
 	GetUserByAccount(account string) (*common.User, error)
@@ -81,7 +83,7 @@ type App interface {
 	GetWebHookList(projectID int64) ([]common.WebHook, error)
 	DeleteWebHook(tx *gorm.DB, projectID int64, types string) error
 	DeleteAllWebHook(tx *gorm.DB, projectID int64) error
-	CheckPermissions(projectID, uid int64) error
+	CheckPermissions(projectID, uid int64, permission gorbac.Permission) error
 	GetErrorLogs(pids []int64, page, pagesize int) ([]*common.TaskLog, int, error)
 	// workflow
 	CreateWorkflow(userID int64, data common.Workflow) error
@@ -130,8 +132,9 @@ type App interface {
 	warning.Warner
 
 	// registry
-	StreamManager() *streamManager
-	DispatchAgentJob(projectID int64, withStream ...*Stream) error
+	StreamManager() *streamManager[*cronpb.Event]
+	StreamManagerV2() *streamManager[*cronpb.ServiceEvent]
+	DispatchAgentJob(projectID int64) error
 	RemoveClientRegister(client string) error
 	HandleCenterEvent(event *cronpb.Event) error
 
@@ -141,7 +144,8 @@ type App interface {
 	// task status
 	SetTaskRunning(agentIP string, execInfo *common.TaskExecutingInfo) error
 	CheckTaskIsRunning(projectID int64, taskID string) ([]common.TaskRunningInfo, error)
-	HandlerTaskFinished(agentIP string, result protocol.TaskFinishedV1) error
+	HandlerTaskFinished(agentIP string, result *protocol.TaskFinishedV1) error
+	SaveTaskLog(agentIP string, result protocol.TaskFinishedV1)
 
 	GetOIDCService() *OIDCService
 }
@@ -172,11 +176,13 @@ type app struct {
 	protocol.CommonInterface
 	warning.Warner
 
-	pusher        *SystemPusher
-	streamManager *streamManager
+	pusher          *SystemPusher
+	streamManager   *streamManager[*cronpb.Event]
+	streamManagerV2 *streamManager[*cronpb.ServiceEvent]
 
 	oidcSrv *OIDCService
 	author  *Author
+	rbacSrv RBACImpl
 }
 
 type WebClientPusher interface {
@@ -215,10 +221,13 @@ func NewApp(configPath string) App {
 		author: &Author{
 			privateKey: []byte(conf.JWT.PrivateKey),
 		},
+		rbacSrv: NewRBACSrv(),
 	}
 	app.ctx, app.cancelFunc = context.WithCancel(context.Background())
 	if conf.ReportAddr != "" {
-		app.Warner = warning.NewHttpReporter(conf.ReportAddr)
+		app.Warner = warning.NewHttpReporter(conf.ReportAddr, func() (string, error) {
+			return app.author.token, nil
+		})
 	}
 
 	if conf.Mysql != nil && conf.Mysql.Service != "" {
@@ -255,8 +264,12 @@ func NewApp(configPath string) App {
 			DialTimeout: time.Duration(conf.Etcd.DialTimeout) * time.Millisecond,
 		})
 
-		app.streamManager = &streamManager{
-			aliveSrv:  make(map[string]map[string]*Stream),
+		app.streamManager = &streamManager[*cronpb.Event]{
+			aliveSrv:  make(map[string]map[string]*Stream[*cronpb.Event]),
+			hostIndex: make(map[string]streamHostIndex),
+		}
+		app.streamManagerV2 = &streamManager[*cronpb.ServiceEvent]{
+			aliveSrv:  make(map[string]map[string]*Stream[*cronpb.ServiceEvent]),
 			hostIndex: make(map[string]streamHostIndex),
 		}
 	}
@@ -278,11 +291,11 @@ func NewApp(configPath string) App {
 	app.clusterID = clusterID % 1024
 	utils.InitIDWorker(app.clusterID)
 	app.PanicGroup = panicgroup.NewPanicGroup(func(err error) {
-		reserr := app.Warning(warning.WarningData{
-			Data:    err.Error(),
-			Type:    warning.WarningTypeSystem,
-			AgentIP: app.localip,
-		})
+		reserr := app.Warning(warning.NewSystemWarningData(warning.SystemWarning{
+			Endpoint: app.GetIP(),
+			Type:     warning.SERVICE_TYPE_CENTER,
+			Message:  fmt.Sprintf("center-service: %s, panic: %s", app.localip, err.Error()),
+		}))
 		if reserr != nil {
 			wlog.With(zap.Any("fields", map[string]interface{}{
 				"desc":         reserr,
@@ -297,6 +310,7 @@ func NewApp(configPath string) App {
 			clientID: app.localip,
 			Endpoint: app.cfg.Publish.Endpoint,
 			client:   &http.Client{Timeout: time.Duration(app.cfg.Deploy.Timeout) * time.Second},
+			Header:   app.cfg.Publish.Header,
 		}
 
 		app.messageChan = make(chan PublishData, 1000)
@@ -352,22 +366,22 @@ func (a *app) HandleCenterEvent(event *cronpb.Event) error {
 }
 
 func startWebhook(app *app) {
-	app.election(common.BuildWebhookMasterKey(), func(s *concurrency.Session) error {
-		wlog.Info("new webhook leader")
-		for {
-			select {
-			case <-app.ctx.Done():
-				return app.ctx.Err()
-			case <-s.Done():
-				return nil
-			default:
-				if err := app.WebHookWorker(s.Done()); err != nil {
-					wlog.Error("webhook runner return error", zap.Error(err))
-					return err
-				}
-			}
-		}
-	})
+	// app.election(common.BuildWebhookMasterKey(), func(s *concurrency.Session) error {
+	// 	wlog.Info("new webhook leader")
+	// 	for {
+	// 		select {
+	// 		case <-app.ctx.Done():
+	// 			return app.ctx.Err()
+	// 		case <-s.Done():
+	// 			return nil
+	// 		default:
+	// 			if err := app.WebHookWorker(s.Done()); err != nil {
+	// 				wlog.Error("webhook runner return error", zap.Error(err))
+	// 				return err
+	// 			}
+	// 		}
+	// 	}
+	// })
 }
 
 func startCleanupTask(app *app) {
@@ -534,22 +548,22 @@ func (a *app) BeginTx() *gorm.DB {
 	return a.store.BeginTx()
 }
 
-func (a *app) CheckUserIsInProject(pid, uid int64) (bool, error) {
+func (a *app) CheckUserIsInProject(pid, uid int64) (*common.ProjectRelevance, error) {
 	opt := selection.NewSelector(selection.NewRequirement("project_id", selection.Equals, pid),
 		selection.NewRequirement("uid", selection.FindIn, uid))
-	opt.Select = "id"
-	res, err := a.store.ProjectRelevance().GetMap(opt)
+	opt.Select = "*"
+	res, err := a.store.ProjectRelevance().GetList(opt)
 	if err != nil && err != gorm.ErrRecordNotFound {
 		errObj := errors.ErrInternalError
 		errObj.Msg = "获取项目归属信息失败"
 		errObj.Log = err.Error()
-		return false, errObj
+		return nil, errObj
 	}
 	if len(res) == 0 {
-		return false, nil
+		return nil, nil
 	}
 
-	return true, nil
+	return res[0], nil
 }
 
 func (a *app) CheckUserProject(pid, uid int64) (*common.Project, error) {
@@ -589,7 +603,7 @@ func (a *app) GetProject(pid int64) (*common.Project, error) {
 	return res[0], nil
 }
 
-func (a *app) GetUserProjects(uid int64) ([]*common.Project, error) {
+func (a *app) GetUserProjects(uid int64) ([]*common.ProjectWithUserRole, error) {
 	opt := selection.NewSelector()
 	isAdmin, err := a.IsAdmin(uid)
 	if err != nil {
@@ -607,12 +621,12 @@ func (a *app) GetUserProjects(uid int64) ([]*common.Project, error) {
 		return nil, errObj
 	}
 
-	var pids []int64
+	projectsMap := hashmap.New[int64, *common.ProjectRelevance]()
 	for _, v := range res {
-		pids = append(pids, v.ProjectID)
+		projectsMap.Put(v.ProjectID, v)
 	}
 
-	opt = selection.NewSelector(selection.NewRequirement("id", selection.In, pids))
+	opt = selection.NewSelector(selection.NewRequirement("id", selection.In, projectsMap.Keys()))
 	projects, err := a.store.Project().GetProject(opt)
 	if err != nil && err != gorm.ErrRecordNotFound {
 		errObj := errors.ErrInternalError
@@ -621,7 +635,21 @@ func (a *app) GetUserProjects(uid int64) ([]*common.Project, error) {
 		return nil, errObj
 	}
 
-	return projects, nil
+	var list []*common.ProjectWithUserRole
+	for _, v := range projects {
+		userPermission, exist := projectsMap.Get(v.ID)
+		if !exist {
+			continue
+		}
+		if userPermission.Role == "" {
+			userPermission.Role = common.PERMISSION_USER
+		}
+		list = append(list, &common.ProjectWithUserRole{
+			Project: v,
+			Role:    userPermission.Role,
+		})
+	}
+	return list, nil
 }
 
 func (a *app) CleanProjectLog(tx *gorm.DB, pid int64) error {
@@ -788,10 +816,16 @@ func (a *app) UpdateProject(pid int64, title, remark string) error {
 	return nil
 }
 
-func (a *app) CreateProjectRelevance(tx *gorm.DB, pid, uid int64) error {
+func (a *app) CreateProjectRelevance(tx *gorm.DB, pid, uid int64, roleStr string) error {
+	role, exist := a.rbacSrv.GetRole(roleStr)
+	if !exist {
+		return errors.NewError(http.StatusBadRequest, "未定义的权限")
+	}
+
 	if err := a.store.ProjectRelevance().Create(tx, common.ProjectRelevance{
 		ProjectID:  pid,
 		UID:        uid,
+		Role:       role.ID(),
 		CreateTime: time.Now().Unix(),
 	}); err != nil {
 		errObj := errors.ErrInternalError
@@ -832,7 +866,7 @@ func (a *app) GetUserByAccount(account string) (*common.User, error) {
 	return res[0], nil
 }
 
-func (a *app) CheckPermissions(projectID, uid int64) error {
+func (a *app) CheckPermissions(projectID, uid int64, permission gorbac.Permission) error {
 	// 首先确认操作的用户是否为该项目的管理员
 	isAdmin, err := a.IsAdmin(uid)
 	if err != nil {
@@ -840,10 +874,15 @@ func (a *app) CheckPermissions(projectID, uid int64) error {
 	}
 
 	if !isAdmin {
-		if exist, err := a.CheckUserIsInProject(projectID, uid); err != nil {
+		exist, err := a.CheckUserIsInProject(projectID, uid)
+		if err != nil {
 			return err
-		} else if !exist {
+		} else if exist == nil {
 			return errors.ErrProjectNotExist
+		}
+		fmt.Println(exist, permission)
+		if !a.rbacSrv.IsGranted(exist.Role, permission) {
+			return errors.ErrInsufficientPermissions
 		}
 	}
 

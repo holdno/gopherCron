@@ -28,11 +28,17 @@ type Project struct {
 	Token  string `json:"token" gorm:"column:token;type:varchar(32);not null;default:'';comment:'项目token,用于请求中心接口'"`
 }
 
+type ProjectWithUserRole struct {
+	*Project
+	Role string `json:"role"`
+}
+
 type ProjectRelevance struct {
-	ID         int64 `json:"id" gorm:"column:id;primary_key;auto_increment"`
-	UID        int64 `json:"uid" gorm:"column:uid;index:uid;type:bigint(20);not null;comment:'关联用户id'"`
-	ProjectID  int64 `json:"project_id" gorm:"column:project_id;index:project_id;type:bigint(20);not null;comment:'关联项目id'"`
-	CreateTime int64 `json:"create_time" gorm:"column:create_time;type:bigint(20);not null;comment:'创建时间'"`
+	ID         int64  `json:"id" gorm:"column:id;primary_key;auto_increment"`
+	UID        int64  `json:"uid" gorm:"column:uid;index:uid;type:bigint(20);not null;comment:'关联用户id'"`
+	ProjectID  int64  `json:"project_id" gorm:"column:project_id;index:project_id;type:bigint(20);not null;comment:'关联项目id'"`
+	Role       string `json:"role" gorm:"column:role;type:varchar(32);default:'user';not null;comment:'项目角色'"`
+	CreateTime int64  `json:"create_time" gorm:"column:create_time;type:bigint(20);not null;comment:'创建时间'"`
 }
 
 type TaskLog struct {
@@ -60,17 +66,15 @@ type WebHook struct {
 }
 
 type WebHookBody struct {
-	TaskID      string `json:"task_id" form:"task_id"`
-	ProjectID   int64  `json:"project_id" form:"project_id"`
-	Command     string `json:"command" form:"command"`
-	StartTime   int64  `json:"start_time" form:"start_time"`
-	EndTime     int64  `json:"end_time" form:"end_time"`
-	Result      string `json:"result" form:"result"`
-	SystemError string `json:"system_error" form:"system_error"`
-	Error       string `json:"error" form:"error"`
-	ClientIP    string `json:"client_ip" form:"client_ip"`
-	RequestTime int64  `json:"request_time" form:"request_time"`
-	Sign        string `json:"sign,omitempty" form:"sign"`
+	TaskID    string `json:"task_id" form:"task_id"`
+	ProjectID int64  `json:"project_id" form:"project_id"`
+	Command   string `json:"command" form:"command"`
+	StartTime int64  `json:"start_time" form:"start_time"`
+	EndTime   int64  `json:"end_time" form:"end_time"`
+	Result    string `json:"result" form:"result"`
+	Error     string `json:"error" form:"error"`
+	ClientIP  string `json:"client_ip" form:"client_ip"`
+	TmpID     string `json:"tmp_id" form:"tmp_id"`
 }
 
 type Workflow struct {

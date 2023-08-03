@@ -31,7 +31,7 @@ import (
 )
 
 func (a *client) SetupMicroService() *winfra.Srv[infra.NodeMetaRemote] {
-	register := a.MustSetupRemoteRegister()
+	register := a.MustSetupRemoteRegisterV2()
 	cfg := a.Cfg()
 	if cfg.Address == "" {
 		cfg.Address = a.GetIP()
@@ -42,6 +42,9 @@ func (a *client) SetupMicroService() *winfra.Srv[infra.NodeMetaRemote] {
 		wlog.Info("debug mode will open pprof tools")
 		pprof.Register(httpEngine)
 	}
+	httpEngine.GET("/heatlhy", func(ctx *gin.Context) {
+		ctx.String(http.StatusOK, "healthy")
+	})
 
 	newsrv := infra.NewAgentServer()
 	var pids []int64
@@ -57,7 +60,7 @@ func (a *client) SetupMicroService() *winfra.Srv[infra.NodeMetaRemote] {
 		newsrv.WithHttpServer(&http.Server{
 			Handler: httpEngine,
 		}),
-		newsrv.WithAddress([]infra.Address{{ListenAddress: cfg.Address}}),
+		newsrv.WithAddress([]infra.Address{{ListenAddress: cfg.Address, RegisterAddress: cfg.RegisterAddress}}),
 		newsrv.WithTags(map[string]string{
 			"agent-version": protocol.GetVersion(),
 		}),
@@ -71,6 +74,58 @@ func (a *client) SetupMicroService() *winfra.Srv[infra.NodeMetaRemote] {
 	return srv
 }
 
+func (a *client) MustSetupRemoteRegisterV2() wregister.ServiceRegister[infra.NodeMetaRemote] {
+
+	genMetadata := func(ctx context.Context, cc *grpc.ClientConn) context.Context {
+		return metadata.NewOutgoingContext(ctx, metadata.New(map[string]string{
+			common.GOPHERCRON_AGENT_IP_MD_KEY:   a.localip,
+			common.GOPHERCRON_AGENT_VERSION_KEY: protocol.GetVersion(),
+		}))
+	}
+
+	r, err := register.NewRemoteRegisterV2(a.localip, func() (register.CenterClient, error) {
+		if a.centerSrv.Cc != nil {
+			a.centerSrv.Cc.Close()
+		}
+		wlog.Debug("start build new center client")
+		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(a.cfg.Timeout)*time.Second)
+		defer cancel()
+		cc, err := grpc.DialContext(ctx, a.cfg.Micro.Endpoint, grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithKeepaliveParams(keepalive.ClientParameters{
+				Time:    time.Second * 10,
+				Timeout: time.Second * 3,
+			}),
+			grpc.WithUnaryInterceptor(func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+				ctx = genMetadata(ctx, cc)
+				if method != cronpb.Center_Auth_FullMethodName {
+					ctx = metadata.AppendToOutgoingContext(ctx, common.GOPHERCRON_AGENT_AUTH_KEY, a.author.Auth(ctx, cc))
+				}
+				return invoker(ctx, method, req, reply, cc, opts...)
+			}),
+			grpc.WithStreamInterceptor(func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+				ctx = genMetadata(ctx, cc)
+				if method != cronpb.Center_Auth_FullMethodName {
+					ctx = metadata.AppendToOutgoingContext(ctx, common.GOPHERCRON_AGENT_AUTH_KEY, a.author.Auth(ctx, cc))
+				}
+				return streamer(ctx, desc, cc, method, opts...)
+			}))
+		if err != nil {
+			wlog.Error("failed to dial center service", zap.String("endpoint", a.cfg.Micro.Endpoint), zap.Error(err))
+			return register.CenterClient{}, err
+		}
+		a.centerSrv = register.CenterClient{
+			CenterClient: cronpb.NewCenterClient(cc),
+			Cc:           cc,
+		}
+		return a.centerSrv, nil
+	}, a.handlerEventFromCenterV2)
+	if err != nil {
+		panic(err)
+	}
+	return r
+}
+
+// MustSetupRemoteRegister v2.2.1 版本之后不再维护，使用 MustSetupRemoteRegisterV2
 func (a *client) MustSetupRemoteRegister() wregister.ServiceRegister[infra.NodeMetaRemote] {
 
 	genMetadata := func(ctx context.Context, cc *grpc.ClientConn) context.Context {
@@ -236,6 +291,10 @@ func NewAuthor(projectAuths []config.ProjectAuth) *Author {
 	return &Author{
 		authMeta: authKvs,
 	}
+}
+
+func (a *Author) GetToken() string {
+	return a.token
 }
 
 func (a *Author) Auth(ctx context.Context, cc *grpc.ClientConn) string {

@@ -3,12 +3,14 @@ package app
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/errors"
 	"github.com/holdno/gopherCron/pkg/warning"
+	"github.com/holdno/gopherCron/protocol"
 	"github.com/holdno/gopherCron/utils"
 
 	"github.com/jinzhu/gorm"
@@ -81,8 +83,8 @@ func (a *app) DeleteAllWebHook(tx *gorm.DB, projectID int64) error {
 	return nil
 }
 
-func (a *app) HandleWebHook(projectID int64, taskID string, types string, tmpID string) error {
-	wh, err := a.GetWebHook(projectID, types)
+func (a *app) HandleWebHook(agentIP string, res *protocol.TaskFinishedV1) error {
+	wh, err := a.GetWebHook(res.ProjectID, "finished")
 	if err != nil {
 		return err
 	}
@@ -94,44 +96,29 @@ func (a *app) HandleWebHook(projectID int64, taskID string, types string, tmpID 
 	var (
 		retryTimes = [5]time.Duration{1, 3, 5, 7, 9}
 		index      = 0
-		logDetail  *common.TaskLog
 	)
 
-	err = utils.RetryFunc(5, func() error {
-		if logDetail, err = a.GetTaskLogDetail(projectID, taskID, tmpID); err != nil {
-			time.Sleep(retryTimes[index] * time.Second)
-			index++
-			return err
-		}
-		return nil
-	})
+	body := common.WebHookBody{
+		TaskID:    res.TaskID,
+		ProjectID: res.ProjectID,
+		Command:   res.Command,
+		StartTime: res.StartTime,
+		EndTime:   res.EndTime,
+		ClientIP:  agentIP,
+		Result:    res.Result,
+		Error:     res.Error,
+		TmpID:     res.TmpID,
+	}
 
+	p, err := a.GetProject(res.ProjectID)
 	if err != nil {
 		return err
 	}
 
-	var result common.TaskResultLog
-	_ = json.Unmarshal([]byte(logDetail.Result), &result)
-
-	body := common.WebHookBody{
-		TaskID:      taskID,
-		ProjectID:   projectID,
-		Command:     logDetail.Command,
-		StartTime:   logDetail.StartTime,
-		EndTime:     logDetail.EndTime,
-		ClientIP:    logDetail.ClientIP,
-		Result:      result.Result,
-		Error:       result.Error,
-		SystemError: result.SystemError,
-	}
-
 	err = utils.RetryFunc(5, func() error {
-		body.RequestTime = time.Now().Unix()
-		body.Sign = utils.MakeSign(body, wh.Secret)
-
 		reqData, _ := json.Marshal(body)
 		req, _ := http.NewRequest(http.MethodPost, wh.CallbackURL, bytes.NewReader(reqData))
-
+		req.Header.Add("Authorization", p.Token)
 		resp, err := a.httpClient.Do(req)
 		if err != nil || resp.StatusCode != http.StatusOK {
 			if index >= 5 {
@@ -148,17 +135,13 @@ func (a *app) HandleWebHook(projectID int64, taskID string, types string, tmpID 
 	})
 
 	if err != nil {
-		task, getTaskErr := a.GetTask(projectID, taskID)
-		if getTaskErr != nil {
-			return getTaskErr
-		}
-		_ = a.Warning(warning.WarningData{
-			Data:      err.Error(),
-			Type:      warning.WarningTypeTask,
+		a.Warning(warning.NewTaskWarningData(warning.TaskWarning{
 			AgentIP:   a.localip,
-			TaskName:  task.Name,
-			ProjectID: projectID,
-		})
+			TaskName:  res.TaskName,
+			TaskID:    res.TaskID,
+			ProjectID: res.ProjectID,
+			Message:   fmt.Sprintf("webhook request error %s, callback-url: %s", err.Error(), wh.CallbackURL),
+		}))
 	}
 	return nil
 }

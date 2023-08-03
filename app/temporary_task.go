@@ -158,12 +158,11 @@ func (a *app) TemporaryTaskSchedule(tmpTask common.TemporaryTask) error {
 			if err == nil {
 				err = fmt.Errorf("panic: %s", r)
 			}
-			a.Warning(warning.WarningData{
-				Type:      warning.WarningTypeSystem,
-				Data:      fmt.Sprintf("临时任务调度/执行失败, %s, DB Rollback", err.Error()),
-				TaskName:  task.Name,
-				ProjectID: tmpTask.ProjectID,
-			})
+			a.Warning(warning.NewSystemWarningData(warning.SystemWarning{
+				Endpoint: a.GetIP(),
+				Type:     warning.SERVICE_TYPE_CENTER,
+				Message:  fmt.Sprintf("center-service: %s, task-id: %s, 临时任务调度/执行失败, %s, DB Rollback", a.GetIP(), task.TaskID, err.Error()),
+			}))
 			tx.Rollback()
 		} else {
 			tx.Commit()

@@ -26,7 +26,7 @@ func GetProjectWorkflowTasks(c *gin.Context) {
 	srv := app.GetApp(c)
 	uid := utils.GetUserID(c)
 
-	if err = srv.CheckPermissions(req.ProjectID, uid); err != nil {
+	if err = srv.CheckPermissions(req.ProjectID, uid, app.PermissionView); err != nil {
 		response.APIError(c, err)
 		return
 	}
@@ -57,7 +57,7 @@ func GetProjectToken(c *gin.Context) {
 		return
 	}
 
-	if err = srv.CheckPermissions(req.ProjectID, uid); err != nil {
+	if err = srv.CheckPermissions(req.ProjectID, uid, app.PermissionAll); err != nil {
 		response.APIError(c, err)
 		return
 	}
@@ -77,12 +77,13 @@ type GetUserProjectsResponse struct {
 	Title     string `json:"title"`
 	Remark    string `json:"remark"`
 	TaskCount int64  `json:"task_count"`
+	Role      string `json:"role"`
 }
 
 func GetUserProjects(c *gin.Context) {
 	var (
 		err   error
-		list  []*common.Project
+		list  []*common.ProjectWithUserRole
 		uid   = utils.GetUserID(c)
 		res   []*GetUserProjectsResponse
 		count int64
@@ -107,6 +108,7 @@ func GetUserProjects(c *gin.Context) {
 			Title:     v.Title,
 			Remark:    v.Remark,
 			TaskCount: count,
+			Role:      v.Role,
 		})
 	}
 

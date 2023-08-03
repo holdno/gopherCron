@@ -26,7 +26,7 @@ func CreateWebHook(c *gin.Context) {
 		return
 	}
 
-	if err = srv.CheckPermissions(req.ProjectID, uid); err != nil {
+	if err = srv.CheckPermissions(req.ProjectID, uid, app.PermissionEdit); err != nil {
 		response.APIError(c, err)
 		return
 	}
@@ -56,7 +56,7 @@ func GetWebHookList(c *gin.Context) {
 		return
 	}
 
-	if err = srv.CheckPermissions(req.ProjectID, uid); err != nil {
+	if err = srv.CheckPermissions(req.ProjectID, uid, app.PermissionEdit); err != nil {
 		response.APIError(c, err)
 		return
 	}
@@ -88,7 +88,7 @@ func GetWebHook(c *gin.Context) {
 		return
 	}
 
-	if err = srv.CheckPermissions(req.ProjectID, uid); err != nil {
+	if err = srv.CheckPermissions(req.ProjectID, uid, app.PermissionEdit); err != nil {
 		response.APIError(c, err)
 		return
 	}
@@ -120,7 +120,7 @@ func DeleteWebHook(c *gin.Context) {
 		return
 	}
 
-	if err = srv.CheckPermissions(req.ProjectID, uid); err != nil {
+	if err = srv.CheckPermissions(req.ProjectID, uid, app.PermissionEdit); err != nil {
 		response.APIError(c, err)
 		return
 	}

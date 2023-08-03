@@ -49,7 +49,7 @@ func SaveTask(c *gin.Context) {
 		return
 	}
 
-	if err = srv.CheckPermissions(req.ProjectID, uid); err != nil {
+	if err = srv.CheckPermissions(req.ProjectID, uid, app.PermissionView); err != nil {
 		response.APIError(c, err)
 		return
 	}

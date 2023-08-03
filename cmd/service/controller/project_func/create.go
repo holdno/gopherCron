@@ -63,7 +63,7 @@ func Create(c *gin.Context) {
 		return
 	}
 
-	if err = srv.CreateProjectRelevance(tx, id, uid); err != nil {
+	if err = srv.CreateProjectRelevance(tx, id, uid, app.RoleChief.IDStr); err != nil {
 		response.APIError(c, err)
 		return
 	}

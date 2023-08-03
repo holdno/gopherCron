@@ -37,7 +37,7 @@ func DeleteOne(c *gin.Context) {
 		}
 	}()
 
-	if err = srv.CheckPermissions(req.ProjectID, uid); err != nil {
+	if err = srv.CheckPermissions(req.ProjectID, uid, app.PermissionDelete); err != nil {
 		response.APIError(c, err)
 		return
 	}

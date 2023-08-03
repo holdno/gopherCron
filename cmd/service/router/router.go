@@ -55,9 +55,11 @@ func SetupRoute(srv app.App, r *gin.Engine, conf *config.ServiceConfig) {
 		c.String(http.StatusOK, "healthy")
 	})
 	r.GET("/metrics", prometheusHandler(srv.Metrics().Registry()))
-
+	r.StaticFS("", http.Dir(conf.Deploy.ViewPath))
+	r.StaticFile("/favicon.ico", conf.Deploy.ViewPath+"/favicon.ico")
 	api := r.Group("/api/v1")
 	{
+		api.GET("/login_methods", user_func.GetLoginMethods)
 		api.GET("/version", system.GetVersion)
 		user := api.Group("/user")
 		{
@@ -187,6 +189,5 @@ func SetupRoute(srv app.App, r *gin.Engine, conf *config.ServiceConfig) {
 	if conf.Deploy.ViewPath == "" {
 		conf.Deploy.ViewPath = "./view"
 	}
-	r.StaticFS("/admin", http.Dir(conf.Deploy.ViewPath))
-	r.StaticFile("/favicon.ico", conf.Deploy.ViewPath+"/favicon.ico")
+
 }

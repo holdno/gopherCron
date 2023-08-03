@@ -38,7 +38,7 @@ func KillTask(c *gin.Context) {
 	}
 
 	// 这里主要是防止用户强杀不属于自己项目的业务
-	if err = srv.CheckPermissions(req.ProjectID, uid); err != nil {
+	if err = srv.CheckPermissions(req.ProjectID, uid, app.PermissionView); err != nil {
 		response.APIError(c, err)
 		return
 	}

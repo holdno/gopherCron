@@ -9,11 +9,11 @@ import (
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/pkg/warning"
 	"github.com/holdno/gopherCron/utils"
-	"github.com/spacegrower/watermelon/infra/wlog"
-	"go.uber.org/zap"
 
+	"github.com/spacegrower/watermelon/infra/wlog"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
 )
 
 func (a *app) WebHookWorker(done <-chan struct{}) error {
@@ -28,10 +28,11 @@ func (a *app) WebHookWorker(done <-chan struct{}) error {
 		}
 		return nil
 	}); err != nil {
-		warningErr := a.Warning(warning.WarningData{
-			Data: fmt.Sprintf("[service - WebHookWorker] etcd kv get error: %s", err.Error()),
-			Type: warning.WarningTypeSystem,
-		})
+		warningErr := a.Warning(warning.NewSystemWarningData(warning.SystemWarning{
+			Endpoint: a.GetIP(),
+			Type:     warning.SERVICE_TYPE_CENTER,
+			Message:  fmt.Sprintf("center-service: %s, webhook worker etcd kv get error: %s", a.GetIP(), err.Error()),
+		}))
 		if warningErr != nil {
 			wlog.Error(fmt.Sprintf("[service - WebHookWorker] failed to push warning, %s", err.Error()))
 		}
@@ -110,13 +111,13 @@ func (a *app) transportWebhookEvent(watchEvent *clientv3.Event) {
 		return
 	}
 
-	if err = a.HandleWebHook(projectID, taskID, "", runningInfo.TmpID); err != nil {
-		wlog.With(zap.Any("fields", map[string]interface{}{
-			"project_id": projectID,
-			"task_id":    taskID,
-			"type":       "",
-			"tmp_id":     runningInfo.TmpID,
-			"error":      err.Error(),
-		})).Error("failed to handle webhook")
-	}
+	// if err = a.HandleWebHook(projectID, taskID, "", runningInfo.TmpID); err != nil {
+	// 	wlog.With(zap.Any("fields", map[string]interface{}{
+	// 		"project_id": projectID,
+	// 		"task_id":    taskID,
+	// 		"type":       "",
+	// 		"tmp_id":     runningInfo.TmpID,
+	// 		"error":      err.Error(),
+	// 	})).Error("failed to handle webhook")
+	// }
 }

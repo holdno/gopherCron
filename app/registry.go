@@ -9,18 +9,31 @@ import (
 	"github.com/holdno/gocommons/selection"
 	"github.com/holdno/gopherCron/pkg/cronpb"
 	"github.com/holdno/gopherCron/pkg/infra"
+
+	cmap "github.com/orcaman/concurrent-map/v2"
 	"github.com/spacegrower/watermelon/infra/wlog"
 	"go.uber.org/zap"
 )
 
-func (a *app) StreamManager() *streamManager {
+func (a *app) StreamManager() *streamManager[*cronpb.Event] {
 	return a.streamManager
 }
 
-type streamManager struct {
-	aliveSrv        map[string]map[string]*Stream
+func (a *app) StreamManagerV2() *streamManager[*cronpb.ServiceEvent] {
+	return a.streamManagerV2
+}
+
+type streamManager[T any] struct {
+	aliveSrv        map[string]map[string]*Stream[T]
 	hostIndex       map[string]streamHostIndex
 	streamStoreLock sync.RWMutex
+	isV2            bool
+	responseMap     cmap.ConcurrentMap[string, *streamResponse]
+}
+
+type streamResponse struct {
+	isClose bool
+	resp    chan *cronpb.ClientEvent
 }
 
 type streamHostIndex struct {
@@ -28,9 +41,9 @@ type streamHostIndex struct {
 	two string
 }
 
-type Stream struct {
+type Stream[T any] struct {
 	stream interface {
-		Send(*cronpb.Event) error
+		Send(T) error
 	}
 	cancelFunc  func()
 	CreateTime  time.Time
@@ -41,22 +54,52 @@ type Stream struct {
 	System      int64
 }
 
-func (s *Stream) Cancel() {
+func (s *Stream[T]) Cancel() {
 	if s.cancelFunc != nil {
 		s.cancelFunc()
 	}
 }
 
-func (s *Stream) Send(e *cronpb.Event) error {
+func (s *Stream[T]) Send(e T) error {
 	return s.stream.Send(e)
 }
 
-func (c *streamManager) generateKey(projectID int64, srvName string) string {
+func (c *streamManager[T]) generateKey(projectID int64, srvName string) string {
 	return fmt.Sprintf("%d/%s", projectID, srvName)
 }
 
 func (c *streamManager) generateServiceKey(info infra.NodeMeta) string {
 	return fmt.Sprintf("%s_%d_%s_%s_%d_%d", info.Region, info.System, info.ServiceName, info.Host, info.Port, info.RegisterTime)
+}
+
+func (c *streamManager) SaveStreamV2(info infra.NodeMeta, stream interface {
+	Send(*cronpb.ServiceEvent) error
+}, cancelFunc func()) {
+	c.streamStoreLock.Lock()
+	defer c.streamStoreLock.Unlock()
+	k := c.generateKey(info.System, info.ServiceName)
+	srvList, exist := c.aliveSrv[k]
+	if !exist {
+		srvList = make(map[string]*Stream)
+		c.aliveSrv[k] = srvList
+	}
+
+	kk := c.generateServiceKey(info)
+	srvList[kk] = &Stream{
+		cancelFunc:  cancelFunc,
+		stream:      stream,
+		CreateTime:  time.Unix(0, info.RegisterTime),
+		Host:        info.Host,
+		Port:        int32(info.Port),
+		ServiceName: info.ServiceName,
+		Region:      info.Region,
+		System:      info.System,
+	}
+
+	c.hostIndex[fmt.Sprintf("%s:%d", info.Host, info.Port)] = streamHostIndex{
+		one: k,
+		two: kk,
+	}
 }
 
 func (c *streamManager) SaveStream(info infra.NodeMeta, stream interface {
@@ -218,4 +261,8 @@ func (a *app) CalcAgentDataConsistency(done <-chan struct{}) error {
 			return nil
 		}
 	}
+}
+
+func sendEventWaitRespons() {
+
 }

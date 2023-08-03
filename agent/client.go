@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -32,7 +33,6 @@ type client struct {
 
 	isClose   bool
 	closeChan chan struct{}
-	ClientTaskReporter
 	// etcd       protocol.EtcdManager
 	// protocol.ClientEtcdManager
 	warning.Warner
@@ -106,15 +106,13 @@ func (agent *client) loadConfigAndSetupAgentFunc() func() error {
 
 		if cfg.ReportAddr != "" {
 			agent.logger.Info(fmt.Sprintf("init http task log reporter, address: %s", cfg.ReportAddr))
-			reporter := warning.NewHttpReporter(cfg.ReportAddr)
-			agent.ClientTaskReporter = reporter
-			agent.Warner = reporter
+			agent.Warner = warning.NewHttpReporter(cfg.ReportAddr, func() (string, error) {
+				if agent.author != nil {
+					return agent.author.token, nil
+				}
+				return "", errors.New("author is not init")
+			})
 		} else {
-			agent.logger.Info("init default task log reporter, it must be used mysql config")
-			agent.ClientTaskReporter = NewDefaultTaskReporter(agent.logger, cfg.Mysql)
-		}
-
-		if agent.Warner == nil {
 			agent.Warner = warning.NewDefaultWarner(agent.logger)
 		}
 

@@ -78,7 +78,7 @@ func RemoveUser(c *gin.Context) {
 		return
 	}
 
-	if err = srv.CheckPermissions(req.ProjectID, uid); err != nil {
+	if err = srv.CheckPermissions(req.ProjectID, uid, app.PermissionEdit); err != nil {
 		response.APIError(c, err)
 		return
 	}
@@ -95,6 +95,7 @@ func RemoveUser(c *gin.Context) {
 type AddUserRequest struct {
 	ProjectID   int64  `json:"project_id" form:"project_id" binding:"required"`
 	UserAccount string `json:"user_account" form:"user_account" binding:"required"`
+	UserRole    string `json:"user_role" form:"user_role" binding:"required"`
 }
 
 func AddUser(c *gin.Context) {
@@ -111,7 +112,7 @@ func AddUser(c *gin.Context) {
 		return
 	}
 
-	if err = srv.CheckPermissions(req.ProjectID, uid); err != nil {
+	if err = srv.CheckPermissions(req.ProjectID, uid, app.PermissionEdit); err != nil {
 		response.APIError(c, err)
 		return
 	}
@@ -134,7 +135,7 @@ func AddUser(c *gin.Context) {
 		}
 	}
 
-	if err = srv.CreateProjectRelevance(nil, req.ProjectID, userInfo.ID); err != nil {
+	if err = srv.CreateProjectRelevance(nil, req.ProjectID, userInfo.ID, req.UserRole); err != nil {
 		response.APIError(c, err)
 		return
 	}

@@ -41,6 +41,10 @@ const (
 	ADMIN_USER_NAME       = "administrator"
 	ADMIN_PROJECT         = "admin_project"
 
+	PERMISSION_ADMIN   = "admin"
+	PERMISSION_MANAGER = "manager"
+	PERMISSION_USER    = "user"
+
 	WEBHOOK_TYPE_TASK_START    = "task_start"
 	WEBHOOK_TYPE_TASK_FINISHED = "task_finished"
 

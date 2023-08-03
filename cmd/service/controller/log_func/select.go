@@ -6,7 +6,6 @@ import (
 	"github.com/holdno/gopherCron/app"
 	"github.com/holdno/gopherCron/cmd/service/response"
 	"github.com/holdno/gopherCron/common"
-	"github.com/holdno/gopherCron/errors"
 	"github.com/holdno/gopherCron/utils"
 
 	"github.com/gin-gonic/gin"
@@ -114,7 +113,6 @@ func GetList(c *gin.Context) {
 		req     GetListRequest
 		logList []*common.TaskLog
 		total   int
-		exist   bool
 		uid     = utils.GetUserID(c)
 		srv     = app.GetApp(c)
 	)
@@ -124,22 +122,8 @@ func GetList(c *gin.Context) {
 		return
 	}
 
-	isAdmin, err := srv.IsAdmin(uid)
-	if err != nil {
+	if err = srv.CheckPermissions(req.ProjectID, uid, app.PermissionView); err != nil {
 		response.APIError(c, err)
-		return
-	}
-
-	if !isAdmin {
-		if exist, err = srv.CheckUserIsInProject(req.ProjectID, uid); err != nil {
-			response.APIError(c, err)
-			return
-		}
-
-		if !exist {
-			response.APIError(c, errors.ErrProjectNotExist)
-			return
-		}
 	}
 
 	if logList, err = srv.GetTaskLogList(req.ProjectID, req.TaskID, req.Page, req.Pagesize); err != nil {
@@ -168,7 +152,7 @@ type GetRecentLogCountResponse struct {
 func GetRecentLogCount(c *gin.Context) {
 	var (
 		err        error
-		projects   []*common.Project
+		projects   []*common.ProjectWithUserRole
 		projectIDs []int64
 		result     []*GetRecentLogCountResponse
 

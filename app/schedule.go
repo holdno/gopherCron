@@ -7,12 +7,14 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/holdno/gocommons/selection"
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/errors"
 	"github.com/holdno/gopherCron/pkg/cronpb"
 	"github.com/holdno/gopherCron/protocol"
 	"github.com/holdno/gopherCron/utils"
 	"github.com/spacegrower/watermelon/infra/wlog"
+	"github.com/spacegrower/watermelon/pkg/safe"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -261,7 +263,7 @@ func (s *WorkflowTaskStates) GetLatestScheduleRecord() *WorkflowTaskScheduleReco
 }
 
 // finished 不一定是成功
-func setWorkFlowTaskFinished(kv concurrency.STM, agentIP string, result protocol.TaskFinishedV1) (bool, error) {
+func setWorkFlowTaskFinished(kv concurrency.STM, agentIP string, result *protocol.TaskFinishedV1) (bool, error) {
 	key := common.BuildWorkflowTaskStatusKey(result.WorkflowID, result.ProjectID, result.TaskID)
 	states := kv.Get(key)
 	planFinished := false
@@ -749,7 +751,61 @@ func (a *app) DelTaskRunningKey(agentIP string, projectID int64, taskID string) 
 	return nil
 }
 
-func (a *app) HandlerTaskFinished(agentIP string, result protocol.TaskFinishedV1) error {
+func (a *app) SaveTaskLog(agentIP string, result protocol.TaskFinishedV1) {
+	// log receive
+	logInfo := common.TaskLog{
+		Name:      result.TaskName,
+		Result:    result.Result,
+		StartTime: result.StartTime,
+		EndTime:   result.EndTime,
+		Command:   result.Command,
+		ClientIP:  agentIP,
+		TmpID:     result.TmpID,
+		TaskID:    result.TaskID,
+		ProjectID: result.ProjectID,
+	}
+
+	opts := selection.NewSelector(selection.NewRequirement("id", selection.Equals, result.ProjectID))
+	projects, err := a.store.Project().GetProject(opts)
+	if err != nil {
+		wlog.Error("failed to report task result, the task project not found", zap.Error(err), zap.Int64("project_id", logInfo.ProjectID))
+	}
+
+	if len(projects) > 0 {
+		logInfo.Project = projects[0].Title
+	}
+
+	taskResult := &common.TaskResultLog{
+		Result: result.Result,
+	}
+	if result.Error != "" {
+		logInfo.WithError = 1
+		taskResult.Error = result.Error
+	}
+
+	var (
+		resultBytes    []byte
+		jsonMarshalErr error
+	)
+	if resultBytes, jsonMarshalErr = json.Marshal(taskResult); jsonMarshalErr != nil {
+		resultBytes = []byte("result log json marshal error:" + jsonMarshalErr.Error())
+	}
+
+	logInfo.Result = string(resultBytes)
+
+	if err := a.store.TaskLog().CreateTaskLog(logInfo); err != nil {
+		a.Metrics().CustomInc("system_error", "task_log_saver", result.TaskID)
+		wlog.With(zap.Any("fields", map[string]interface{}{
+			"task_name":  logInfo.Name,
+			"result":     logInfo.Result,
+			"error":      err.Error(),
+			"start_time": time.Unix(logInfo.StartTime, 0).Format("2006-01-02 15:05:05"),
+			"end_time":   time.Unix(logInfo.StartTime, 0).Format("2006-01-02 15:05:05"),
+		})).Error("任务日志入库失败")
+	}
+}
+
+func (a *app) HandlerTaskFinished(agentIP string, result *protocol.TaskFinishedV1) error {
 	err := a.DelTaskRunningKey(agentIP, result.ProjectID, result.TaskID)
 	if err != nil {
 		return errors.NewError(http.StatusInternalServerError, "设置任务运行状态失败").WithLog(err.Error())
@@ -759,6 +815,10 @@ func (a *app) HandlerTaskFinished(agentIP string, result protocol.TaskFinishedV1
 			return err
 		}
 	}
-	a.PublishMessage(messageTaskStatusChanged(result.ProjectID, result.TaskID, result.TmpID, result.Status))
+
+	safe.Run(func() {
+		a.PublishMessage(messageTaskStatusChanged(result.ProjectID, result.TaskID, result.TmpID, result.Status))
+		a.HandleWebHook(agentIP, result)
+	})
 	return nil
 }

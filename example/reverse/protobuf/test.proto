@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package testpb;
+option go_package = ".;testpb";
+
+service Center {
+    rpc OnCall (OnCallReq) returns (OnCallReply) {}
+}
+
+message OnCallReq {
+    string data = 1;
+}
+
+message OnCallReply {
+    string response = 1;
+}
+
+
+service Agent {
+    rpc OnCall (OnCallReq) returns (OnCallReply) {}
+}

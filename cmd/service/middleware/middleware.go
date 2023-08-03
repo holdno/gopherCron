@@ -68,3 +68,14 @@ func GetAgentIP(ctx context.Context) (string, bool) {
 	ip, ok := middleware.GetFrom(ctx, agentIPKey{}).(string)
 	return ip, ok
 }
+
+type agentVersionKey struct{}
+
+func SetAgentVersion(ctx context.Context, version string) {
+	middleware.SetInto(ctx, agentVersionKey{}, version)
+}
+
+func GetAgentVersion(ctx context.Context) (string, bool) {
+	version, ok := middleware.GetFrom(ctx, agentVersionKey{}).(string)
+	return version, ok
+}
