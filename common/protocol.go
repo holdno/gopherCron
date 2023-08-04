@@ -19,8 +19,6 @@ const (
 	REMOTE_EVENT_TASK_STOP            = "remote_event_task_stop"
 	REMOTE_EVENT_CHECK_TASK_ISRUNNING = "remote_event_check_task_isrunning"
 
-	CENTER_EVENT_WORKFLOW_REFRESH = "workflow_refresh"
-
 	GOPHERCRON_PROXY_TO_MD_KEY      = "gophercron-proxy-to"
 	GOPHERCRON_PROXY_PROJECT_MD_KEY = "gophercron-proxy-project"
 	GOPHERCRON_AGENT_IP_MD_KEY      = "gophercron-agent-ip"

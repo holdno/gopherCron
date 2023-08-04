@@ -61,8 +61,13 @@ func (a *app) RemoveClientRegister(client string) error {
 			stream := a.StreamManager().GetStreamsByHost(client)
 			if stream != nil {
 				stream.Cancel()
+				continue
 			}
-			continue
+			streamV2 := a.StreamManagerV2().GetStreamsByHost(client)
+			if streamV2 != nil {
+				streamV2.Cancel()
+				continue
+			}
 		}
 		resp, err := disposeOne(v)
 		if err != nil {
@@ -107,8 +112,8 @@ func (a *app) DispatchAgentJob(projectID int64) error {
 	}
 
 	var (
-		streamsV1 []Stream[*cronpb.Event]
-		streamsV2 []Stream[*cronpb.ServiceEvent]
+		streamsV1 []*Stream[*cronpb.Event]
+		streamsV2 []*Stream[*cronpb.ServiceEvent]
 	)
 	streams := a.StreamManager().GetStreams(projectID, cronpb.Agent_ServiceDesc.ServiceName)
 	if streams != nil {
@@ -116,7 +121,7 @@ func (a *app) DispatchAgentJob(projectID int64) error {
 			streamsV1 = append(streamsV1, v)
 		}
 	} else {
-		streams := a.StreamManager().GetStreams(projectID, cronpb.Agent_ServiceDesc.ServiceName)
+		streams := a.StreamManagerV2().GetStreams(projectID, cronpb.Agent_ServiceDesc.ServiceName)
 		if streams == nil {
 			return fmt.Errorf("failed to get grpc streams")
 		}
@@ -148,13 +153,25 @@ func (a *app) DispatchAgentJob(projectID int64) error {
 			}
 		}
 		for _, v := range streamsV2 {
-			if err = v.stream.Send(&cronpb.ServiceEvent{
-				Id: utils.,
-				Version:   "v1",
-				Type:      common.REMOTE_EVENT_PUT,
-				Value:     kvPair.Value,
-				EventTime: time.Now().Unix(),
-			}); err != nil {
+			var err error
+			func() {
+				ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
+				defer cancel()
+				_, err = a.StreamManagerV2().SendEventWaitResponse(ctx, v, &cronpb.ServiceEvent{
+					Id:        utils.GetStrID(),
+					Type:      cronpb.EventType_EVENT_REGISTER_REPLY,
+					EventTime: time.Now().Unix(),
+					Event: &cronpb.ServiceEvent_RegisterReply{
+						RegisterReply: &cronpb.Event{
+							Version:   "v1",
+							Type:      common.REMOTE_EVENT_PUT,
+							Value:     kvPair.Value,
+							EventTime: time.Now().Unix(),
+						},
+					},
+				})
+			}()
+			if err != nil {
 				wlog.Info("failed to dispatch agent job", zap.String("host", fmt.Sprintf("%s:%d", v.Host, v.Port)), zap.Error(err))
 				return err
 			}
@@ -166,6 +183,7 @@ func (a *app) DispatchAgentJob(projectID int64) error {
 type AgentClient struct {
 	cronpb.AgentClient
 	addr   string
+	cse    string
 	cancel func()
 }
 
@@ -200,10 +218,10 @@ func (a *app) GetAgentClient(region string, projectID int64) (*AgentClient, erro
 	return client, nil
 }
 
-func (a *app) getAgentAddrs(region string, projectID int64) ([]etcd.FindedResult[infra.NodeMetaRemote], error) {
+func (a *app) getAgentAddrs(region string, projectID int64) ([]etcd.FindedResult[infra.NodeMeta], error) {
 	mtimer := a.metrics.CustomHistogramSet("get_agents_list")
 	defer mtimer.ObserveDuration()
-	finder := etcd.NewFinder[infra.NodeMetaRemote](infra.ResolveEtcdClient())
+	finder := etcd.NewFinder[infra.NodeMeta](infra.ResolveEtcdClient())
 	ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
 	defer cancel()
 	addrs, _, err := finder.FindAll(ctx, filepath.ToSlash(filepath.Join(etcdregister.GetETCDPrefixKey(), "gophercron", strconv.FormatInt(projectID, 10), cronpb.Agent_ServiceDesc.ServiceName))+"/")
@@ -214,34 +232,121 @@ func (a *app) getAgentAddrs(region string, projectID int64) ([]etcd.FindedResult
 	return addrs, nil
 }
 
+func (a *app) GetAgentStream(region string, projectID int64) (*CenterClient, error) {
+	// client 的连接对象由调用时提供初始化
+	addrs, err := a.getAgentAddrs(region, projectID)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, addr := range addrs {
+		if addr.Attr().CenterServiceEndpoint != "" {
+			dialAddress := addr.Attr().CenterServiceEndpoint
+			ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
+			defer cancel()
+			gopts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithPerRPCCredentials(a.author)}
+			if addr.Attr().CenterServiceRegion != a.cfg.Micro.Region {
+				dialAddress, gopts = BuildProxyDialerInfo(ctx, addr.Attr().CenterServiceRegion, dialAddress, gopts)
+			}
+			cc, err := grpc.DialContext(ctx, dialAddress, gopts...)
+			if err != nil {
+				return nil, fmt.Errorf("failed to connect agent stream %s, error: %s", dialAddress, err.Error())
+			}
+			client := &CenterClient{
+				CenterClient: cronpb.NewCenterClient(cc),
+				addr:         addr.Address(),
+				cancel: func() {
+					cc.Close()
+				},
+			}
+			return client, nil
+		}
+	}
+
+	return nil, nil
+}
+
+func (a *app) FindAgentsV2(region string, projectID int64) ([]*CenterClient, error) {
+	addrs, err := a.getAgentAddrs(region, projectID)
+	if err != nil {
+		return nil, err
+	}
+	var (
+		list      []*CenterClient
+		connCache = make(map[string]*grpc.ClientConn)
+	)
+
+	for _, addr := range addrs {
+		err := func() error {
+			if addr.Attr().CenterServiceEndpoint == "" {
+				return nil
+			}
+			dialAddress := addr.Attr().CenterServiceEndpoint
+			ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
+			defer cancel()
+			gopts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithPerRPCCredentials(a.author)}
+			if addr.Attr().CenterServiceRegion != a.cfg.Micro.Region {
+				dialAddress, gopts = BuildProxyDialerInfo(ctx, addr.Attr().CenterServiceRegion, dialAddress, gopts)
+			}
+
+			if _, exist := connCache[dialAddress]; !exist {
+				cc, err := grpc.DialContext(ctx, dialAddress, gopts...)
+				if err != nil {
+					return fmt.Errorf("failed to connect agent stream %s, error: %s", dialAddress, err.Error())
+				}
+				connCache[dialAddress] = cc
+			}
+			cc := connCache[dialAddress]
+			client := &CenterClient{
+				CenterClient: cronpb.NewCenterClient(cc),
+				addr:         addr.Address(),
+				cancel: func() {
+					cc.Close()
+				},
+			}
+			list = append(list, client)
+			return nil
+		}()
+		if err != nil {
+			return nil, err
+		}
+	}
+	connCache = nil
+	return list, nil
+}
+
 func (a *app) FindAgents(region string, projectID int64) ([]*AgentClient, error) {
 	addrs, err := a.getAgentAddrs(region, projectID)
 	if err != nil {
-
 		return nil, err
 	}
 	var list []*AgentClient
 	for _, addr := range addrs {
-
-		ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
-		defer cancel()
-		gopts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithPerRPCCredentials(a.author)}
-		dialAddress := addr.Address()
-		if addr.Attr().Region != a.cfg.Micro.Region {
-			dialAddress, gopts = BuildProxyDialerInfo(ctx, addr.Attr().Region, addr.Address(), gopts)
-		}
-		cc, err := grpc.DialContext(ctx, dialAddress, gopts...)
+		err := func() error {
+			ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
+			defer cancel()
+			gopts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithPerRPCCredentials(a.author)}
+			dialAddress := addr.Address()
+			if addr.Attr().Region != a.cfg.Micro.Region {
+				dialAddress, gopts = BuildProxyDialerInfo(ctx, addr.Attr().Region, addr.Address(), gopts)
+			}
+			cc, err := grpc.DialContext(ctx, dialAddress, gopts...)
+			if err != nil {
+				return err
+			}
+			client := &AgentClient{
+				AgentClient: cronpb.NewAgentClient(cc),
+				addr:        addr.Address(),
+				cancel: func() {
+					cc.Close()
+				},
+			}
+			list = append(list, client)
+			return nil
+		}()
 		if err != nil {
 			return nil, fmt.Errorf("failed to connect agent %s, error: %s", addr.Address(), err.Error())
 		}
-		client := &AgentClient{
-			AgentClient: cronpb.NewAgentClient(cc),
-			addr:        addr.Address(),
-			cancel: func() {
-				cc.Close()
-			},
-		}
-		list = append(list, client)
 	}
 
 	return list, nil
@@ -303,6 +408,9 @@ func (a *app) GetCenterSrvList() ([]*CenterClient, error) {
 }
 
 func (a *app) DispatchEvent(event *cronpb.SendEventRequest) error {
+	if event.Event.Type == cronpb.EventType_EVENT_UNKNOWN {
+		return fmt.Errorf("event type is undefined")
+	}
 	mtimer := a.metrics.CustomHistogramSet("dispatch_event")
 	defer mtimer.ObserveDuration()
 	centers, err := a.GetCenterSrvList()

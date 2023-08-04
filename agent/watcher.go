@@ -36,7 +36,7 @@ func newReplyEvent(id string) *cronpb.ClientEvent {
 
 // handlerEventFromCenterV2 响应中心的请求，若返回error，则会主动断开连接
 func (a *client) handlerEventFromCenterV2(ctx context.Context, event *cronpb.ServiceEvent) (*cronpb.ClientEvent, error) {
-	wlog.Debug("handle new event from center", zap.String("event_type", event.Type.String()))
+	wlog.Debug("handle new event v2 from center", zap.String("event_type", event.Type.String()))
 	replyEvent := newReplyEvent(event.Id)
 	switch event.Type {
 	case cronpb.EventType_EVENT_REGISTER_HEARTBEAT_PING:

@@ -38,7 +38,7 @@ type CenterClient interface {
 	RegisterAgentV2(ctx context.Context, opts ...grpc.CallOption) (Center_RegisterAgentV2Client, error)
 	StatusReporter(ctx context.Context, in *ScheduleReply, opts ...grpc.CallOption) (*Result, error)
 	// 面向中心的接口
-	SendEvent(ctx context.Context, in *SendEventRequest, opts ...grpc.CallOption) (*Result, error)
+	SendEvent(ctx context.Context, in *SendEventRequest, opts ...grpc.CallOption) (*ClientEvent, error)
 	RemoveStream(ctx context.Context, in *RemoveStreamRequest, opts ...grpc.CallOption) (*Result, error)
 }
 
@@ -161,8 +161,8 @@ func (c *centerClient) StatusReporter(ctx context.Context, in *ScheduleReply, op
 	return out, nil
 }
 
-func (c *centerClient) SendEvent(ctx context.Context, in *SendEventRequest, opts ...grpc.CallOption) (*Result, error) {
-	out := new(Result)
+func (c *centerClient) SendEvent(ctx context.Context, in *SendEventRequest, opts ...grpc.CallOption) (*ClientEvent, error) {
+	out := new(ClientEvent)
 	err := c.cc.Invoke(ctx, Center_SendEvent_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -189,7 +189,7 @@ type CenterServer interface {
 	RegisterAgentV2(Center_RegisterAgentV2Server) error
 	StatusReporter(context.Context, *ScheduleReply) (*Result, error)
 	// 面向中心的接口
-	SendEvent(context.Context, *SendEventRequest) (*Result, error)
+	SendEvent(context.Context, *SendEventRequest) (*ClientEvent, error)
 	RemoveStream(context.Context, *RemoveStreamRequest) (*Result, error)
 	mustEmbedUnimplementedCenterServer()
 }
@@ -213,7 +213,7 @@ func (UnimplementedCenterServer) RegisterAgentV2(Center_RegisterAgentV2Server) e
 func (UnimplementedCenterServer) StatusReporter(context.Context, *ScheduleReply) (*Result, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method StatusReporter not implemented")
 }
-func (UnimplementedCenterServer) SendEvent(context.Context, *SendEventRequest) (*Result, error) {
+func (UnimplementedCenterServer) SendEvent(context.Context, *SendEventRequest) (*ClientEvent, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SendEvent not implemented")
 }
 func (UnimplementedCenterServer) RemoveStream(context.Context, *RemoveStreamRequest) (*Result, error) {

@@ -21,6 +21,7 @@ import (
 	"github.com/holdno/gopherCron/protocol"
 	"github.com/holdno/gopherCron/utils"
 	"github.com/mikespook/gorbac"
+	cmap "github.com/orcaman/concurrent-map/v2"
 	"github.com/ugurcsen/gods-generic/maps/hashmap"
 
 	"github.com/gin-gonic/gin"
@@ -136,7 +137,7 @@ type App interface {
 	StreamManagerV2() *streamManager[*cronpb.ServiceEvent]
 	DispatchAgentJob(projectID int64) error
 	RemoveClientRegister(client string) error
-	HandleCenterEvent(event *cronpb.Event) error
+	HandleCenterEvent(event *cronpb.ServiceEvent) error
 
 	// proxy
 	GetGrpcDirector() func(ctx context.Context, fullMethodName string) (context.Context, *grpc.ClientConn, error)
@@ -269,8 +270,12 @@ func NewApp(configPath string) App {
 			hostIndex: make(map[string]streamHostIndex),
 		}
 		app.streamManagerV2 = &streamManager[*cronpb.ServiceEvent]{
+			isV2:      true,
 			aliveSrv:  make(map[string]map[string]*Stream[*cronpb.ServiceEvent]),
 			hostIndex: make(map[string]streamHostIndex),
+			responseMap: &responseMap{
+				m: cmap.New[*streamResponse](),
+			},
 		}
 	}
 
@@ -347,12 +352,12 @@ func (a *app) Metrics() *metrics.Metrics {
 	return a.metrics
 }
 
-func (a *app) HandleCenterEvent(event *cronpb.Event) error {
+func (a *app) HandleCenterEvent(event *cronpb.ServiceEvent) error {
 	if event == nil {
 		return nil
 	}
 	switch event.Type {
-	case common.CENTER_EVENT_WORKFLOW_REFRESH:
+	case cronpb.EventType_EVENT_WORKFLOW_REFRESH:
 		if err := a.workflowRunner.RefreshPlan(); err != nil {
 			return err
 		}

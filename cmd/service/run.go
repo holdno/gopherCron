@@ -95,6 +95,7 @@ func apiServer(srv app.App, conf *config.ServiceConfig) {
 	// agent 鉴权
 	agentApi.Use(jwt.CenterAuthMiddleware([]byte(srv.GetConfig().JWT.PublicKey)))
 	agentApi.Handler(cronpb.CenterServer.RegisterAgent,
+		cronpb.CenterServer.RegisterAgentV2,
 		cronpb.CenterServer.StatusReporter,
 		cronpb.CenterServer.TryLock)
 

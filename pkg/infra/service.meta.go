@@ -36,6 +36,7 @@ type NodeMeta struct {
 	RegisterTime          int64             `json:"register_time"`
 	Tags                  map[string]string `json:"tags"`
 	CenterServiceEndpoint string            `json:"cse"`
+	CenterServiceRegion   string            `json:"csr"`
 	register.NodeMeta
 }
 

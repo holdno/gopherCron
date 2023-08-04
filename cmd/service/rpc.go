@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/holdno/gopherCron/app"
@@ -20,6 +21,7 @@ import (
 	"github.com/holdno/gopherCron/utils"
 
 	"github.com/spacegrower/watermelon/infra/register"
+	wutils "github.com/spacegrower/watermelon/infra/utils"
 	"github.com/spacegrower/watermelon/infra/wlog"
 	"github.com/spacegrower/watermelon/pkg/safe"
 	"go.uber.org/zap"
@@ -68,6 +70,12 @@ func (s *cronRpc) RemoveStream(ctx context.Context, req *cronpb.RemoveStreamRequ
 	if stream != nil {
 		currentRegistry = true
 		stream.Cancel()
+	} else {
+		streamV2 := s.app.StreamManagerV2().GetStreamsByHost(req.Client)
+		if streamV2 != nil {
+			currentRegistry = true
+			streamV2.Cancel()
+		}
 	}
 	return &cronpb.Result{
 		Result:  currentRegistry,
@@ -194,23 +202,43 @@ func (s *cronRpc) StatusReporter(ctx context.Context, req *cronpb.ScheduleReply)
 	}, nil
 }
 
-func (s *cronRpc) SendEvent(ctx context.Context, req *cronpb.SendEventRequest) (*cronpb.Result, error) {
+func (s *cronRpc) SendEvent(ctx context.Context, req *cronpb.SendEventRequest) (*cronpb.ClientEvent, error) {
 	if req.ProjectId == 0 {
 		// got event for center
 		if err := s.app.HandleCenterEvent(req.Event); err != nil {
 			return nil, status.Error(codes.Internal, err.Error())
 		}
 	} else {
+		fmt.Println("send event got agent: ", req.Agent)
+		if req.Agent != "" {
+			stream := s.app.StreamManagerV2().GetStreamsByHost(req.Agent)
+			if stream == nil {
+				return nil, status.Error(codes.NotFound, fmt.Sprintf("stream not found, service ip: %s, agent: %s", s.app.GetIP(), req.Agent))
+			}
+			resp, err := s.app.StreamManagerV2().SendEventWaitResponse(ctx, stream, req.Event)
+			if err != nil {
+				stream.Cancel()
+				return nil, errors.NewError(http.StatusInternalServerError, fmt.Sprintf("stream 下发任务操作失败, 主动断开agent链接, %s:%d, %v", stream.Host, stream.Port, err))
+			}
+			return resp, nil
+		}
 		for _, v := range s.app.StreamManager().GetStreams(req.ProjectId, cronpb.Agent_ServiceDesc.ServiceName) {
-			if err := v.Send(req.Event); err != nil {
-				return nil, errors.NewError(http.StatusInternalServerError, "下发任务删除操作失败")
+			if err := v.Send(req.Event.GetRegisterReply()); err != nil {
+				v.Cancel()
+				return nil, errors.NewError(http.StatusInternalServerError, fmt.Sprintf("下发任务操作失败, 主动断开agent链接, %s:%d, %v", v.Host, v.Port, err))
 			}
 		}
-	}
+		for _, v := range s.app.StreamManagerV2().GetStreams(req.ProjectId, cronpb.Agent_ServiceDesc.ServiceName) {
+			_, err := s.app.StreamManagerV2().SendEventWaitResponse(ctx, v, req.Event)
+			if err != nil {
+				v.Cancel()
+				return nil, errors.NewError(http.StatusInternalServerError, fmt.Sprintf("stream 下发任务操作失败, 主动断开agent链接, %s:%d, %v", v.Host, v.Port, err))
+			}
+		}
 
-	return &cronpb.Result{
-		Result:  true,
-		Message: "ok",
+	}
+	return &cronpb.ClientEvent{
+		Id: req.Event.Id,
 	}, nil
 }
 
@@ -390,13 +418,19 @@ func (s *cronRpc) RegisterAgentV2(req cronpb.Center_RegisterAgentV2Server) error
 
 				if info.Type == cronpb.EventType_EVENT_REGISTER_REQUEST {
 					newRegisterInfo <- info.GetRegisterInfo()
+				} else {
+					s.app.StreamManagerV2().RecvStreamResponse(info)
 				}
 			}
 		}
 	})
 
 	agentIP, _ := middleware.GetAgentIP(req.Context())
-	currentServiceIP := s.getCurrentRegisterAddrs()[0]
+	mustGetHostIP := func() string {
+		ip, _ := wutils.GetHostIP()
+		return ip
+	}
+	currentServiceAddr := strings.ReplaceAll(s.getCurrentRegisterAddrs()[0].String(), "[::]", mustGetHostIP())
 
 	ctx, cancel := context.WithCancel(req.Context())
 	defer cancel()
@@ -406,7 +440,7 @@ func (s *cronRpc) RegisterAgentV2(req cronpb.Center_RegisterAgentV2Server) error
 		s.registerMetricsAdd(-1, agentIP)
 		r.DeRegister()
 		for _, meta := range registerStream {
-			s.app.StreamManager().RemoveStream(meta)
+			s.app.StreamManagerV2().RemoveStream(meta)
 		}
 	}()
 Here:
@@ -442,7 +476,8 @@ Here:
 							Runtime:     info.Runtime,
 							Version:     info.Version,
 						},
-						CenterServiceEndpoint: currentServiceIP.String(),
+						CenterServiceEndpoint: currentServiceAddr,
+						CenterServiceRegion:   s.app.GetConfig().Micro.Region,
 						OrgID:                 info.OrgID,
 						Region:                info.Region,
 						Weight:                info.Weight,
@@ -464,7 +499,7 @@ Here:
 			s.registerMetricsAdd(1, agentIP)
 
 			for _, meta := range registerStreamOnce {
-				s.app.StreamManager().SaveStream(meta, req, cancel)
+				s.app.StreamManagerV2().SaveStream(meta, req, cancel)
 			}
 
 			for _, info := range multiService.Agents {

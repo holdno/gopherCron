@@ -152,22 +152,27 @@ func (a *app) GetProjectTaskCount(projectID int64) (int64, error) {
 
 // KillTask 强行结束任务
 func (a *app) KillTask(projectID int64, taskID string) error {
-	taskKey := common.BuildKey(projectID, taskID)
-	ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
-	defer cancel()
-	resp, err := a.etcd.KV().Get(ctx, taskKey)
-	if err != nil {
-		return err
-	}
+	// taskKey := common.BuildKey(projectID, taskID)
+	// ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
+	// defer cancel()
+	// resp, err := a.etcd.KV().Get(ctx, taskKey)
+	// if err != nil {
+	// 	return err
+	// }
 
-	err = a.DispatchEvent(&cronpb.SendEventRequest{
+	err := a.DispatchEvent(&cronpb.SendEventRequest{
 		Region:    a.cfg.Micro.Region,
 		ProjectId: projectID,
-		Event: &cronpb.Event{
-			Type:      common.REMOTE_EVENT_TASK_STOP,
-			Version:   "v1",
-			Value:     resp.Kvs[0].Value,
+		Event: &cronpb.ServiceEvent{
+			Id:        utils.GetStrID(),
+			Type:      cronpb.EventType_EVENT_KILL_TASK_REQUEST,
 			EventTime: time.Now().Unix(),
+			Event: &cronpb.ServiceEvent_KillTaskRequest{
+				KillTaskRequest: &cronpb.KillTaskRequest{
+					TaskId:    taskID,
+					ProjectId: projectID,
+				},
+			},
 		},
 	})
 	if err != nil {
@@ -290,11 +295,16 @@ func (a *app) DeleteTask(projectID int64, taskID string) (*common.TaskInfo, erro
 	err = a.DispatchEvent(&cronpb.SendEventRequest{
 		Region:    a.cfg.Micro.Region,
 		ProjectId: projectID,
-		Event: &cronpb.Event{
-			Type:      common.REMOTE_EVENT_DELETE,
-			Version:   "v1",
-			Value:     resp.Kvs[0].Value,
+		Event: &cronpb.ServiceEvent{
+			Type:      cronpb.EventType_EVENT_REGISTER_REPLY,
 			EventTime: time.Now().Unix(),
+			Event: &cronpb.ServiceEvent_RegisterReply{
+				RegisterReply: &cronpb.Event{
+					Type:    common.REMOTE_EVENT_DELETE,
+					Version: "v1",
+					Value:   resp.Kvs[0].Value,
+				},
+			},
 		},
 	})
 	if err != nil {
@@ -345,14 +355,21 @@ func (a *app) DeleteProjectAllTasks(projectID int64) error {
 	}
 
 	for _, kv := range resp.Kvs {
+
 		err = a.DispatchEvent(&cronpb.SendEventRequest{
 			Region:    a.cfg.Micro.Region,
 			ProjectId: projectID,
-			Event: &cronpb.Event{
-				Type:      common.REMOTE_EVENT_DELETE,
-				Version:   "v1",
-				Value:     kv.Value,
+			Event: &cronpb.ServiceEvent{
+				Id:        utils.GetStrID(),
 				EventTime: time.Now().Unix(),
+				Event: &cronpb.ServiceEvent_RegisterReply{
+					RegisterReply: &cronpb.Event{
+						Type:      common.REMOTE_EVENT_DELETE,
+						Version:   "v1",
+						Value:     kv.Value,
+						EventTime: time.Now().Unix(),
+					},
+				},
 			},
 		})
 		if err != nil {
@@ -437,11 +454,18 @@ func (a *app) SaveTask(task *common.TaskInfo, opts ...clientv3.OpOption) (*commo
 	err = a.DispatchEvent(&cronpb.SendEventRequest{
 		Region:    a.cfg.Micro.Region,
 		ProjectId: task.ProjectID,
-		Event: &cronpb.Event{
-			Type:      common.REMOTE_EVENT_PUT,
-			Version:   "v1",
-			Value:     saveByte,
+		Event: &cronpb.ServiceEvent{
+			Id:        utils.GetStrID(),
 			EventTime: time.Now().Unix(),
+			Type:      cronpb.EventType_EVENT_REGISTER_REPLY,
+			Event: &cronpb.ServiceEvent_RegisterReply{
+				RegisterReply: &cronpb.Event{
+					Type:      common.REMOTE_EVENT_PUT,
+					Version:   "v1",
+					Value:     saveByte,
+					EventTime: time.Now().Unix(),
+				},
+			},
 		},
 	})
 	if err != nil {

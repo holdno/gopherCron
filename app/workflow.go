@@ -146,10 +146,8 @@ func (a *app) notifyCenterToRefreshWorkflowPlan() error {
 	err := a.DispatchEvent(&cronpb.SendEventRequest{
 		Region:    a.cfg.Micro.Region,
 		ProjectId: 0,
-		Event: &cronpb.Event{
-			Type:      common.CENTER_EVENT_WORKFLOW_REFRESH,
-			Version:   "v1",
-			Value:     []byte("refresh_now"),
+		Event: &cronpb.ServiceEvent{
+			Type:      cronpb.EventType_EVENT_WORKFLOW_REFRESH,
 			EventTime: time.Now().Unix(),
 		},
 	})
@@ -649,20 +647,61 @@ func (a *app) killWorkflowTasks(region string, killList []WorkflowTaskInfo) erro
 	ctx, _ := utils.GetContextWithTimeout()
 
 	for _, v := range killList {
-		agents, err := a.FindAgents(region, v.ProjectID)
+		err := func() error {
+			streams, err := a.FindAgentsV2(region, v.ProjectID)
+			if err != nil {
+				return err
+			}
+			if len(streams) > 0 {
+				defer func() {
+					for _, stream := range streams {
+						stream.Close()
+					}
+				}()
+				for _, stream := range streams {
+					_, err := stream.SendEvent(ctx, &cronpb.SendEventRequest{
+						Region:    region,
+						ProjectId: v.ProjectID,
+						Agent:     stream.addr,
+						Event: &cronpb.ServiceEvent{
+							Id:        utils.GetStrID(),
+							EventTime: time.Now().Unix(),
+							Type:      cronpb.EventType_EVENT_KILL_TASK_REQUEST,
+							Event: &cronpb.ServiceEvent_KillTaskRequest{
+								KillTaskRequest: &cronpb.KillTaskRequest{
+									ProjectId: v.ProjectID,
+									TaskId:    v.TaskID,
+								},
+							},
+						},
+					})
+					if err != nil {
+						return err
+					}
+				}
+			} else {
+				agents, err := a.FindAgents(region, v.ProjectID)
+				if err != nil {
+					return err
+				}
+				for _, a := range agents {
+					if _, err = a.KillTask(ctx, &cronpb.KillTaskRequest{
+						ProjectId: v.ProjectID,
+						TaskId:    v.TaskID,
+					}); err != nil {
+						a.Close()
+						return errors.NewError(http.StatusInternalServerError, "停止任务请求失败, agent: "+a.addr).WithLog(err.Error())
+					}
+					a.Close()
+				}
+			}
+
+			return nil
+		}()
 		if err != nil {
 			return err
 		}
-		for _, a := range agents {
-			if _, err = a.KillTask(ctx, &cronpb.KillTaskRequest{
-				ProjectId: v.ProjectID,
-				TaskId:    v.TaskID,
-			}); err != nil {
-				a.Close()
-				return errors.NewError(http.StatusInternalServerError, "停止任务请求失败, agent: "+a.addr).WithLog(err.Error())
-			}
-			a.Close()
-		}
+
 	}
 	return nil
 }
@@ -813,6 +852,7 @@ func (p *WorkflowPlan) Finished(withError error) error {
 	finalState.Reason = failedReason.String()
 	finalState.Records = states
 	finalState.EndTime = time.Now().Unix()
+	finalState.Status = common.TASK_STATUS_FINISHED_V2
 
 	p.runner.app.PublishMessage(messageWorkflowStatusChanged(p.Workflow.ID, finalState.Status))
 
