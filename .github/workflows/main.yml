@@ -11,7 +11,7 @@ jobs:
     steps:
       - name: Get version
         id: get_version
-        run: echo ::set-output name=VERSION::${GITHUB_REF/refs\/tags\//}
+        run: echo "{VERSION}={${GITHUB_REF/refs\/tags\//}}" >> $GITHUB_OUTPUT
       - name: Checkout
         uses: actions/checkout@v3
       - name: Build
