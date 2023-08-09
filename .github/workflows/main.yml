@@ -9,6 +9,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      - name: Get version
+        id: get_version
+        run: echo ::set-output name=VERSION::${GITHUB_REF/refs\/tags\//}
       - name: Checkout
         uses: actions/checkout@v3
       - name: Build
@@ -18,7 +21,7 @@ jobs:
         run: ./script/makerelease.sh
       - name: LoadReleaseNote
         if: startsWith(github.ref, 'refs/tags/')
-        run: cat ./release-note/${{ github.ref }}.md > Release.txt
+        run: cat ./release-note/${{ steps.get_version.outputs.VERSION }}.md > Release.txt
       - name: Test
         if: startsWith(github.ref, 'refs/tags/')
         run: cat Release.txt
