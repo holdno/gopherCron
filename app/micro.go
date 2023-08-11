@@ -21,6 +21,7 @@ import (
 	"github.com/spacegrower/watermelon/infra/resolver/etcd"
 	"github.com/spacegrower/watermelon/infra/wlog"
 	"github.com/spacegrower/watermelon/pkg/safe"
+	"github.com/ugurcsen/gods-generic/maps/hashmap"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -36,11 +37,11 @@ func (a *app) RemoveClientRegister(client string) error {
 		return err
 	}
 
-	defer func() {
-		for _, v := range list {
-			v.Close()
-		}
-	}()
+	// defer func() {
+	// 	for _, v := range list {
+	// 		v.Close()
+	// 	}
+	// }()
 
 	removed := false
 
@@ -364,7 +365,49 @@ func (c *CenterClient) Close() {
 	}
 }
 
+func resolveCenterService(a *app) {
+	findKey := filepath.ToSlash(filepath.Join(etcdregister.GetETCDPrefixKey(), "gophercron", "0", cronpb.Center_ServiceDesc.ServiceName)) + "/"
+	var opts []clientv3.OpOption
+	opts = append(opts, clientv3.WithPrefix())
+	if err := a.refreshCenterSrvList(); err != nil {
+		panic(err)
+	}
+	for {
+		wlog.Debug("start resolving others center service", zap.String("key", findKey))
+		updates := a.etcd.Client().Watch(a.ctx, findKey, opts...)
+		for {
+			select {
+			case <-a.ctx.Done():
+			case ev, ok := <-updates:
+				if !ok {
+					// watcher closed
+					wlog.Info("watch chan closed", zap.String("key", findKey))
+					return
+				}
+
+				// some error occurred, re watch
+				if ev.Err() != nil {
+					wlog.Error("resolving center service with error",
+						zap.Error(ev.Err()),
+						zap.Bool("canceled", ev.Canceled))
+
+					return
+				}
+
+				a.refreshCenterSrvList()
+			}
+		}
+	}
+}
+
 func (a *app) GetCenterSrvList() ([]*CenterClient, error) {
+	return a.__centerConncets.Values(), nil
+}
+
+func (a *app) refreshCenterSrvList() error {
+	if a.__centerConncets == nil {
+		a.__centerConncets = hashmap.New[string, *CenterClient]()
+	}
 	mtimer := a.metrics.CustomHistogramSet("get_center_srv_list")
 	defer mtimer.ObserveDuration()
 	finder := etcd.NewFinder[infra.NodeMeta](infra.ResolveEtcdClient())
@@ -374,16 +417,16 @@ func (a *app) GetCenterSrvList() ([]*CenterClient, error) {
 	addrs, _, err := finder.FindAll(ctx, findKey)
 	if err != nil {
 		a.metrics.CustomInc("find_centers_error", findKey, err.Error())
-		return nil, err
+		return err
 	}
 
-	var centers []*CenterClient
-
+	centerMap := hashmap.New[string, *CenterClient]()
 	for _, addr := range addrs {
 		var (
 			cc        *grpc.ClientConn
 			centerSrv *CenterClient
 		)
+
 		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
 		defer cancel()
 		gopts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithPerRPCCredentials(a.author)}
@@ -391,9 +434,14 @@ func (a *app) GetCenterSrvList() ([]*CenterClient, error) {
 		if addr.Attr().Region != a.cfg.Micro.Region {
 			dialAddress, gopts = BuildProxyDialerInfo(ctx, addr.Attr().Region, addr.Address(), gopts)
 		}
+		cacheKey := fmt.Sprintf("%s_%s", dialAddress, addr.Address())
+		if srv, exist := a.__centerConncets.Get(cacheKey); exist {
+			centerMap.Put(cacheKey, srv)
+			continue
+		}
 		cc, err = grpc.DialContext(ctx, dialAddress, gopts...)
 		if err != nil {
-			return nil, fmt.Errorf("failed to connect center %s, error: %s", addr.Address(), err.Error())
+			return fmt.Errorf("failed to connect center %s, error: %s", addr.Address(), err.Error())
 		}
 		centerSrv = &CenterClient{
 			CenterClient: cronpb.NewCenterClient(cc),
@@ -402,9 +450,18 @@ func (a *app) GetCenterSrvList() ([]*CenterClient, error) {
 				cc.Close()
 			},
 		}
-		centers = append(centers, centerSrv)
+		centerMap.Put(cacheKey, centerSrv)
 	}
-	return centers, nil
+
+	old := a.__centerConncets
+	a.__centerConncets = centerMap
+	for _, key := range old.Keys() {
+		if srv, exist := centerMap.Get(key); !exist {
+			srv.Close()
+		}
+	}
+	old.Clear()
+	return err
 }
 
 func (a *app) DispatchEvent(event *cronpb.SendEventRequest) error {
@@ -418,11 +475,11 @@ func (a *app) DispatchEvent(event *cronpb.SendEventRequest) error {
 		return err
 	}
 
-	defer func() {
-		for _, v := range centers {
-			v.Close()
-		}
-	}()
+	// defer func() {
+	// 	for _, v := range centers {
+	// 		v.Close()
+	// 	}
+	// }()
 
 	dispatchOne := func(v *CenterClient) error {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)

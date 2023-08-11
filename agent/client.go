@@ -90,8 +90,8 @@ func (agent *client) loadConfigAndSetupAgentFunc() func() error {
 			agent.scheduler = initScheduler()
 			agent.daemon = daemon.NewProjectDaemon(nil, agent.logger)
 
-			if cfg.Address != "" {
-				agent.localip = strings.Split(cfg.Address, ":")[0]
+			if cfg.RegisterAddress != "" {
+				agent.localip = strings.Split(cfg.RegisterAddress, ":")[0]
 			}
 			if agent.localip == "" {
 				var err error

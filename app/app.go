@@ -184,6 +184,8 @@ type app struct {
 	oidcSrv *OIDCService
 	author  *Author
 	rbacSrv RBACImpl
+
+	__centerConncets *hashmap.Map[string, *CenterClient]
 }
 
 type WebClientPusher interface {
@@ -337,6 +339,7 @@ func NewApp(configPath string) App {
 }
 
 func (a *app) Run() {
+	go resolveCenterService(a)
 	startCleanupTask(a)
 	startWebhook(a)
 	startWorkflow(a)

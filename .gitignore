@@ -9,3 +9,4 @@ gopherCronClient
 _build
 .DS_Store
 /script/image.sh
+debug

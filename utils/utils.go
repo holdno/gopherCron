@@ -286,6 +286,9 @@ func NewReasonWriter() *reasonWriter {
 
 // CompareVersion 后者大于前者返回true
 func CompareVersion(o, n string) bool {
+	o = strings.Split(o, "-")[0]
+	n = strings.Split(n, "-")[0]
+
 	o = strings.TrimPrefix(o, "v")
 	n = strings.TrimPrefix(n, "v")
 

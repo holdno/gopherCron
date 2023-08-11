@@ -209,7 +209,6 @@ func (s *cronRpc) SendEvent(ctx context.Context, req *cronpb.SendEventRequest) (
 			return nil, status.Error(codes.Internal, err.Error())
 		}
 	} else {
-		fmt.Println("send event got agent: ", req.Agent)
 		if req.Agent != "" {
 			stream := s.app.StreamManagerV2().GetStreamsByHost(req.Agent)
 			if stream == nil {
