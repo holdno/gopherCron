@@ -57,7 +57,7 @@ type App interface {
 	GetProjectTaskCount(projectID int64) (int64, error)
 	GetTaskList(projectID int64) ([]*common.TaskListItemWithWorkflows, error)
 	GetTask(projectID int64, taskID string) (*common.TaskInfo, error)
-	TemporarySchedulerTask(task *common.TaskInfo) error
+	TemporarySchedulerTask(user *common.User, task *common.TaskInfo) error
 	GetTaskLogList(pid int64, tid string, page, pagesize int) ([]*common.TaskLog, error)
 	GetTaskLogDetail(pid int64, tid, tmpID string) (*common.TaskLog, error)
 	GetLogTotalByDate(projects []int64, timestamp int64, errType int) (int, error)
@@ -1026,6 +1026,7 @@ func (a *app) parseUserSearchArgs(args GetUserListArgs) (selection.Selector, err
 
 	opts.Page = args.Page
 	opts.Pagesize = args.Pagesize
+	opts.OrderBy = "id DESC"
 	return opts, nil
 }
 

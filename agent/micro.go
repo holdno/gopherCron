@@ -193,8 +193,8 @@ func (a *client) CheckRunning(ctx context.Context, req *cronpb.CheckRunningReque
 }
 
 func (a *client) Schedule(ctx context.Context, req *cronpb.ScheduleRequest) (*cronpb.Result, error) {
-	unmarshalTask := func(value []byte) (*common.TaskInfo, error) {
-		var task common.TaskInfo
+	unmarshalTask := func(value []byte) (*common.TaskWithExecuter, error) {
+		var task common.TaskWithExecuter
 		if err := json.Unmarshal(value, &task); err != nil {
 			return nil, status.Error(codes.InvalidArgument, "failed to unmarshal task")
 		}
@@ -233,7 +233,7 @@ func (a *client) Schedule(ctx context.Context, req *cronpb.ScheduleRequest) (*cr
 		if _, taskExecuting := a.scheduler.CheckTaskExecuting(task.SchedulerKey()); taskExecuting {
 			return nil, status.Error(codes.AlreadyExists, "the task already executing, try again later")
 		}
-		plan, err := common.BuildWorkflowTaskSchedulerPlan(task)
+		plan, err := common.BuildWorkflowTaskSchedulerPlan(task.TaskInfo)
 		if err != nil {
 			return nil, status.Error(codes.Internal, "failed to build workflow task schedule plan")
 		}

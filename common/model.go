@@ -66,15 +66,17 @@ type WebHook struct {
 }
 
 type WebHookBody struct {
-	TaskID    string `json:"task_id" form:"task_id"`
-	ProjectID int64  `json:"project_id" form:"project_id"`
-	Command   string `json:"command" form:"command"`
-	StartTime int64  `json:"start_time" form:"start_time"`
-	EndTime   int64  `json:"end_time" form:"end_time"`
-	Result    string `json:"result" form:"result"`
-	Error     string `json:"error" form:"error"`
-	ClientIP  string `json:"client_ip" form:"client_ip"`
-	TmpID     string `json:"tmp_id" form:"tmp_id"`
+	TaskID      string `json:"task_id" form:"task_id"`
+	TaskName    string `json:"task_name" form:"task_name"`
+	ProjectID   int64  `json:"project_id" form:"project_id"`
+	ProjectName string `json:"project_name" form:"project_name"`
+	Command     string `json:"command" form:"command"`
+	StartTime   int64  `json:"start_time" form:"start_time"`
+	EndTime     int64  `json:"end_time" form:"end_time"`
+	Result      string `json:"result" form:"result"`
+	Error       string `json:"error" form:"error"`
+	ClientIP    string `json:"client_ip" form:"client_ip"`
+	TmpID       string `json:"tmp_id" form:"tmp_id"`
 }
 
 type Workflow struct {

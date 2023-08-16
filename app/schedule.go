@@ -629,7 +629,7 @@ func clearWorkflowKeys(kv clientv3.KV, workflowID int64) error {
 }
 
 // TemporarySchedulerTask 临时调度任务
-func (a *app) TemporarySchedulerTask(task *common.TaskInfo) error {
+func (a *app) TemporarySchedulerTask(user *common.User, task *common.TaskInfo) error {
 	var (
 		err error
 	)
@@ -646,7 +646,14 @@ func (a *app) TemporarySchedulerTask(task *common.TaskInfo) error {
 	ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
 	defer cancel()
 
-	value, _ := json.Marshal(task)
+	if user == nil {
+		user = &common.User{}
+	}
+	value, _ := json.Marshal(common.TaskWithExecuter{
+		TaskInfo: task,
+		UserID:   user.ID,
+		UserName: user.Name,
+	})
 
 	stream, err := a.GetAgentStream(a.GetConfig().Micro.Region, task.ProjectID)
 	if err != nil {

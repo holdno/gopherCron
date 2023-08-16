@@ -939,16 +939,18 @@ func (a *workflowRunner) scheduleWorkflowPlan(plan *WorkflowPlan) error {
 
 	for _, v := range needToScheduleTasks {
 		task := plan.Tasks[v]
-		a.scheduleEventChan <- common.BuildTaskEvent(common.TASK_EVENT_WORKFLOW_SCHEDULE, &common.TaskInfo{
-			TaskID:    task.TaskID,
-			Name:      task.TaskName,
-			ProjectID: task.ProjectID,
-			Command:   task.Command,
-			Remark:    task.Remark,
-			Timeout:   task.Timeout,
-			Noseize:   task.Noseize,
-			FlowInfo: &common.WorkflowInfo{
-				WorkflowID: plan.Workflow.ID,
+		a.scheduleEventChan <- common.BuildTaskEvent(common.TASK_EVENT_WORKFLOW_SCHEDULE, &common.TaskWithExecuter{
+			TaskInfo: &common.TaskInfo{
+				TaskID:    task.TaskID,
+				Name:      task.TaskName,
+				ProjectID: task.ProjectID,
+				Command:   task.Command,
+				Remark:    task.Remark,
+				Timeout:   task.Timeout,
+				Noseize:   task.Noseize,
+				FlowInfo: &common.WorkflowInfo{
+					WorkflowID: plan.Workflow.ID,
+				},
 			},
 		})
 	}
@@ -1448,7 +1450,7 @@ func (a *workflowRunner) handleTaskEvent(event *common.TaskEvent) {
 			return
 		}
 
-		err := a.scheduleTask(event.Task)
+		err := a.scheduleTask(event.Task.TaskInfo)
 		if err != nil {
 			wlog.Error("failed to schedule workflow task", zap.Error(err))
 			a.app.Warning(warning.NewWorkflowWarningData(warning.WorkflowWarning{

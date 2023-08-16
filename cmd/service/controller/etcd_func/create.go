@@ -44,8 +44,15 @@ func SaveTask(c *gin.Context) {
 	}
 
 	// 验证 cron表达式
-	if _, err = cronexpr.Parse(req.Cron); err != nil {
+	exp, err := cronexpr.Parse(req.Cron)
+	if err != nil {
 		response.APIError(c, errors.ErrCron)
+		return
+	}
+
+	scheduleInterval := exp.NextN(time.Now(), 2)
+	if scheduleInterval[1].Sub(scheduleInterval[0]) < time.Second*5-time.Nanosecond {
+		response.APIError(c, errors.ErrCronInterval)
 		return
 	}
 

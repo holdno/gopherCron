@@ -234,7 +234,6 @@ func (s *cronRpc) SendEvent(ctx context.Context, req *cronpb.SendEventRequest) (
 				return nil, errors.NewError(http.StatusInternalServerError, fmt.Sprintf("stream 下发任务操作失败, 主动断开agent链接, %s:%d, %v", v.Host, v.Port, err))
 			}
 		}
-
 	}
 	return &cronpb.ClientEvent{
 		Id: req.Event.Id,

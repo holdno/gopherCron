@@ -27,6 +27,12 @@ const (
 	GOPHERCRON_CENTER_AUTH_KEY      = "gophercron-center-auth"
 )
 
+type TaskWithExecuter struct {
+	*TaskInfo
+	UserID   int64  `json:"user_id"`
+	UserName string `json:"user_name"`
+}
+
 // TaskInfo 任务详情
 type TaskInfo struct {
 	TaskID    string `json:"task_id"`
@@ -83,6 +89,8 @@ type TaskSchedulePlan struct {
 	TmpID    string
 	NextTime time.Time
 	Type     PlanType
+	UserId   int64
+	UserName string
 }
 
 type PlanType string
@@ -298,8 +306,8 @@ func GenTaskSchedulerKey(projectID int64, taskID string) string {
 	return fmt.Sprintf("%d_%s", projectID, taskID)
 }
 
-func Unmarshal(value []byte) (*TaskInfo, error) {
-	task := new(TaskInfo)
+func Unmarshal(value []byte) (*TaskWithExecuter, error) {
+	task := new(TaskWithExecuter)
 	err := json.Unmarshal(value, task)
 	if err != nil {
 		return nil, err
@@ -330,10 +338,10 @@ func ExtractAgentCommand(key string) string {
 
 type TaskEvent struct {
 	EventType int // save delete
-	Task      *TaskInfo
+	Task      *TaskWithExecuter
 }
 
-func BuildTaskEvent(eventType int, task *TaskInfo) *TaskEvent {
+func BuildTaskEvent(eventType int, task *TaskWithExecuter) *TaskEvent {
 	return &TaskEvent{
 		EventType: eventType,
 		Task:      task,
@@ -341,7 +349,7 @@ func BuildTaskEvent(eventType int, task *TaskInfo) *TaskEvent {
 }
 
 // 构造执行计划
-func BuildTaskSchedulerPlan(task *TaskInfo, planType PlanType) (*TaskSchedulePlan, error) {
+func BuildTaskSchedulerPlan(task *TaskWithExecuter, planType PlanType) (*TaskSchedulePlan, error) {
 	var (
 		expr *cronexpr.Expression
 		err  error
@@ -352,7 +360,9 @@ func BuildTaskSchedulerPlan(task *TaskInfo, planType PlanType) (*TaskSchedulePla
 	}
 
 	return &TaskSchedulePlan{
-		Task:     task,
+		Task:     task.TaskInfo,
+		UserId:   task.UserID,
+		UserName: task.UserName,
 		Expr:     expr,
 		NextTime: expr.Next(time.Now()),
 		Type:     planType,

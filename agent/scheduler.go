@@ -18,13 +18,13 @@ import (
 	"github.com/holdno/gopherCron/pkg/warning"
 	"github.com/holdno/gopherCron/protocol"
 	"github.com/holdno/gopherCron/utils"
+
+	"github.com/avast/retry-go/v4"
+	"github.com/sirupsen/logrus"
 	"github.com/spacegrower/watermelon/infra/wlog"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-
-	"github.com/holdno/rego"
-	"github.com/sirupsen/logrus"
 )
 
 // Scheduler 任务调度
@@ -252,7 +252,7 @@ func (a *client) handleTaskEvent(event *common.TaskEvent) {
 		a.TryStartTask(taskSchedulePlan)
 	case common.TASK_EVENT_WORKFLOW_SCHEDULE:
 		// 构建执行计划
-		if taskSchedulePlan, err = common.BuildWorkflowTaskSchedulerPlan(event.Task); err != nil {
+		if taskSchedulePlan, err = common.BuildWorkflowTaskSchedulerPlan(event.Task.TaskInfo); err != nil {
 			logrus.WithField("Error", err.Error()).Error("build task schedule plan error")
 			return
 		}
@@ -490,7 +490,7 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 				}
 			}
 			value, _ := json.Marshal(f)
-			if err := rego.Retry(func() error {
+			if err := retry.Do(func() error {
 				ctx, cancel := context.WithTimeout(context.Background(), time.Duration(a.cfg.Timeout)*time.Second)
 				defer cancel()
 				_, err := a.GetStatusReporter()(ctx, &cronpb.ScheduleReply{
@@ -503,7 +503,8 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 					},
 				})
 				return err
-			}, rego.WithTimes(3), rego.WithLatestError()); err != nil {
+			}, retry.Attempts(3), retry.DelayType(retry.BackOffDelay),
+				retry.MaxJitter(time.Minute), retry.LastErrorOnly(true)); err != nil {
 				a.Warning(warning.NewTaskWarningData(warning.TaskWarning{
 					AgentIP:   a.localip,
 					TaskName:  plan.Task.Name,
@@ -516,7 +517,7 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 			}
 		}()
 
-		if err := rego.Retry(func() error {
+		if err := retry.Do(func() error {
 			value, _ := json.Marshal(taskExecuteInfo)
 			ctx, cancel := context.WithTimeout(context.Background(), time.Duration(a.cfg.Timeout)*time.Second)
 			defer cancel()
@@ -530,7 +531,9 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 				},
 			})
 			return err
-		}, rego.WithTimes(3), rego.WithLatestError()); err != nil {
+		}, retry.Attempts(3), retry.DelayType(retry.BackOffDelay),
+			retry.MaxJitter(time.Minute), retry.LastErrorOnly(true)); err != nil {
+
 			a.logger.Error(fmt.Sprintf("task: %s, id: %s, tmp_id: %s, change running status error, %v", plan.Task.Name,
 				plan.Task.TaskID, plan.Task.TmpID, err))
 			errDetail := fmt.Errorf("agent上报任务开始运行状态失败: %s", err.Error())

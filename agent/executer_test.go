@@ -3,6 +3,7 @@ package agent
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,7 +11,21 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/holdno/gopherCron/common"
 )
+
+func TestTaskUnmarshal(t *testing.T) {
+	raw := `{"task_id": "12313123"}`
+
+	var data common.TaskWithExecuter
+
+	if err := json.Unmarshal([]byte(raw), &data); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Log(data.TaskInfo)
+}
 
 func fatal(format string, args ...interface{}) {
 	fmt.Println(fmt.Sprintf(format, args...))
