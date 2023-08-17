@@ -910,7 +910,8 @@ func (a *app) SaveTaskLog(agentIP string, result common.TaskFinishedV2) {
 	}
 
 	taskResult := &common.TaskResultLog{
-		Result: result.Result,
+		Result:   result.Result,
+		Operator: result.Operator,
 	}
 	if result.Error != "" {
 		logInfo.WithError = 1

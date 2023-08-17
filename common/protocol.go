@@ -124,9 +124,9 @@ type TaskExecuteResult struct {
 
 // TaskResultLog 任务执行结果日志
 type TaskResultLog struct {
-	Result      string `json:"result"`
-	SystemError string `json:"system_error"`
-	Error       string `json:"error"`
+	Result   string `json:"result"`
+	Error    string `json:"error"`
+	Operator string `json:"operator,omitempty"`
 }
 
 // ETCD_PREFIX topic prefix  default: /cron
