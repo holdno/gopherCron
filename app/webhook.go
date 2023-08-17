@@ -139,7 +139,7 @@ func (a *app) HandleWebHook(agentIP string, res *common.TaskFinishedV2) error {
 		req.Header.Add("Authorization", p.Token)
 		resp, err := a.httpClient.Do(req)
 		if err != nil {
-			return errors.NewError(resp.StatusCode, err.Error())
+			return errors.NewError(http.StatusInternalServerError, err.Error())
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
