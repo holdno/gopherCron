@@ -193,8 +193,8 @@ func (a *client) CheckRunning(ctx context.Context, req *cronpb.CheckRunningReque
 }
 
 func (a *client) Schedule(ctx context.Context, req *cronpb.ScheduleRequest) (*cronpb.Result, error) {
-	unmarshalTask := func(value []byte) (*common.TaskWithExecuter, error) {
-		var task common.TaskWithExecuter
+	unmarshalTask := func(value []byte) (*common.TaskWithOperator, error) {
+		var task common.TaskWithOperator
 		if err := json.Unmarshal(value, &task); err != nil {
 			return nil, status.Error(codes.InvalidArgument, "failed to unmarshal task")
 		}

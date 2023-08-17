@@ -77,6 +77,7 @@ type WebHookBody struct {
 	Error       string `json:"error" form:"error"`
 	ClientIP    string `json:"client_ip" form:"client_ip"`
 	TmpID       string `json:"tmp_id" form:"tmp_id"`
+	Operator    string `json:"operator" form:"operator"`
 }
 
 type Workflow struct {

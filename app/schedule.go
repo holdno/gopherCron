@@ -11,7 +11,6 @@ import (
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/errors"
 	"github.com/holdno/gopherCron/pkg/cronpb"
-	"github.com/holdno/gopherCron/protocol"
 	"github.com/holdno/gopherCron/utils"
 	"github.com/spacegrower/watermelon/infra/wlog"
 	"github.com/spacegrower/watermelon/pkg/safe"
@@ -306,7 +305,7 @@ func (s *WorkflowTaskStates) GetLatestScheduleRecord() *WorkflowTaskScheduleReco
 }
 
 // finished 不一定是成功
-func setWorkFlowTaskFinished(kv concurrency.STM, agentIP string, result *protocol.TaskFinishedV1) (bool, error) {
+func setWorkFlowTaskFinished(kv concurrency.STM, agentIP string, result *common.TaskFinishedV2) (bool, error) {
 	key := common.BuildWorkflowTaskStatusKey(result.WorkflowID, result.ProjectID, result.TaskID)
 	states := kv.Get(key)
 	planFinished := false
@@ -649,7 +648,7 @@ func (a *app) TemporarySchedulerTask(user *common.User, task *common.TaskInfo) e
 	if user == nil {
 		user = &common.User{}
 	}
-	value, _ := json.Marshal(common.TaskWithExecuter{
+	value, _ := json.Marshal(common.TaskWithOperator{
 		TaskInfo: task,
 		UserID:   user.ID,
 		UserName: user.Name,
@@ -886,7 +885,7 @@ func (a *app) DelTaskRunningKey(agentIP string, projectID int64, taskID string) 
 	return nil
 }
 
-func (a *app) SaveTaskLog(agentIP string, result protocol.TaskFinishedV1) {
+func (a *app) SaveTaskLog(agentIP string, result common.TaskFinishedV2) {
 	// log receive
 	logInfo := common.TaskLog{
 		Name:      result.TaskName,
@@ -940,7 +939,7 @@ func (a *app) SaveTaskLog(agentIP string, result protocol.TaskFinishedV1) {
 	}
 }
 
-func (a *app) HandlerTaskFinished(agentIP string, result *protocol.TaskFinishedV1) error {
+func (a *app) HandlerTaskFinished(agentIP string, result *common.TaskFinishedV2) error {
 	err := a.DelTaskRunningKey(agentIP, result.ProjectID, result.TaskID)
 	if err != nil {
 		return errors.NewError(http.StatusInternalServerError, "设置任务运行状态失败").WithLog(err.Error())

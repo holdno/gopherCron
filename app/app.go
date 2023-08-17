@@ -145,8 +145,8 @@ type App interface {
 	// task status
 	SetTaskRunning(agentIP string, execInfo *common.TaskExecutingInfo) error
 	CheckTaskIsRunning(projectID int64, taskID string) ([]common.TaskRunningInfo, error)
-	HandlerTaskFinished(agentIP string, result *protocol.TaskFinishedV1) error
-	SaveTaskLog(agentIP string, result protocol.TaskFinishedV1)
+	HandlerTaskFinished(agentIP string, result *common.TaskFinishedV2) error
+	SaveTaskLog(agentIP string, result common.TaskFinishedV2)
 
 	GetOIDCService() *OIDCService
 }

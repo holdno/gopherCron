@@ -17,7 +17,6 @@ import (
 	"github.com/holdno/gopherCron/pkg/cronpb"
 	"github.com/holdno/gopherCron/pkg/etcd"
 	"github.com/holdno/gopherCron/pkg/infra"
-	"github.com/holdno/gopherCron/protocol"
 	"github.com/holdno/gopherCron/utils"
 
 	"github.com/spacegrower/watermelon/infra/register"
@@ -179,7 +178,7 @@ func (s *cronRpc) StatusReporter(ctx context.Context, req *cronpb.ScheduleReply)
 			return nil, err
 		}
 	case common.TASK_STATUS_FINISHED_V2:
-		var result protocol.TaskFinishedV1
+		var result common.TaskFinishedV2
 		if err := json.Unmarshal(req.Event.Value, &result); err != nil {
 			return nil, err
 		}

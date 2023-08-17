@@ -108,7 +108,7 @@ func (a *client) handlerEventFromCenterV2(ctx context.Context, event *cronpb.Ser
 
 func (a *client) handlerEventFromCenter(event *cronpb.Event) error {
 	var (
-		task      *common.TaskWithExecuter
+		task      *common.TaskWithOperator
 		taskEvent *common.TaskEvent
 		err       error
 	)

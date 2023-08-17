@@ -18,7 +18,7 @@ import (
 func TestTaskUnmarshal(t *testing.T) {
 	raw := `{"task_id": "12313123"}`
 
-	var data common.TaskWithExecuter
+	var data common.TaskWithOperator
 
 	if err := json.Unmarshal([]byte(raw), &data); err != nil {
 		t.Fatal(err)

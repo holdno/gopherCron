@@ -15,7 +15,6 @@ import (
 	"github.com/holdno/gopherCron/errors"
 	"github.com/holdno/gopherCron/pkg/cronpb"
 	"github.com/holdno/gopherCron/pkg/warning"
-	"github.com/holdno/gopherCron/protocol"
 	"github.com/holdno/gopherCron/utils"
 
 	"github.com/gorhill/cronexpr"
@@ -939,7 +938,7 @@ func (a *workflowRunner) scheduleWorkflowPlan(plan *WorkflowPlan) error {
 
 	for _, v := range needToScheduleTasks {
 		task := plan.Tasks[v]
-		a.scheduleEventChan <- common.BuildTaskEvent(common.TASK_EVENT_WORKFLOW_SCHEDULE, &common.TaskWithExecuter{
+		a.scheduleEventChan <- common.BuildTaskEvent(common.TASK_EVENT_WORKFLOW_SCHEDULE, &common.TaskWithOperator{
 			TaskInfo: &common.TaskInfo{
 				TaskID:    task.TaskID,
 				Name:      task.TaskName,
@@ -1384,7 +1383,7 @@ BreakHere:
 	}
 }
 
-func (a *workflowRunner) handleTaskResultV1(agentIP string, data *protocol.TaskFinishedV1) error {
+func (a *workflowRunner) handleTaskResultV1(agentIP string, data *common.TaskFinishedV2) error {
 	var (
 		next         = true
 		planFinished bool

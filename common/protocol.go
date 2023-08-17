@@ -27,7 +27,7 @@ const (
 	GOPHERCRON_CENTER_AUTH_KEY      = "gophercron-center-auth"
 )
 
-type TaskWithExecuter struct {
+type TaskWithOperator struct {
 	*TaskInfo
 	UserID   int64  `json:"user_id"`
 	UserName string `json:"user_name"`
@@ -306,8 +306,8 @@ func GenTaskSchedulerKey(projectID int64, taskID string) string {
 	return fmt.Sprintf("%d_%s", projectID, taskID)
 }
 
-func Unmarshal(value []byte) (*TaskWithExecuter, error) {
-	task := new(TaskWithExecuter)
+func Unmarshal(value []byte) (*TaskWithOperator, error) {
+	task := new(TaskWithOperator)
 	err := json.Unmarshal(value, task)
 	if err != nil {
 		return nil, err
@@ -338,10 +338,10 @@ func ExtractAgentCommand(key string) string {
 
 type TaskEvent struct {
 	EventType int // save delete
-	Task      *TaskWithExecuter
+	Task      *TaskWithOperator
 }
 
-func BuildTaskEvent(eventType int, task *TaskWithExecuter) *TaskEvent {
+func BuildTaskEvent(eventType int, task *TaskWithOperator) *TaskEvent {
 	return &TaskEvent{
 		EventType: eventType,
 		Task:      task,
@@ -349,7 +349,7 @@ func BuildTaskEvent(eventType int, task *TaskWithExecuter) *TaskEvent {
 }
 
 // 构造执行计划
-func BuildTaskSchedulerPlan(task *TaskWithExecuter, planType PlanType) (*TaskSchedulePlan, error) {
+func BuildTaskSchedulerPlan(task *TaskWithOperator, planType PlanType) (*TaskSchedulePlan, error) {
 	var (
 		expr *cronexpr.Expression
 		err  error
@@ -410,4 +410,19 @@ type AckResponseV1 struct {
 	Type     string `json:"ack"`
 	ClientIP string `json:"client_ip"`
 	TmpID    string `json:"tmp_id"`
+}
+
+type TaskFinishedV2 struct {
+	TaskID     string `json:"task_id"`
+	TaskName   string `json:"task_name"`
+	Command    string `json:"command"`
+	ProjectID  int64  `json:"project_id"`
+	Status     string `json:"status"`
+	WorkflowID int64  `json:"workflow_id"`
+	StartTime  int64  `json:"start_time"`
+	EndTime    int64  `json:"end_time"`
+	TmpID      string `json:"tmp_id"`
+	Result     string `json:"result"`
+	Error      string `json:"error"`
+	Operator   string `json:"operator"`
 }

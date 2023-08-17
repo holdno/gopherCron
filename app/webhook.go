@@ -8,15 +8,14 @@ import (
 
 	"github.com/avast/retry-go/v4"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
-	"github.com/holdno/gopherCron/common"
-	"github.com/holdno/gopherCron/errors"
-	"github.com/holdno/gopherCron/pkg/warning"
-	"github.com/holdno/gopherCron/protocol"
-	"github.com/holdno/gopherCron/utils"
+	"github.com/jinzhu/gorm"
 	"github.com/spacegrower/watermelon/infra/wlog"
 	"go.uber.org/zap"
 
-	"github.com/jinzhu/gorm"
+	"github.com/holdno/gopherCron/common"
+	"github.com/holdno/gopherCron/errors"
+	"github.com/holdno/gopherCron/pkg/warning"
+	"github.com/holdno/gopherCron/utils"
 )
 
 func (a *app) CreateWebHook(projectID int64, types, callbackUrl string) error {
@@ -86,7 +85,7 @@ func (a *app) DeleteAllWebHook(tx *gorm.DB, projectID int64) error {
 	return nil
 }
 
-func (a *app) HandleWebHook(agentIP string, res *protocol.TaskFinishedV1) error {
+func (a *app) HandleWebHook(agentIP string, res *common.TaskFinishedV2) error {
 	wh, err := a.GetWebHook(res.ProjectID, "finished")
 	if err != nil {
 		return err
@@ -119,6 +118,7 @@ func (a *app) HandleWebHook(agentIP string, res *protocol.TaskFinishedV1) error 
 		Result:      res.Result,
 		Error:       res.Error,
 		TmpID:       res.TmpID,
+		Operator:    res.Operator,
 	}
 
 	var eventType = "succeeded"

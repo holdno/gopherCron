@@ -16,7 +16,6 @@ import (
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/pkg/cronpb"
 	"github.com/holdno/gopherCron/pkg/warning"
-	"github.com/holdno/gopherCron/protocol"
 	"github.com/holdno/gopherCron/utils"
 
 	"github.com/avast/retry-go/v4"
@@ -469,13 +468,14 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 		defer func() {
 			// 删除任务的正在执行状态
 			a.scheduler.DeleteExecutingTask(plan.Task.SchedulerKey())
-			f := protocol.TaskFinishedV1{
+			f := common.TaskFinishedV2{
 				TaskName:  taskExecuteInfo.Task.Name,
 				TaskID:    taskExecuteInfo.Task.TaskID,
 				Command:   taskExecuteInfo.Task.Command,
 				ProjectID: taskExecuteInfo.Task.ProjectID,
 				Status:    common.TASK_STATUS_DONE_V2,
 				TmpID:     taskExecuteInfo.Task.TmpID,
+				Operator:  fmt.Sprintf("%s(%d)", plan.UserName, plan.UserId),
 			}
 			if taskExecuteInfo.Task.FlowInfo != nil {
 				f.WorkflowID = taskExecuteInfo.Task.FlowInfo.WorkflowID
@@ -497,7 +497,7 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 					ProjectId: plan.Task.ProjectID,
 					Event: &cronpb.Event{
 						Type:      common.TASK_STATUS_FINISHED_V2,
-						Version:   "v1",
+						Version:   "v2",
 						Value:     value,
 						EventTime: time.Now().Unix(),
 					},

@@ -82,17 +82,3 @@ const (
 func GetVersion() string {
 	return version
 }
-
-type TaskFinishedV1 struct {
-	TaskID     string `json:"task_id"`
-	TaskName   string `json:"task_name"`
-	Command    string `json:"command"`
-	ProjectID  int64  `json:"project_id"`
-	Status     string `json:"status"`
-	WorkflowID int64  `json:"workflow_id"`
-	StartTime  int64  `json:"start_time"`
-	EndTime    int64  `json:"end_time"`
-	TmpID      string `json:"tmp_id"`
-	Result     string `json:"result"`
-	Error      string `json:"error"`
-}
