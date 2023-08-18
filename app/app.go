@@ -790,10 +790,7 @@ func (a *app) CheckProjectExistByName(title string) (*common.Project, error) {
 func (a *app) CreateProject(tx *gorm.DB, p common.Project) (int64, error) {
 	id, err := a.store.Project().CreateProject(tx, p)
 	if err != nil {
-		errObj := errors.ErrInternalError
-		errObj.Msg = "创建项目失败"
-		errObj.Log = err.Error()
-		return 0, errObj
+		return 0, errors.NewError(http.StatusInternalServerError, "创建项目失败").WithLog(err.Error())
 	}
 
 	return id, nil
@@ -805,10 +802,7 @@ func (a *app) DeleteProject(tx *gorm.DB, pid, uid int64) error {
 		opt.AddQuery(selection.NewRequirement("uid", selection.Equals, uid))
 	}
 	if err := a.store.Project().DeleteProject(tx, opt); err != nil {
-		errObj := errors.ErrInternalError
-		errObj.Msg = "删除项目失败"
-		errObj.Log = err.Error()
-		return errObj
+		return errors.NewError(http.StatusInternalServerError, "删除项目失败").WithLog(err.Error())
 	}
 
 	return nil
@@ -816,10 +810,7 @@ func (a *app) DeleteProject(tx *gorm.DB, pid, uid int64) error {
 
 func (a *app) UpdateProject(pid int64, title, remark string) error {
 	if err := a.store.Project().UpdateProject(pid, title, remark); err != nil {
-		errObj := errors.ErrInternalError
-		errObj.Msg = "更新项目失败"
-		errObj.Log = err.Error()
-		return errObj
+		return errors.NewError(http.StatusInternalServerError, "更新项目失败").WithLog(err.Error())
 	}
 	return nil
 }
@@ -836,10 +827,7 @@ func (a *app) CreateProjectRelevance(tx *gorm.DB, pid, uid int64, roleStr string
 		Role:       role.ID(),
 		CreateTime: time.Now().Unix(),
 	}); err != nil {
-		errObj := errors.ErrInternalError
-		errObj.Msg = "创建项目关联关系失败"
-		errObj.Log = err.Error()
-		return errObj
+		return errors.NewError(http.StatusInternalServerError, "创建项目关联关系失败").WithLog(err.Error())
 	}
 
 	return nil
@@ -847,10 +835,7 @@ func (a *app) CreateProjectRelevance(tx *gorm.DB, pid, uid int64, roleStr string
 
 func (a *app) DeleteProjectRelevance(tx *gorm.DB, pid, uid int64) error {
 	if err := a.store.ProjectRelevance().Delete(tx, pid, uid); err != nil {
-		errObj := errors.ErrInternalError
-		errObj.Msg = "删除项目关联关系失败"
-		errObj.Log = err.Error()
-		return errObj
+		return errors.NewError(http.StatusInternalServerError, "删除项目关联关系失败").WithLog(err.Error())
 	}
 	return nil
 }
@@ -861,10 +846,7 @@ func (a *app) GetUserByAccount(account string) (*common.User, error) {
 
 	res, err := a.store.User().GetUsers(opt)
 	if err != nil && err != gorm.ErrRecordNotFound {
-		errObj := errors.ErrInternalError
-		errObj.Msg = "获取用户信息失败"
-		errObj.Log = err.Error()
-		return nil, errObj
+		return nil, errors.NewError(http.StatusInternalServerError, "获取用户信息失败").WithLog(err.Error())
 	}
 
 	if len(res) == 0 {
