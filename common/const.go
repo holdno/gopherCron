@@ -1,5 +1,9 @@
 package common
 
+import (
+	"github.com/jinzhu/gorm"
+)
+
 const (
 	TASK_EVENT_SAVE              = 1
 	TASK_EVENT_DELETE            = 2
@@ -45,8 +49,8 @@ const (
 	PERMISSION_MANAGER = "manager"
 	PERMISSION_USER    = "user"
 
-	WEBHOOK_TYPE_TASK_START    = "task_start"
-	WEBHOOK_TYPE_TASK_FINISHED = "task_finished"
+	WEBHOOK_TYPE_TASK_RESULT  = "task-result"
+	WEBHOOK_TYPE_TASK_FAILURE = "task-failure"
 
 	ACK_RESPONSE_V1 = "v1"
 
@@ -62,3 +66,5 @@ var (
 	// common
 	LocalIP = ""
 )
+
+var ErrNoRows = gorm.ErrRecordNotFound

@@ -78,10 +78,11 @@ type App interface {
 	ChangePassword(uid int64, password, salt string) error
 	GetTaskLocker(task *common.TaskInfo) *etcd.Locker
 	GetIP() string
+	ClusterID() int64
 	GetConfig() *config.ServiceConfig
 	CreateWebHook(projectID int64, types, CallBackURL string) error
 	GetWebHook(projectID int64, types string) (*common.WebHook, error)
-	GetWebHookList(projectID int64) ([]common.WebHook, error)
+	GetWebHookList(projectID int64) ([]*common.WebHook, error)
 	DeleteWebHook(tx *gorm.DB, projectID int64, types string) error
 	DeleteAllWebHook(tx *gorm.DB, projectID int64) error
 	CheckPermissions(projectID, uid int64, permission gorbac.Permission) error
@@ -520,6 +521,10 @@ func startTemporaryTaskWorker(app *app) {
 	})
 }
 
+func (a *app) ClusterID() int64 {
+	return a.clusterID
+}
+
 func (a *app) Log() wlog.Logger {
 	return wlog.With()
 }
@@ -788,6 +793,15 @@ func (a *app) CheckProjectExistByName(title string) (*common.Project, error) {
 }
 
 func (a *app) CreateProject(tx *gorm.DB, p common.Project) (int64, error) {
+	exist, err := a.store.OrgRelevanceStore().GetUserOrg(p.OID, p.UID)
+	if err != nil && err != common.ErrNoRows {
+		return 0, errors.NewError(http.StatusInternalServerError, "创建项目失败，获取用户组织信息失败").WithLog(err.Error())
+	}
+
+	if exist == nil {
+		return 0, errors.NewError(http.StatusForbidden, "无权限")
+	}
+
 	id, err := a.store.Project().CreateProject(tx, p)
 	if err != nil {
 		return 0, errors.NewError(http.StatusInternalServerError, "创建项目失败").WithLog(err.Error())

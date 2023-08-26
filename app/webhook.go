@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/avast/retry-go/v4"
@@ -36,15 +37,10 @@ func (a *app) CreateWebHook(projectID int64, types, callbackUrl string) error {
 	return nil
 }
 
-func (a *app) GetWebHookList(projectID int64) ([]common.WebHook, error) {
+func (a *app) GetWebHookList(projectID int64) ([]*common.WebHook, error) {
 	list, err := a.store.WebHook().GetList(projectID)
-	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return nil, nil
-		}
-		errObj := errors.ErrInternalError
-		errObj.Log = "[WebHook - GetWebHookList] failed to get webhook list: " + err.Error()
-		return nil, errObj
+	if err != nil && err != gorm.ErrRecordNotFound {
+		return nil, errors.NewError(http.StatusInternalServerError, "failed to get project webhooks")
 	}
 
 	return list, nil
@@ -86,12 +82,25 @@ func (a *app) DeleteAllWebHook(tx *gorm.DB, projectID int64) error {
 }
 
 func (a *app) HandleWebHook(agentIP string, res *common.TaskFinishedV2) error {
-	wh, err := a.GetWebHook(res.ProjectID, "finished")
+	hooks, err := a.GetWebHookList(res.ProjectID)
 	if err != nil {
 		return err
 	}
 
-	if wh == nil {
+	if len(hooks) == 0 {
+		return nil
+	}
+
+	hookMaps := make(map[string]*common.WebHook)
+	hookURLMaps := make(map[string]*sync.Once)
+	for _, v := range hooks {
+		hookMaps[v.Type] = v
+		if _, exist := hookURLMaps[v.CallbackURL]; !exist {
+			hookURLMaps[v.CallbackURL] = &sync.Once{}
+		}
+	}
+	// 任务没报错，也没有任务结束钩子的话，提前终止运行
+	if res.Error == "" && hookMaps[common.WEBHOOK_TYPE_TASK_RESULT] == nil {
 		return nil
 	}
 
@@ -129,36 +138,50 @@ func (a *app) HandleWebHook(agentIP string, res *common.TaskFinishedV2) error {
 	event.SetID(utils.GetStrID())
 	event.SetSubject("task-result")
 	event.SetData(cloudevents.ApplicationJSON, body)
-	event.SetSource(fmt.Sprintf("gophercron-center-%s", a.GetIP()))
+	event.SetSource(fmt.Sprintf("gophercron-center-%d", a.ClusterID()))
 	event.SetType(eventType)
 	event.SetTime(time.Unix(res.EndTime, 0))
 	reqData, _ := event.MarshalJSON()
 
-	err = retry.Do(func() error {
-		req, _ := http.NewRequest(http.MethodPost, wh.CallbackURL, bytes.NewReader(reqData))
-		req.Header.Add("Authorization", p.Token)
-		resp, err := a.httpClient.Do(req)
-		if err != nil {
-			return errors.NewError(http.StatusInternalServerError, err.Error())
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			return errors.NewError(resp.StatusCode, "回调响应失败，"+resp.Status)
-		}
-		return nil
-	}, retry.Attempts(5), retry.DelayType(retry.BackOffDelay),
-		retry.MaxJitter(time.Minute), retry.LastErrorOnly(true))
+	handleFunc := func(hook *common.WebHook) error {
+		hookURLMaps[hook.CallbackURL].Do(func() {
+			err = retry.Do(func() error {
+				req, _ := http.NewRequest(http.MethodPost, hook.CallbackURL, bytes.NewReader(reqData))
+				req.Header.Add("Authorization", p.Token)
+				resp, err := a.httpClient.Do(req)
+				if err != nil {
+					return errors.NewError(http.StatusInternalServerError, err.Error())
+				}
+				defer resp.Body.Close()
+				if resp.StatusCode != http.StatusOK {
+					return errors.NewError(resp.StatusCode, "回调响应失败，"+resp.Status)
+				}
+				return nil
+			}, retry.Attempts(5), retry.DelayType(retry.BackOffDelay),
+				retry.MaxJitter(time.Minute), retry.LastErrorOnly(true))
+		})
 
-	if err != nil {
-		wlog.Error("failed to handle webhook", zap.String("type", "finished"),
-			zap.Int64("project_id", res.ProjectID), zap.String("task_id", res.TaskID), zap.Error(err))
-		a.Warning(warning.NewTaskWarningData(warning.TaskWarning{
-			AgentIP:   a.localip,
-			TaskName:  res.TaskName,
-			TaskID:    res.TaskID,
-			ProjectID: res.ProjectID,
-			Message:   fmt.Sprintf("webhook request error %s, callback-url: %s", err.Error(), wh.CallbackURL),
-		}))
+		if err != nil {
+			wlog.Error("failed to handle webhook", zap.String("type", hook.Type),
+				zap.Int64("project_id", res.ProjectID), zap.String("task_id", res.TaskID), zap.Error(err))
+			a.Warning(warning.NewTaskWarningData(warning.TaskWarning{
+				AgentIP:   a.localip,
+				TaskName:  res.TaskName,
+				TaskID:    res.TaskID,
+				ProjectID: res.ProjectID,
+				Message:   fmt.Sprintf("webhook request error %s, callback-url: %s", err.Error(), hook.CallbackURL),
+			}))
+		}
+		return err
 	}
+
+	if eventType == "failure" && hookMaps[common.WEBHOOK_TYPE_TASK_FAILURE] != nil {
+		handleFunc(hookMaps[common.WEBHOOK_TYPE_TASK_FAILURE])
+	}
+
+	if hook := hookMaps[common.WEBHOOK_TYPE_TASK_RESULT]; hook != nil {
+		handleFunc(hook)
+	}
+
 	return nil
 }

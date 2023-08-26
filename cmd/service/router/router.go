@@ -86,6 +86,12 @@ func SetupRoute(srv app.App, r *gin.Engine, conf *config.ServiceConfig) {
 			webhook.GET("/info", controller.GetWebHook)
 		}
 
+		org := api.Group("/org")
+		{
+			org.Use(middleware.TokenVerify([]byte(conf.JWT.PublicKey)))
+			org.GET("/list", )
+		}
+
 		cron := api.Group("/crontab")
 		{
 			cron.Use(middleware.TokenVerify([]byte(conf.JWT.PublicKey)))

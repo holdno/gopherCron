@@ -62,7 +62,7 @@ func (s *projectRelevanceStore) GetList(selector selection.Selector) ([]*common.
 
 	db := parseSelector(s.GetReplica(), selector, true)
 
-	if err = db.Table(s.GetTable()).Find(&res).Debug().Error; err != nil {
+	if err = db.Table(s.GetTable()).Find(&res).Error; err != nil {
 		return nil, err
 	}
 
