@@ -13,6 +13,7 @@ import (
 )
 
 type CreateRequest struct {
+	OID    string `json:"oid" form:"oid" binding:"required"`
 	Title  string `json:"title" form:"title" binding:"required"`
 	Remark string `json:"remark" form:"remark"`
 }
@@ -54,6 +55,7 @@ func Create(c *gin.Context) {
 	}()
 
 	if id, err = srv.CreateProject(tx, common.Project{
+		OID:    req.OID,
 		Title:  req.Title,
 		Remark: req.Remark,
 		UID:    uid,

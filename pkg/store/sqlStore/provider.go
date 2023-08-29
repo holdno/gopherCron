@@ -92,7 +92,7 @@ func MustSetup(conf *config.MysqlConf, logger wlog.Logger, install bool) SqlStor
 	provider.stores.WorkflowLog = NewWorkflowLogStore(provider)
 	provider.stores.TemporaryTask = NewTemporaryTaskStoreStore(provider)
 	provider.stores.Org = NewOrgStore(provider)
-	provider.stores.OrgRelevanceStore = NewOrgRelevanceStore(provider)
+	provider.stores.OrgRelevance = NewOrgRelevanceStore(provider)
 
 	provider.CheckStores()
 
@@ -222,7 +222,7 @@ type SqlStore interface {
 	WorkflowLog() store.WorkflowLogStore
 	TemporaryTask() store.TemporaryTaskStore
 	Org() store.OrgStore
-	OrgRelevanceStore() store.OrgRelevanceStore
+	OrgRelevance() store.OrgRelevanceStore
 	BeginTx() *gorm.DB
 	Install()
 	Shutdown()

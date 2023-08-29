@@ -566,7 +566,7 @@ func (a *app) CheckUserIsInProject(pid, uid int64) (*common.ProjectRelevance, er
 		selection.NewRequirement("uid", selection.FindIn, uid))
 	opt.Select = "*"
 	res, err := a.store.ProjectRelevance().GetList(opt)
-	if err != nil && err != gorm.ErrRecordNotFound {
+	if err != nil && err != common.ErrNoRows {
 		errObj := errors.ErrInternalError
 		errObj.Msg = "获取项目归属信息失败"
 		errObj.Log = err.Error()
@@ -581,7 +581,7 @@ func (a *app) CheckUserIsInProject(pid, uid int64) (*common.ProjectRelevance, er
 
 func (a *app) CheckUserProject(pid, uid int64) (*common.Project, error) {
 	opt := selection.NewSelector(selection.NewRequirement("id", selection.Equals, pid))
-	if uid != 1 {
+	if uid != common.ADMIN_USER_ID {
 		opt.AddQuery(selection.NewRequirement("uid", selection.Equals, uid))
 	}
 	res, err := a.store.Project().GetProject(opt)
@@ -793,7 +793,7 @@ func (a *app) CheckProjectExistByName(title string) (*common.Project, error) {
 }
 
 func (a *app) CreateProject(tx *gorm.DB, p common.Project) (int64, error) {
-	exist, err := a.store.OrgRelevanceStore().GetUserOrg(p.OID, p.UID)
+	exist, err := a.store.OrgRelevance().GetUserOrg(p.OID, p.UID)
 	if err != nil && err != common.ErrNoRows {
 		return 0, errors.NewError(http.StatusInternalServerError, "创建项目失败，获取用户组织信息失败").WithLog(err.Error())
 	}
@@ -830,6 +830,39 @@ func (a *app) UpdateProject(pid int64, title, remark string) error {
 }
 
 func (a *app) CreateProjectRelevance(tx *gorm.DB, pid, uid int64, roleStr string) error {
+	var err error
+	if tx == nil {
+		tx = a.BeginTx()
+		defer func() {
+			if r := recover(); r != nil || err != nil {
+				if err == nil {
+					err = fmt.Errorf("panic: %s", r)
+				}
+				tx.Rollback()
+			} else {
+				tx.Commit()
+			}
+		}()
+	}
+
+	// 检测用户是否存在项目组中
+	userProjectRel, err := a.CheckUserIsInProject(pid, uid)
+	if err != nil {
+		return errors.NewError(http.StatusInternalServerError, "获取用户项目关联信息失败").WithLog(err.Error())
+	}
+	if userProjectRel != nil {
+		return nil
+	}
+
+	project, err := a.store.Project().GetProjectByID(pid)
+	if err != nil && err != common.ErrNoRows {
+		return errors.NewError(http.StatusInternalServerError, "获取项目信息失败").WithLog(err.Error())
+	}
+
+	if project == nil {
+		return errors.NewError(http.StatusForbidden, "项目不存在")
+	}
+
 	role, exist := a.rbacSrv.GetRole(roleStr)
 	if !exist {
 		return errors.NewError(http.StatusBadRequest, "未定义的权限")
@@ -842,6 +875,23 @@ func (a *app) CreateProjectRelevance(tx *gorm.DB, pid, uid int64, roleStr string
 		CreateTime: time.Now().Unix(),
 	}); err != nil {
 		return errors.NewError(http.StatusInternalServerError, "创建项目关联关系失败").WithLog(err.Error())
+	}
+
+	rel, err := a.store.OrgRelevance().GetUserOrg(project.OID, uid)
+	if err != nil && err != common.ErrNoRows {
+		return errors.NewError(http.StatusInternalServerError, "获取用户组织信息失败").WithLog(err.Error())
+	}
+
+	if rel == nil {
+		err = a.store.OrgRelevance().Create(tx, common.OrgRelevance{
+			OID:        project.OID,
+			UID:        uid,
+			Role:       RoleUser.IDStr,
+			CreateTime: time.Now().Unix(),
+		})
+		if err != nil {
+			return errors.NewError(http.StatusInternalServerError, "创建用户组织关系失败").WithLog(err.Error())
+		}
 	}
 
 	return nil

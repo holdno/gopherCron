@@ -39,11 +39,12 @@ const (
 	AGENT_COMMAND_RELOAD_CONFIG = "reload_config"
 
 	// Database
-	ADMIN_USER_ACCOUNT    = "admin"
-	ADMIN_USER_PASSWORD   = "123456"
-	ADMIN_USER_PERMISSION = "admin,user"
-	ADMIN_USER_NAME       = "administrator"
-	ADMIN_PROJECT         = "admin_project"
+	ADMIN_USER_ID         int64 = 1
+	ADMIN_USER_ACCOUNT          = "admin"
+	ADMIN_USER_PASSWORD         = "123456"
+	ADMIN_USER_PERMISSION       = "admin,user"
+	ADMIN_USER_NAME             = "administrator"
+	ADMIN_PROJECT               = "admin_project"
 
 	PERMISSION_ADMIN   = "admin"
 	PERMISSION_MANAGER = "manager"

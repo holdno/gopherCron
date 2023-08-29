@@ -127,14 +127,6 @@ func AddUser(c *gin.Context) {
 		return
 	}
 
-	// 检测用户是否存在项目组中
-	if _, err = srv.CheckUserIsInProject(req.ProjectID, userInfo.ID); err != nil {
-		if err != errors.ErrProjectNotExist {
-			response.APIError(c, err)
-			return
-		}
-	}
-
 	if err = srv.CreateProjectRelevance(nil, req.ProjectID, userInfo.ID, req.UserRole); err != nil {
 		response.APIError(c, err)
 		return
