@@ -28,7 +28,7 @@ func (a *client) ExecuteTask(info *common.TaskExecutingInfo) *common.TaskExecute
 
 	cmd = exec.CommandContext(info.CancelCtx, a.cfg.Shell, "-c", info.Task.Command)
 	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setpgid: true,
+		// Setpgid: true,
 	}
 	stdoutPipe, _ := cmd.StdoutPipe()
 
