@@ -40,15 +40,18 @@ type App interface {
 	Log() wlog.Logger
 	CreateProject(tx *gorm.DB, p common.Project) (int64, error)
 	GetProject(pid int64) (*common.Project, error)
-	GetUserProjects(uid int64) ([]*common.ProjectWithUserRole, error)
+	CleanProject(tx *gorm.DB, pid int64) error
+	GetUserProjects(uid int64, oid string) ([]*common.ProjectWithUserRole, error)
 	CheckProjectExistByName(title string) (*common.Project, error)
 	CheckUserIsInProject(pid, uid int64) (*common.ProjectRelevance, error) // 确认该用户是否加入该项目
 	CheckUserProject(pid, uid int64) (*common.Project, error)              // 确认项目是否属于该用户
 	UpdateProject(pid int64, title, remark string) error
 	DeleteProject(tx *gorm.DB, pid, uid int64) error
+	GetUserOrgs(userID int64) ([]*common.Org, error)
 	SaveTask(task *common.TaskInfo, opts ...clientv3.OpOption) (*common.TaskInfo, error)
 	DeleteTask(pid int64, tid string) (*common.TaskInfo, error)
 	DeleteProjectAllTasks(projectID int64) error
+	CreateOrg(userID int64, title string) (string, error)
 	KillTask(pid int64, tid string) error
 	IsAdmin(uid int64) (bool, error)
 	GetWorkerList(projectID int64) ([]common.ClientInfo, error)
@@ -616,7 +619,20 @@ func (a *app) GetProject(pid int64) (*common.Project, error) {
 	return res[0], nil
 }
 
-func (a *app) GetUserProjects(uid int64) ([]*common.ProjectWithUserRole, error) {
+func (a *app) GetProjects(oid string) ([]*common.Project, error) {
+	opt := selection.NewSelector(selection.NewRequirement("oid", selection.Equals, oid))
+	projects, err := a.store.Project().GetProject(opt)
+	if err != nil && err != gorm.ErrRecordNotFound {
+		errObj := errors.ErrInternalError
+		errObj.Msg = "无法获取项目信息"
+		errObj.Log = err.Error()
+		return nil, errObj
+	}
+
+	return projects, nil
+}
+
+func (a *app) GetUserProjects(uid int64, oid string) ([]*common.ProjectWithUserRole, error) {
 	opt := selection.NewSelector()
 	isAdmin, err := a.IsAdmin(uid)
 	if err != nil {
@@ -639,7 +655,8 @@ func (a *app) GetUserProjects(uid int64) ([]*common.ProjectWithUserRole, error) 
 		projectsMap.Put(v.ProjectID, v)
 	}
 
-	opt = selection.NewSelector(selection.NewRequirement("id", selection.In, projectsMap.Keys()))
+	opt = selection.NewSelector(selection.NewRequirement("oid", selection.Equals, oid),
+		selection.NewRequirement("id", selection.In, projectsMap.Keys()))
 	projects, err := a.store.Project().GetProject(opt)
 	if err != nil && err != gorm.ErrRecordNotFound {
 		errObj := errors.ErrInternalError

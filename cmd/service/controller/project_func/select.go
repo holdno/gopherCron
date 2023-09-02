@@ -71,6 +71,10 @@ func GetProjectToken(c *gin.Context) {
 	response.APISuccess(c, project.Token)
 }
 
+type GetUserProjectsRequest struct {
+	OID string `json:"oid" form:"oid" binding:"required"`
+}
+
 type GetUserProjectsResponse struct {
 	ProjectID int64  `json:"project_id"`
 	UID       int64  `json:"uid"`
@@ -85,12 +89,18 @@ func GetUserProjects(c *gin.Context) {
 		err   error
 		list  []*common.ProjectWithUserRole
 		uid   = utils.GetUserID(c)
+		req   GetUserProjectsRequest
 		res   []*GetUserProjectsResponse
 		count int64
 		srv   = app.GetApp(c)
 	)
 
-	if list, err = srv.GetUserProjects(uid); err != nil {
+	if err = utils.BindArgsWithGin(c, &req); err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	if list, err = srv.GetUserProjects(uid, req.OID); err != nil {
 		response.APIError(c, err)
 		return
 	}

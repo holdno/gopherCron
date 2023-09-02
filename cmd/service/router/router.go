@@ -89,7 +89,8 @@ func SetupRoute(srv app.App, r *gin.Engine, conf *config.ServiceConfig) {
 		org := api.Group("/org")
 		{
 			org.Use(middleware.TokenVerify([]byte(conf.JWT.PublicKey)))
-			org.GET("/list", )
+			org.GET("/list", controller.GetUserOrgList)
+			org.POST("/create", controller.CreateOrg)
 		}
 
 		cron := api.Group("/crontab")

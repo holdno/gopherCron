@@ -69,7 +69,7 @@ type SqlProviderStores struct {
 	WorkflowTask          store.WorkflowTaskStore
 	TemporaryTask         store.TemporaryTaskStore
 	Org                   store.OrgStore
-	OrgRelevanceStore     store.OrgRelevanceStore
+	OrgRelevance          store.OrgRelevanceStore
 }
 
 func MustSetup(conf *config.MysqlConf, logger wlog.Logger, install bool) SqlStore {
@@ -125,7 +125,7 @@ func (s *SqlProvider) Org() store.OrgStore {
 }
 
 func (s *SqlProvider) OrgRelevance() store.OrgRelevanceStore {
-	return s.stores.OrgRelevanceStore
+	return s.stores.OrgRelevance
 }
 
 func (s *SqlProvider) TemporaryTask() store.TemporaryTaskStore {

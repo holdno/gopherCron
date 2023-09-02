@@ -381,6 +381,11 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 			taskExecuteInfo.CancelFunc()
 		}()
 		lockError := make(chan error)
+
+		var (
+			result *common.TaskExecuteResult
+		)
+
 		if plan.Task.Noseize != common.TASK_EXECUTE_NOSEIZE {
 			// 远程加锁，加锁失败后如果任务还在运行中，则进行重试，如果重试失败，则强行结束任务
 			var (
@@ -449,22 +454,22 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 			}
 
 			defer func() {
+				if result != nil && result.Err != "" || err != nil {
+					unLockFunc()
+					return
+				}
 				if unLockFunc != nil {
 					// 任务执行后锁最少保持5s
 					// 防止分布式部署下多台机器共同执行
 					if time.Since(taskExecuteInfo.RealTime).Seconds() < 5 {
 						time.Sleep(5*time.Second - time.Duration(time.Now().Sub(taskExecuteInfo.RealTime).Milliseconds()))
 					}
-
 					unLockFunc()
 				}
 			}()
 		}
 
 		a.scheduler.SetExecutingTask(plan.Task.SchedulerKey(), taskExecuteInfo)
-		var (
-			result *common.TaskExecuteResult
-		)
 		defer func() {
 			// 删除任务的正在执行状态
 			a.scheduler.DeleteExecutingTask(plan.Task.SchedulerKey())

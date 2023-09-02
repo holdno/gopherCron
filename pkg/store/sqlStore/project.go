@@ -94,6 +94,17 @@ func (s *projectStore) DeleteProject(tx *gorm.DB, selector selection.Selector) e
 	return nil
 }
 
+func (s *projectStore) DeleteProjectV2(tx *gorm.DB, id int64) error {
+	if tx == nil {
+		tx = s.GetMaster()
+	}
+
+	if err := tx.Table(s.GetTable()).Where("id = ?", id).Delete(nil).Error; err != nil {
+		return err
+	}
+	return nil
+}
+
 func (s *projectStore) UpdateRelation(projectID int64, relation string) error {
 	if err := s.GetMaster().Table(s.GetTable()).Where("id = ?", projectID).Update("relation", relation).Error; err != nil {
 		return err

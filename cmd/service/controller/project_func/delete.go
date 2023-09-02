@@ -32,8 +32,6 @@ func DeleteOne(c *gin.Context) {
 		if r := recover(); r != nil || err != nil {
 			wlog.Error("failed to delete project", zap.Int64("project_id", req.ProjectID), zap.Any("panic", r))
 			tx.Rollback()
-		} else {
-			tx.Commit()
 		}
 	}()
 
@@ -42,22 +40,12 @@ func DeleteOne(c *gin.Context) {
 		return
 	}
 
-	if err = srv.DeleteProject(tx, req.ProjectID, uid); err != nil {
+	if err = srv.CleanProject(nil, req.ProjectID); err != nil {
 		response.APIError(c, err)
 		return
 	}
 
-	if err = srv.CleanProjectLog(tx, req.ProjectID); err != nil {
-		response.APIError(c, err)
-		return
-	}
-
-	if err = srv.DeleteAllWebHook(tx, req.ProjectID); err != nil {
-		response.APIError(c, err)
-		return
-	}
-
-	if err = srv.DeleteProjectAllTasks(req.ProjectID); err != nil {
+	if err = tx.Commit().Error; err != nil {
 		response.APIError(c, err)
 		return
 	}

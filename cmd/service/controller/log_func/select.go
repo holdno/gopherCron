@@ -12,8 +12,9 @@ import (
 )
 
 type GetErrorLogsRequest struct {
-	Page     int `json:"page" form:"page" binding:"required"`
-	Pagesize int `json:"pagesize" form:"pagesize" binding:"required"`
+	OID      string `json:"oid" form:"oid" binding:"required"`
+	Page     int    `json:"page" form:"page" binding:"required"`
+	Pagesize int    `json:"pagesize" form:"pagesize" binding:"required"`
 }
 
 type GetErrorLogsResponse struct {
@@ -44,7 +45,7 @@ func GetErrorLogs(c *gin.Context) {
 	}
 
 	if !isAdmin {
-		projects, err := srv.GetUserProjects(uid)
+		projects, err := srv.GetUserProjects(uid, req.OID)
 		if err != nil {
 			response.APIError(c, err)
 			return
@@ -142,6 +143,10 @@ func GetList(c *gin.Context) {
 	})
 }
 
+type GetRecentLogCountRequest struct {
+	OID string `json:"oid" form:"oid" binding:"required"`
+}
+
 type GetRecentLogCountResponse struct {
 	SuccessCount int    `json:"success_count"`
 	ErrorCount   int    `json:"error_count"`
@@ -154,13 +159,19 @@ func GetRecentLogCount(c *gin.Context) {
 		err        error
 		projects   []*common.ProjectWithUserRole
 		projectIDs []int64
+		req        GetRecentLogCountRequest
 		result     []*GetRecentLogCountResponse
 
 		uid = utils.GetUserID(c)
 		srv = app.GetApp(c)
 	)
 
-	if projects, err = srv.GetUserProjects(uid); err != nil {
+	if err = utils.BindArgsWithGin(c, &req); err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	if projects, err = srv.GetUserProjects(uid, req.OID); err != nil {
 		response.APIError(c, err)
 		return
 	}
