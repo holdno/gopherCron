@@ -46,3 +46,29 @@ func CreateOrg(c *gin.Context) {
 
 	response.APISuccess(c, nil)
 }
+
+type DeleteOrgRequest struct {
+	ID string `json:"id" form:"id" binding:"required"`
+}
+
+func DeleteOrg(c *gin.Context) {
+	var (
+		err error
+		req DeleteOrgRequest
+
+		uid = utils.GetUserID(c)
+		srv = app.GetApp(c)
+	)
+
+	if err = utils.BindArgsWithGin(c, &req); err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	if err = srv.DeleteOrg(req.ID, uid); err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	response.APISuccess(c, nil)
+}

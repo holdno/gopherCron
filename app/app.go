@@ -52,6 +52,7 @@ type App interface {
 	DeleteTask(pid int64, tid string) (*common.TaskInfo, error)
 	DeleteProjectAllTasks(projectID int64) error
 	CreateOrg(userID int64, title string) (string, error)
+	DeleteOrg(orgID string, userID int64) error
 	KillTask(pid int64, tid string) error
 	IsAdmin(uid int64) (bool, error)
 	GetWorkerList(projectID int64) ([]common.ClientInfo, error)
