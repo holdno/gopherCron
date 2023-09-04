@@ -660,10 +660,7 @@ func (a *app) GetUserProjects(uid int64, oid string) ([]*common.ProjectWithUserR
 		selection.NewRequirement("id", selection.In, projectsMap.Keys()))
 	projects, err := a.store.Project().GetProject(opt)
 	if err != nil && err != gorm.ErrRecordNotFound {
-		errObj := errors.ErrInternalError
-		errObj.Msg = "无法获取项目信息"
-		errObj.Log = err.Error()
-		return nil, errObj
+		return nil, errors.NewError(http.StatusInternalServerError, "无法获取项目信息").WithLog(err.Error())
 	}
 
 	var list []*common.ProjectWithUserRole
@@ -680,6 +677,7 @@ func (a *app) GetUserProjects(uid int64, oid string) ([]*common.ProjectWithUserR
 			Role:    userPermission.Role,
 		})
 	}
+
 	return list, nil
 }
 

@@ -23,7 +23,7 @@ type User struct {
 type Project struct {
 	ID     int64  `json:"id" gorm:"column:id;primary_key;auto_increment"`
 	UID    int64  `json:"uid" gorm:"column:uid;index:uid;type:bigint(20);not null;comment:'关联用户id'"`
-	OID    string `json:"oid" gorm:"column:oid;index:uid;type:bigint(20);not null;comment:'关联组织id'"`
+	OID    string `json:"oid" gorm:"column:oid;index:oid;type:varchar(32);not null;comment:'关联组织id'"`
 	Title  string `json:"title" gorm:"column:title;index:title;type:varchar(100);not null;comment:'项目名称'"`
 	Remark string `json:"remark" gorm:"column:remark;type:varchar(255);not null;comment:'项目备注'"`
 	Token  string `json:"token" gorm:"column:token;type:varchar(32);not null;default:'';comment:'项目token,用于请求中心接口'"`
@@ -97,6 +97,7 @@ type WebHookBody struct {
 
 type Workflow struct {
 	ID         int64  `json:"id" gorm:"column:id;primary_key;auto_increment"`
+	OID        string `json:"oid" gorm:"column:oid;index:oid;type:varchar(32);not null;comment:'关联组织id'"`
 	Title      string `json:"title" gorm:"column:title;type:varchar(100);not null;comment:'flow标题'"`
 	Remark     string `json:"remark" gorm:"column:remark;type:text;not null;comment:'flow详细介绍'"`
 	Cron       string `json:"cron" gorm:"column:cron;type:varchar(20);not null;comment:'cron表达式'"`
@@ -105,6 +106,7 @@ type Workflow struct {
 }
 
 type GetWorkflowListOptions struct {
+	OID   string
 	Title string
 	IDs   []int64
 }

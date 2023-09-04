@@ -16,16 +16,30 @@ import (
 )
 
 func (a *app) GetUserOrgs(userID int64) ([]*common.Org, error) {
-	orgRelevance, err := a.store.OrgRelevance().ListUserOrg(userID)
-	if err != nil && err != common.ErrNoRows {
-		return nil, errors.NewError(http.StatusInternalServerError, "获取用户关联组织信息失败").WithLog(err.Error())
+	isAdmin, err := a.IsAdmin(userID)
+	if err != nil {
+		return nil, err
+	}
+	selector := selection.NewSelector()
+	var orgIDs []string
+	if !isAdmin {
+		orgRelevance, err := a.store.OrgRelevance().ListUserOrg(userID)
+		if err != nil && err != common.ErrNoRows {
+			return nil, errors.NewError(http.StatusInternalServerError, "获取用户关联组织信息失败").WithLog(err.Error())
+		}
+
+		for _, v := range orgRelevance {
+			orgIDs = append(orgIDs, v.OID)
+		}
+
+		if len(orgIDs) == 0 {
+			return nil, nil
+		}
+
+		selector.AddQuery(selection.NewRequirement("id", selection.In, orgIDs))
 	}
 
-	var orgIDs []string
-	for _, v := range orgRelevance {
-		orgIDs = append(orgIDs, v.OID)
-	}
-	list, err := a.store.Org().List(selection.NewSelector(selection.NewRequirement("id", selection.In, orgIDs)))
+	list, err := a.store.Org().List(selector)
 	if err != nil && err != common.ErrNoRows {
 		return nil, errors.NewError(http.StatusInternalServerError, "获取用户组织列表失败").WithLog(err.Error())
 	}

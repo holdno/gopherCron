@@ -14,6 +14,7 @@ import (
 )
 
 type CreateWorkflowRequest struct {
+	OID    string `json:"oid" from:"oid" binding:"required"`
 	Title  string `json:"title" form:"title" binding:"required"`
 	Remark string `json:"remark" form:"remark"`
 	Cron   string `json:"cron" form:"cron" binding:"required"`
@@ -33,6 +34,7 @@ func CreateWorkflow(c *gin.Context) {
 	srv := app.GetApp(c)
 	uid := utils.GetUserID(c)
 	if err = srv.CreateWorkflow(uid, common.Workflow{
+		OID:        req.OID,
 		Title:      req.Title,
 		Remark:     req.Remark,
 		Cron:       req.Cron,
@@ -200,6 +202,7 @@ func GetWorkflow(c *gin.Context) {
 }
 
 type GetWorkflowListRequest struct {
+	OID      string `json:"oid" form:"oid" binding:"required"`
 	Title    string `json:"title" form:"title"`
 	Page     uint64 `json:"page" form:"page" binding:"required"`
 	Pagesize uint64 `json:"pagesize" form:"pagesize" binding:"required"`
@@ -249,6 +252,7 @@ func GetWorkflowList(c *gin.Context) {
 		}
 	}
 	list, total, err := srv.GetWorkflowList(common.GetWorkflowListOptions{
+		OID:   req.OID,
 		Title: req.Title,
 		IDs:   workflowIDs,
 	}, req.Page, req.Pagesize)

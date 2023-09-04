@@ -104,9 +104,17 @@ func (a *app) WorkflowAddUser(workflowID int64, userID int64) error {
 }
 
 func (a *app) CreateWorkflow(userID int64, data common.Workflow) error {
+	exist, err := a.store.OrgRelevance().GetUserOrg(data.OID, userID)
+	if err != nil && err != common.ErrNoRows {
+		return errors.NewError(http.StatusInternalServerError, "创建项目失败，获取用户组织信息失败").WithLog(err.Error())
+	}
+
+	if exist == nil {
+		return errors.NewError(http.StatusForbidden, "无权限")
+	}
+
 	var (
-		tx  = a.store.BeginTx()
-		err error
+		tx = a.store.BeginTx()
 	)
 
 	if _, err = cronexpr.Parse(data.Cron); err != nil {
@@ -431,6 +439,7 @@ func (a *app) GetWorkflow(id int64) (*common.Workflow, error) {
 func (a *app) GetWorkflowList(opts common.GetWorkflowListOptions, page, pagesize uint64) ([]common.Workflow, int, error) {
 	// TODO get user workflow
 	selector := selection.NewSelector()
+	selector.AddQuery(selection.NewRequirement("oid", selection.Equals, opts.OID))
 	if len(opts.IDs) > 0 {
 		selector.AddQuery(selection.NewRequirement("id", selection.In, opts.IDs))
 	}
