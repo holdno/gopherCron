@@ -21,6 +21,7 @@ func (a *app) GetUserOrgs(userID int64) ([]*common.Org, error) {
 		return nil, err
 	}
 	selector := selection.NewSelector()
+	selector.AddOrder("create_time ASC")
 	var orgIDs []string
 	if !isAdmin {
 		orgRelevance, err := a.store.OrgRelevance().ListUserOrg(userID)
@@ -43,6 +44,11 @@ func (a *app) GetUserOrgs(userID int64) ([]*common.Org, error) {
 	if err != nil && err != common.ErrNoRows {
 		return nil, errors.NewError(http.StatusInternalServerError, "获取用户组织列表失败").WithLog(err.Error())
 	}
+
+	list = append(list, &common.Org{
+		ID:    "baseorg",
+		Title: "通用",
+	})
 
 	return list, nil
 }

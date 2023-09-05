@@ -51,13 +51,17 @@ func (s *projectStore) UpdateProject(id int64, title, remark string) error {
 	return nil
 }
 
-func (s *projectStore) GetProjectByID(pid int64) (*common.Project, error) {
+func (s *projectStore) GetProjectByID(tx *gorm.DB, pid int64) (*common.Project, error) {
 	var (
 		err error
 		res common.Project
 	)
 
-	if err = s.GetReplica().Table(s.GetTable()).Where("id = ?", pid).Find(&res).Error; err != nil {
+	if tx == nil {
+		tx = s.GetReplica()
+	}
+
+	if err = tx.Table(s.GetTable()).Where("id = ?", pid).Find(&res).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, nil
 		}

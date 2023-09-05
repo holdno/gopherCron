@@ -55,14 +55,14 @@ func (s *orgRelevanceStore) ListUserOrg(uid int64) ([]*common.OrgRelevance, erro
 func (s *orgRelevanceStore) GetUserOrg(oid string, uid int64) (*common.OrgRelevance, error) {
 	var (
 		err error
-		res *common.OrgRelevance
+		res common.OrgRelevance
 	)
 
 	if err = s.GetReplica().Table(s.GetTable()).Where("oid = ? AND uid = ?", oid, uid).First(&res).Error; err != nil {
 		return nil, err
 	}
 
-	return res, nil
+	return &res, nil
 }
 
 func (s *orgRelevanceStore) Delete(tx *gorm.DB, oid string, uid int64) error {

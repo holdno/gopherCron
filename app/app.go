@@ -809,18 +809,28 @@ func (a *app) CheckProjectExistByName(title string) (*common.Project, error) {
 }
 
 func (a *app) CreateProject(tx *gorm.DB, p common.Project) (int64, error) {
-	exist, err := a.store.OrgRelevance().GetUserOrg(p.OID, p.UID)
-	if err != nil && err != common.ErrNoRows {
-		return 0, errors.NewError(http.StatusInternalServerError, "创建项目失败，获取用户组织信息失败").WithLog(err.Error())
+	isAdmin, err := a.IsAdmin(p.UID)
+	if err != nil {
+		return 0, err
 	}
+	if !isAdmin {
+		exist, err := a.store.OrgRelevance().GetUserOrg(p.OID, p.UID)
+		if err != nil && err != common.ErrNoRows {
+			return 0, errors.NewError(http.StatusInternalServerError, "创建项目失败，获取用户组织信息失败").WithLog(err.Error())
+		}
 
-	if exist == nil {
-		return 0, errors.NewError(http.StatusForbidden, "无权限")
+		if exist == nil {
+			return 0, errors.NewError(http.StatusForbidden, "无权限")
+		}
 	}
 
 	id, err := a.store.Project().CreateProject(tx, p)
 	if err != nil {
 		return 0, errors.NewError(http.StatusInternalServerError, "创建项目失败").WithLog(err.Error())
+	}
+
+	if err = a.CreateProjectRelevance(tx, id, p.UID, RoleChief.IDStr); err != nil {
+		return 0, err
 	}
 
 	return id, nil
@@ -870,7 +880,7 @@ func (a *app) CreateProjectRelevance(tx *gorm.DB, pid, uid int64, roleStr string
 		return nil
 	}
 
-	project, err := a.store.Project().GetProjectByID(pid)
+	project, err := a.store.Project().GetProjectByID(tx, pid)
 	if err != nil && err != common.ErrNoRows {
 		return errors.NewError(http.StatusInternalServerError, "获取项目信息失败").WithLog(err.Error())
 	}

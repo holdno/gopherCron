@@ -23,7 +23,6 @@ func Create(c *gin.Context) {
 		req     CreateRequest
 		err     error
 		project *common.Project
-		id      int64
 		uid     = utils.GetUserID(c)
 		srv     = app.GetApp(c)
 	)
@@ -34,10 +33,8 @@ func Create(c *gin.Context) {
 	}
 
 	if project, err = srv.CheckProjectExistByName(req.Title); err != nil {
-		if err != errors.ErrProjectNotExist {
-			response.APIError(c, err)
-			return
-		}
+		response.APIError(c, err)
+		return
 	}
 
 	if project != nil {
@@ -54,18 +51,13 @@ func Create(c *gin.Context) {
 		}
 	}()
 
-	if id, err = srv.CreateProject(tx, common.Project{
+	if _, err = srv.CreateProject(tx, common.Project{
 		OID:    req.OID,
 		Title:  req.Title,
 		Remark: req.Remark,
 		UID:    uid,
 		Token:  utils.RandomStr(32),
 	}); err != nil {
-		response.APIError(c, err)
-		return
-	}
-
-	if err = srv.CreateProjectRelevance(tx, id, uid, app.RoleChief.IDStr); err != nil {
 		response.APIError(c, err)
 		return
 	}
