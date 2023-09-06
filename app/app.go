@@ -39,10 +39,11 @@ type App interface {
 	Run()
 	Log() wlog.Logger
 	CreateProject(tx *gorm.DB, p common.Project) (int64, error)
+	ReGenProjectToken(uid, pid int64) (string, error)
 	GetProject(pid int64) (*common.Project, error)
 	CleanProject(tx *gorm.DB, pid int64) error
 	GetUserProjects(uid int64, oid string) ([]*common.ProjectWithUserRole, error)
-	CheckProjectExistByName(title string) (*common.Project, error)
+	CheckProjectExist(oid, title string) (*common.Project, error)
 	CheckUserIsInProject(pid, uid int64) (*common.ProjectRelevance, error) // 确认该用户是否加入该项目
 	CheckUserProject(pid, uid int64) (*common.Project, error)              // 确认项目是否属于该用户
 	UpdateProject(pid int64, title, remark string) error
@@ -790,15 +791,13 @@ func (a *app) GetLogTotalByDate(projects []int64, timestamp int64, errType int) 
 	return total, nil
 }
 
-func (a *app) CheckProjectExistByName(title string) (*common.Project, error) {
-	opt := selection.NewSelector(selection.NewRequirement("title", selection.Equals, title))
+func (a *app) CheckProjectExist(oid, title string) (*common.Project, error) {
+	opt := selection.NewSelector(selection.NewRequirement("oid", selection.Equals, oid),
+		selection.NewRequirement("title", selection.Equals, title))
 
 	p, err := a.store.Project().GetProject(opt)
-	if err != nil && err != gorm.ErrRecordNotFound {
-		errObj := errors.ErrInternalError
-		errObj.Msg = "获取项目信息失败"
-		errObj.Log = err.Error()
-		return nil, errObj
+	if err != nil && err != common.ErrNoRows {
+		return nil, errors.NewError(http.StatusInternalServerError, "项目重名检测失败").WithLog(err.Error())
 	}
 
 	if len(p) == 0 {
@@ -806,6 +805,19 @@ func (a *app) CheckProjectExistByName(title string) (*common.Project, error) {
 	}
 
 	return p[0], nil
+}
+
+func (a *app) ReGenProjectToken(uid, pid int64) (string, error) {
+	if err := a.CheckPermissions(pid, uid, PermissionAll); err != nil {
+		return "", err
+	}
+
+	newToken := utils.RandomStr(32)
+
+	if err := a.store.Project().UpdateToken(pid, newToken); err != nil {
+		return "", errors.NewError(http.StatusInternalServerError, "重置项目token失败").WithLog(err.Error())
+	}
+	return newToken, nil
 }
 
 func (a *app) CreateProject(tx *gorm.DB, p common.Project) (int64, error) {
@@ -838,7 +850,11 @@ func (a *app) CreateProject(tx *gorm.DB, p common.Project) (int64, error) {
 
 func (a *app) DeleteProject(tx *gorm.DB, pid, uid int64) error {
 	opt := selection.NewSelector(selection.NewRequirement("id", selection.Equals, pid))
-	if uid != 1 {
+	isAdmin, err := a.IsAdmin(uid)
+	if err != nil {
+		return err
+	}
+	if !isAdmin {
 		opt.AddQuery(selection.NewRequirement("uid", selection.Equals, uid))
 	}
 	if err := a.store.Project().DeleteProject(tx, opt); err != nil {
@@ -960,7 +976,7 @@ func (a *app) CheckPermissions(projectID, uid int64, permission gorbac.Permissio
 		} else if exist == nil {
 			return errors.ErrProjectNotExist
 		}
-		fmt.Println(exist, permission)
+
 		if !a.rbacSrv.IsGranted(exist.Role, permission) {
 			return errors.ErrInsufficientPermissions
 		}

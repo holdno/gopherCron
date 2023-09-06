@@ -38,7 +38,7 @@ type ProjectStore interface {
 	GetProject(selector selection.Selector) ([]*common.Project, error)
 	GetProjectByID(tx *gorm.DB, pid int64) (*common.Project, error)
 	DeleteProject(tx *gorm.DB, selector selection.Selector) error
-	UpdateRelation(projectID int64, relation string) error
+	UpdateToken(projectID int64, token string) error
 	DeleteProjectV2(tx *gorm.DB, id int64) error
 }
 

@@ -169,6 +169,7 @@ func SetupRoute(srv app.App, r *gin.Engine, conf *config.ServiceConfig) {
 			project.GET("/users", user_func.GetUsersUnderTheProject)
 			project.POST("/remove_user", project_func.RemoveUser)
 			project.POST("/add_user", project_func.AddUser)
+			project.POST("/re_gen_token", project_func.ReGenToken)
 			workflow := project.Group("/workflow")
 			{
 				workflow.GET("/task/list", project_func.GetProjectWorkflowTasks)

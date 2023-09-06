@@ -32,7 +32,7 @@ func Create(c *gin.Context) {
 		return
 	}
 
-	if project, err = srv.CheckProjectExistByName(req.Title); err != nil {
+	if project, err = srv.CheckProjectExist(req.OID, req.Title); err != nil {
 		response.APIError(c, err)
 		return
 	}

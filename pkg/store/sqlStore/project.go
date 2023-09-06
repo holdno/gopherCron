@@ -109,8 +109,8 @@ func (s *projectStore) DeleteProjectV2(tx *gorm.DB, id int64) error {
 	return nil
 }
 
-func (s *projectStore) UpdateRelation(projectID int64, relation string) error {
-	if err := s.GetMaster().Table(s.GetTable()).Where("id = ?", projectID).Update("relation", relation).Error; err != nil {
+func (s *projectStore) UpdateToken(projectID int64, token string) error {
+	if err := s.GetMaster().Table(s.GetTable()).Where("id = ?", projectID).Update("token", token).Error; err != nil {
 		return err
 	}
 	return nil

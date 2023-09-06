@@ -92,6 +92,31 @@ func RemoveUser(c *gin.Context) {
 	response.APISuccess(c, nil)
 }
 
+type ReGenTokenRequest struct {
+	ProjectID int64 `json:"project_id" form:"project_id" binding:"required"`
+}
+
+func ReGenToken(c *gin.Context) {
+	var (
+		err error
+		req ReGenTokenRequest
+		uid = utils.GetUserID(c)
+		srv = app.GetApp(c)
+	)
+
+	if err = utils.BindArgsWithGin(c, &req); err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	newToken, err := srv.ReGenProjectToken(uid, req.ProjectID)
+	if err != nil {
+		response.APIError(c, err)
+		return
+	}
+	response.APISuccess(c, newToken)
+}
+
 type AddUserRequest struct {
 	ProjectID   int64  `json:"project_id" form:"project_id" binding:"required"`
 	UserAccount string `json:"user_account" form:"user_account" binding:"required"`

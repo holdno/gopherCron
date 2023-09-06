@@ -104,13 +104,20 @@ func (a *app) WorkflowAddUser(workflowID int64, userID int64) error {
 }
 
 func (a *app) CreateWorkflow(userID int64, data common.Workflow) error {
-	exist, err := a.store.OrgRelevance().GetUserOrg(data.OID, userID)
-	if err != nil && err != common.ErrNoRows {
-		return errors.NewError(http.StatusInternalServerError, "创建项目失败，获取用户组织信息失败").WithLog(err.Error())
+	isAdmin, err := a.IsAdmin(userID)
+	if err != nil {
+		return err
 	}
 
-	if exist == nil {
-		return errors.NewError(http.StatusForbidden, "无权限")
+	if !isAdmin {
+		exist, err := a.store.OrgRelevance().GetUserOrg(data.OID, userID)
+		if err != nil && err != common.ErrNoRows {
+			return errors.NewError(http.StatusInternalServerError, "创建项目失败，获取用户组织信息失败").WithLog(err.Error())
+		}
+
+		if exist == nil {
+			return errors.NewError(http.StatusForbidden, "无权限")
+		}
 	}
 
 	var (
@@ -145,8 +152,7 @@ func (a *app) CreateWorkflow(userID int64, data common.Workflow) error {
 	if err = tx.Commit().Error; err != nil {
 		return errors.NewError(http.StatusInternalServerError, "存储事务提交失败").WithLog(err.Error())
 	}
-	err = a.notifyCenterToRefreshWorkflowPlan()
-	return err
+	return a.notifyCenterToRefreshWorkflowPlan()
 }
 
 func (a *app) notifyCenterToRefreshWorkflowPlan() error {
