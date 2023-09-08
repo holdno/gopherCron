@@ -422,6 +422,7 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 								resultChan <- err
 							})
 							if !first {
+								a.metrics.SystemErrInc("agent_task_execute_lock_failure")
 								cancelReason.WriteString(fmt.Sprintf("任务执行过程中锁维持失败,错误信息:%s,agent主动终止任务", err.Error()))
 							}
 							return
@@ -454,11 +455,11 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 			}
 
 			defer func() {
-				if result != nil && result.Err != "" || err != nil {
-					unLockFunc()
-					return
-				}
 				if unLockFunc != nil {
+					if result != nil && result.Err != "" || err != nil {
+						unLockFunc()
+						return
+					}
 					// 任务执行后锁最少保持5s
 					// 防止分布式部署下多台机器共同执行
 					if time.Since(taskExecuteInfo.RealTime).Seconds() < 5 {
@@ -480,7 +481,9 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 				ProjectID: taskExecuteInfo.Task.ProjectID,
 				Status:    common.TASK_STATUS_DONE_V2,
 				TmpID:     taskExecuteInfo.Task.TmpID,
-				Operator:  fmt.Sprintf("%s(%d)", plan.UserName, plan.UserId),
+			}
+			if plan.UserId != 0 {
+				f.Operator = fmt.Sprintf("%s(%d)", plan.UserName, plan.UserId)
 			}
 			if taskExecuteInfo.Task.FlowInfo != nil {
 				f.WorkflowID = taskExecuteInfo.Task.FlowInfo.WorkflowID
@@ -510,6 +513,7 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 				return err
 			}, retry.Attempts(3), retry.DelayType(retry.BackOffDelay),
 				retry.MaxJitter(time.Minute), retry.LastErrorOnly(true)); err != nil {
+				a.metrics.SystemErrInc("agent_status_report_failure")
 				a.Warning(warning.NewTaskWarningData(warning.TaskWarning{
 					AgentIP:   a.localip,
 					TaskName:  plan.Task.Name,
@@ -538,10 +542,10 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 			return err
 		}, retry.Attempts(3), retry.DelayType(retry.BackOffDelay),
 			retry.MaxJitter(time.Minute), retry.LastErrorOnly(true)); err != nil {
-
+			a.metrics.SystemErrInc("agent_status_report_failure")
 			a.logger.Error(fmt.Sprintf("task: %s, id: %s, tmp_id: %s, change running status error, %v", plan.Task.Name,
 				plan.Task.TaskID, plan.Task.TmpID, err))
-			errDetail := fmt.Errorf("agent上报任务开始运行状态失败: %s", err.Error())
+			errDetail := fmt.Errorf("agent上报任务开始状态失败: %s，任务终止", err.Error())
 			cancelReason.WriteString(errDetail.Error())
 			errSignal.Send(errDetail)
 			taskExecuteInfo.CancelFunc()

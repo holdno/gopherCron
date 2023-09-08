@@ -15,6 +15,8 @@ import (
 	"github.com/holdno/gopherCron/pkg/infra/register"
 	"github.com/holdno/gopherCron/protocol"
 	"github.com/holdno/gopherCron/utils"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/gin-contrib/pprof"
 	"github.com/gin-gonic/gin"
@@ -29,6 +31,16 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
+
+func prometheusHandler(r *prometheus.Registry) gin.HandlerFunc {
+	h := promhttp.InstrumentMetricHandler(
+		r, promhttp.HandlerFor(r, promhttp.HandlerOpts{}),
+	)
+
+	return func(c *gin.Context) {
+		h.ServeHTTP(c.Writer, c.Request)
+	}
+}
 
 func (a *client) SetupMicroService() *winfra.Srv[infra.NodeMetaRemote] {
 	register := a.MustSetupRemoteRegisterV2()
@@ -45,6 +57,9 @@ func (a *client) SetupMicroService() *winfra.Srv[infra.NodeMetaRemote] {
 	httpEngine.GET("/heatlhy", func(ctx *gin.Context) {
 		ctx.String(http.StatusOK, "healthy")
 	})
+	if a.metrics != nil {
+		httpEngine.GET("/metrics", prometheusHandler(a.metrics.provider.Registry()))
+	}
 
 	newsrv := infra.NewAgentServer()
 	var pids []int64
@@ -92,8 +107,8 @@ func (a *client) MustSetupRemoteRegisterV2() wregister.ServiceRegister[infra.Nod
 		defer cancel()
 		cc, err := grpc.DialContext(ctx, a.cfg.Micro.Endpoint, grpc.WithTransportCredentials(insecure.NewCredentials()),
 			grpc.WithKeepaliveParams(keepalive.ClientParameters{
-				Time:    time.Second * 10,
-				Timeout: time.Second * 3,
+				Time:    time.Second * 15,
+				Timeout: time.Second * 5,
 			}),
 			grpc.WithUnaryInterceptor(func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 				ctx = genMetadata(ctx, cc)

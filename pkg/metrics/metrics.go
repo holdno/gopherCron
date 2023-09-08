@@ -1,29 +1,22 @@
 package metrics
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/oklog/ulid/v2"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
-	"github.com/prometheus/client_golang/prometheus/push"
-	"github.com/spacegrower/watermelon/infra/wlog"
-	"go.uber.org/zap"
 )
 
 func RegisterGoMetrics(r *prometheus.Registry) {
 	r.Register(collectors.NewGoCollector(collectors.WithGoCollections(collectors.GoRuntimeMetricsCollection)))
 }
 
-func (m *Metrics) NewCounterVec(name, ns, system string, labels []string) *prometheus.CounterVec {
+func (m *Metrics) NewCounterVec(name string, labels []string) *prometheus.CounterVec {
 	if !strings.HasSuffix(name, "_count") {
 		name += "_count"
 	}
@@ -31,10 +24,10 @@ func (m *Metrics) NewCounterVec(name, ns, system string, labels []string) *prome
 	// counterVec monitor error count
 	var counterVec = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: ns,
-			Subsystem: system,
+			Namespace: m.ns,
+			Subsystem: m.serviceName,
 			Name:      name,
-			Help:      fmt.Sprintf("%s count of /%s/%s", name, ns, system),
+			Help:      fmt.Sprintf("%s count of /%s/%s", name, m.ns, m.serviceName),
 		},
 		labels,
 	)
@@ -47,17 +40,17 @@ func (m *Metrics) NewCounterVec(name, ns, system string, labels []string) *prome
 // 	prometheus.NewMetricVec(prometheus.NewDesc(fmt.Sprintf("%s_%s_%s", ns, system, name, labels), fmt.Sprintf("%s count of /%s/%s", name, ns, system), labels, nil))
 // }
 
-func (m *Metrics) NewGaugeVec(name, ns, system string, labels []string) *prometheus.GaugeVec {
+func (m *Metrics) NewGaugeVec(name string, labels []string) *prometheus.GaugeVec {
 	if !strings.HasSuffix(name, "_gauge") {
 		name += "_gauge"
 	}
 	// errorCounterVec monitor error count
 	var gaugeVec = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Namespace: ns,
-			Subsystem: system,
+			Namespace: m.ns,
+			Subsystem: m.serviceName,
 			Name:      name,
-			Help:      fmt.Sprintf("%s gauge of /%s/%s", name, ns, system),
+			Help:      fmt.Sprintf("%s gauge of /%s/%s", name, m.ns, m.serviceName),
 		},
 		labels,
 	)
@@ -66,17 +59,17 @@ func (m *Metrics) NewGaugeVec(name, ns, system string, labels []string) *prometh
 	return gaugeVec
 }
 
-func (m *Metrics) NewHistogramVec(name, ns, system string, labels []string) *prometheus.HistogramVec {
+func (m *Metrics) NewHistogramVec(name string, labels []string) *prometheus.HistogramVec {
 	if !strings.HasSuffix(name, "_duration") {
 		name += "_duration"
 	}
 	// timerHistogramVec monitor something duration
 	var timerHistogramVec = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Namespace: ns,
-			Subsystem: system,
+			Namespace: m.ns,
+			Subsystem: m.serviceName,
 			Name:      name,
-			Help:      fmt.Sprintf("%s duration of /%s/%s", name, ns, system),
+			Help:      fmt.Sprintf("%s duration of /%s/%s", name, m.ns, m.serviceName),
 		},
 		labels,
 	)
@@ -112,42 +105,4 @@ func clearOldMetrics(endpoint, jobName string) {
 	if err != nil {
 		log.Printf("failed to clear old metric, job name: %s, error: %s", jobName, err.Error())
 	}
-}
-
-func setupPusherFromEnv(ctx context.Context, service string) *push.Pusher {
-	endpoint := os.Getenv("PROM_PUSHGATEWAY_ENDPOINT")
-	job := os.Getenv("PROM_PUSHGATEWAY_JOB_NAME")
-
-	if endpoint == "" || job == "" {
-		return nil
-	}
-
-	username := os.Getenv("PROM_PUSHGATEWAY_USERNAME")
-	password := os.Getenv("PROM_PUSHGATEWAY_PASSWORD")
-
-	pusher := push.New(endpoint, job).
-		Grouping("service", service).
-		Grouping("uuid", ulid.Make().String())
-	if username != "" {
-		pusher.BasicAuth(username, password)
-	}
-
-	clearOldMetrics(endpoint, job)
-
-	go func() {
-		ticker := time.NewTicker(time.Second * 5)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				if err := pusher.Push(); err != nil {
-					wlog.Error("prometheus failed to push metrics", zap.Error(err))
-				}
-			}
-		}
-	}()
-
-	return pusher
 }

@@ -903,6 +903,7 @@ func (a *app) SaveTaskLog(agentIP string, result common.TaskFinishedV2) {
 	projects, err := a.store.Project().GetProject(opts)
 	if err != nil {
 		wlog.Error("failed to report task result, the task project not found", zap.Error(err), zap.Int64("project_id", logInfo.ProjectID))
+		return
 	}
 
 	if len(projects) > 0 {

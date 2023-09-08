@@ -3,7 +3,6 @@ package register
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"strconv"
 	"sync"
@@ -54,7 +53,7 @@ func NewRemoteRegisterV2(localIP string, connect func() (CenterClient, error), e
 		if rr.client.Cc != nil {
 			rr.client.Cc.Close()
 		}
-		fmt.Println("re connect")
+
 		rr.client, err = connect()
 		return
 	}

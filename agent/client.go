@@ -41,6 +41,7 @@ type client struct {
 	author    *Author
 
 	cronpb.UnimplementedAgentServer
+	metrics *Metrics
 }
 
 type Client interface {
@@ -99,7 +100,7 @@ func (agent *client) loadConfigAndSetupAgentFunc() func() error {
 					agent.logger.Panic("failed to get local ip", zap.Error(err))
 				}
 			}
-
+			agent.metrics = NewMonitor(agent.localip)
 		} else if agent.configPath == "" {
 			return fmt.Errorf("invalid config path")
 		}
