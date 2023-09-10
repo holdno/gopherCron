@@ -28,6 +28,7 @@ import (
 
 // Scheduler 任务调度
 type TaskScheduler struct {
+	a                     *client
 	TaskEventChan         chan *common.TaskEvent // 任务事件队列
 	PlanTable             sync.Map
 	consistency           *consistency
@@ -122,12 +123,17 @@ func (ts *TaskScheduler) CalcPlanHash() {
 	var (
 		projectPlanList = make(map[int64][]string)
 		commandMap      = make(map[string]string)
+		taskCounter     = 0
 	)
+
 	ts.PlanRange(func(key string, value *common.TaskSchedulePlan) bool {
 		projectPlanList[value.Task.ProjectID] = append(projectPlanList[value.Task.ProjectID], key)
 		commandMap[key] = value.Task.Command
+		taskCounter++
 		return true
 	})
+
+	ts.a.metrics.jobs.With(nil).Set(float64(taskCounter))
 
 	ts.consistency.locker.Lock()
 	defer ts.consistency.locker.Unlock()
