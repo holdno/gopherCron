@@ -463,10 +463,6 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 
 			defer func() {
 				if unLockFunc != nil {
-					if result != nil && result.Err != "" || err != nil {
-						unLockFunc()
-						return
-					}
 					// 任务执行后锁最少保持5s
 					// 防止分布式部署下多台机器共同执行
 					if time.Since(taskExecuteInfo.RealTime).Seconds() < 5 {
@@ -487,7 +483,7 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 				Command:   taskExecuteInfo.Task.Command,
 				ProjectID: taskExecuteInfo.Task.ProjectID,
 				Status:    common.TASK_STATUS_DONE_V2,
-				TmpID:     taskExecuteInfo.Task.TmpID,
+				TmpID:     taskExecuteInfo.TmpID,
 			}
 			if plan.UserId != 0 {
 				f.Operator = fmt.Sprintf("%s(%d)", plan.UserName, plan.UserId)
@@ -529,7 +525,7 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 					Message:   "agent上报任务运行结束状态失败: " + err.Error(),
 				}))
 				a.logger.Error(fmt.Sprintf("task: %s, id: %s, tmp_id: %s, failed to change running status, the task is finished, error: %v",
-					plan.Task.Name, plan.Task.TaskID, plan.Task.TmpID, err))
+					plan.Task.Name, plan.Task.TaskID, plan.TmpID, err))
 			}
 		}()
 
@@ -551,7 +547,7 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 			retry.MaxJitter(time.Minute), retry.LastErrorOnly(true)); err != nil {
 			a.metrics.SystemErrInc("agent_status_report_failure")
 			a.logger.Error(fmt.Sprintf("task: %s, id: %s, tmp_id: %s, change running status error, %v", plan.Task.Name,
-				plan.Task.TaskID, plan.Task.TmpID, err))
+				plan.Task.TaskID, plan.TmpID, err))
 			errDetail := fmt.Errorf("agent上报任务开始状态失败: %s，任务终止", err.Error())
 			cancelReason.WriteString(errDetail.Error())
 			errSignal.Send(errDetail)

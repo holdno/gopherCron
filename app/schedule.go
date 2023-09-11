@@ -636,6 +636,9 @@ func (a *app) TemporarySchedulerTask(user *common.User, task *common.TaskInfo) e
 	// reset task create time as schedule time
 	task.CreateTime = time.Now().Unix()
 
+	if task.TmpID == "" {
+		task.TmpID = utils.GetStrID()
+	}
 	a.PublishMessage(messageTaskStatusChanged(
 		task.ProjectID,
 		task.TaskID,
@@ -762,7 +765,7 @@ func (a *app) SetTaskRunning(agentIP string, execInfo *common.TaskExecutingInfo)
 		return errors.NewError(http.StatusInternalServerError, "设置任务运行状态失败").WithLog(err.Error())
 	}
 
-	a.PublishMessage(messageTaskStatusChanged(execInfo.Task.ProjectID, execInfo.Task.TaskID, execInfo.Task.TmpID, common.TASK_STATUS_RUNNING_V2))
+	a.PublishMessage(messageTaskStatusChanged(execInfo.Task.ProjectID, execInfo.Task.TaskID, execInfo.TmpID, common.TASK_STATUS_RUNNING_V2))
 	return nil
 }
 

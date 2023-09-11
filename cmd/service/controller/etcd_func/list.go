@@ -72,6 +72,7 @@ func GetClientList(c *gin.Context) {
 
 	if err = srv.CheckPermissions(req.ProjectID, uid, app.PermissionView); err != nil {
 		response.APIError(c, err)
+		return
 	}
 
 	if res, err = srv.GetWorkerList(req.ProjectID); err != nil {
