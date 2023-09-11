@@ -88,7 +88,7 @@ func (agent *client) loadConfigAndSetupAgentFunc() func() error {
 			// why 1024. view https://github.com/holdno/snowFlakeByGo
 			utils.InitIDWorker(clusterID % 1024)
 			agent.logger = wlog.With()
-			agent.scheduler = initScheduler()
+			agent.scheduler = initScheduler(agent)
 			agent.daemon = daemon.NewProjectDaemon(nil, agent.logger)
 
 			if cfg.RegisterAddress != "" {

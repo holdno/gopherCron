@@ -53,8 +53,9 @@ func (ts *TaskScheduler) PlanHashDebouncer() func() {
 	return ts.consistency.debounce
 }
 
-func initScheduler() *TaskScheduler {
+func initScheduler(agent *client) *TaskScheduler {
 	scheduler := &TaskScheduler{
+		a:                     agent,
 		TaskEventChan:         make(chan *common.TaskEvent, 3000),
 		TaskExecuteResultChan: make(chan *common.TaskExecuteResult, 3000),
 		consistency:           &consistency{},
