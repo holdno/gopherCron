@@ -14,10 +14,10 @@ import (
 	"github.com/holdno/gopherCron/pkg/infra/register"
 	"github.com/holdno/gopherCron/pkg/warning"
 	"github.com/holdno/gopherCron/utils"
-	"go.uber.org/zap"
 
 	wregister "github.com/spacegrower/watermelon/infra/register"
 	"github.com/spacegrower/watermelon/infra/wlog"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
 
