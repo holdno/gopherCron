@@ -456,7 +456,7 @@ func (a *app) refreshCenterSrvList() error {
 	old := a.__centerConncets
 	a.__centerConncets = centerMap
 	for _, key := range old.Keys() {
-		if srv, exist := centerMap.Get(key); !exist {
+		if srv, exist := centerMap.Get(key); exist {
 			srv.Close()
 		}
 	}
