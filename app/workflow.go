@@ -445,7 +445,9 @@ func (a *app) GetWorkflow(id int64) (*common.Workflow, error) {
 func (a *app) GetWorkflowList(opts common.GetWorkflowListOptions, page, pagesize uint64) ([]common.Workflow, int, error) {
 	// TODO get user workflow
 	selector := selection.NewSelector()
-	selector.AddQuery(selection.NewRequirement("oid", selection.Equals, opts.OID))
+	if opts.OID != "" {
+		selector.AddQuery(selection.NewRequirement("oid", selection.Equals, opts.OID))
+	}
 	if len(opts.IDs) > 0 {
 		selector.AddQuery(selection.NewRequirement("id", selection.In, opts.IDs))
 	}

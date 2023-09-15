@@ -84,9 +84,12 @@ func apiServer(srv app.App, conf *config.ServiceConfig) {
 
 		agentVersion, exist := GetAgentVersionFromContext(ctx)
 		if !exist {
-			return status.Error(codes.Aborted, "header: "+common.GOPHERCRON_AGENT_VERSION_KEY+" is not found")
+			// return status.Error(codes.Aborted, "header: "+common.GOPHERCRON_AGENT_VERSION_KEY+" is not found")
+			middleware.SetAgentVersion(ctx, "v2.1.1") // 如果没有version说明是比较老的版本，最后一个没有version的版本是2.1.1
+		} else {
+			middleware.SetAgentVersion(ctx, agentVersion)
 		}
-		middleware.SetAgentVersion(ctx, agentVersion)
+
 		return nil
 	})
 
