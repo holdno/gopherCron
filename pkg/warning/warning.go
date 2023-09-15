@@ -2,6 +2,7 @@ package warning
 
 import (
 	"encoding/json"
+	"time"
 
 	"github.com/spacegrower/watermelon/infra/wlog"
 	"go.uber.org/zap"
@@ -14,6 +15,7 @@ const (
 
 type WarningData struct {
 	Data json.RawMessage `json:"data"`
+	Time int64           `json:"time"`
 	Type string          `json:"type"`
 }
 
@@ -27,6 +29,7 @@ type WorkflowWarning struct {
 func NewWorkflowWarningData(data WorkflowWarning) WarningData {
 	raw, _ := json.Marshal(data)
 	return WarningData{
+		Time: time.Now().Unix(),
 		Data: raw,
 		Type: WarningTypeTask,
 	}
@@ -44,6 +47,7 @@ type TaskWarning struct {
 func NewTaskWarningData(data TaskWarning) WarningData {
 	raw, _ := json.Marshal(data)
 	return WarningData{
+		Time: time.Now().Unix(),
 		Data: raw,
 		Type: WarningTypeTask,
 	}
@@ -58,6 +62,7 @@ type SystemWarning struct {
 func NewSystemWarningData(data SystemWarning) WarningData {
 	raw, _ := json.Marshal(data)
 	return WarningData{
+		Time: time.Now().Unix(),
 		Data: raw,
 		Type: WarningTypeSystem,
 	}
