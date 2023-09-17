@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/holdno/gopherCron/common"
 
 	"github.com/gin-gonic/gin"
@@ -21,26 +22,37 @@ const (
 func main() {
 	engine := gin.New()
 	engine.POST("/webhook", func(c *gin.Context) {
+		projectSecret := c.Request.Header.Get("Authorization")
+		if projectSecret != secret {
+			c.Status(http.StatusUnauthorized)
+			return
+		}
+
 		_body, err := ioutil.ReadAll(c.Request.Body)
 		if err != nil {
 			panic(err)
 		}
 		var req common.WebHookBody
-		if err = json.Unmarshal(_body, &req); err != nil {
+		event := cloudevents.NewEvent()
+		if err = json.Unmarshal(_body, &event); err != nil {
 			c.String(http.StatusBadRequest, "bad request")
 			return
 		}
 
-		sign := req.Sign
-		req.Sign = ""
-
-		newSign := utils.MakeSign(req, "123123")
-		if sign != newSign || time.Now().Unix()-5 > req.RequestTime {
-			c.String(http.StatusUnauthorized, "unauthorized")
+		if err := event.Validate(); err != nil {
+			c.String(http.StatusBadRequest, "bad request")
 			return
 		}
 
-		fmt.Println("handle success")
+		if err = event.DataAs(&req); err != nil {
+			c.String(http.StatusBadRequest, "bad request")
+			return
+		}
+
+		if req.Error != "" {
+			// alert
+			fmt.Println("got task error event", req.TaskName, req.ProjectName, req.Operator, req.Error)
+		}
 
 		c.String(http.StatusOK, req.Result)
 	})

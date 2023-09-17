@@ -33,7 +33,7 @@ func GetTaskList(c *gin.Context) {
 		return
 	}
 
-	if err = srv.CheckPermissions(req.ProjectID, uid); err != nil {
+	if err = srv.CheckPermissions(req.ProjectID, uid, app.PermissionView); err != nil {
 		response.APIError(c, err)
 		return
 	}
@@ -70,23 +70,9 @@ func GetClientList(c *gin.Context) {
 		return
 	}
 
-	isAdmin, err := srv.IsAdmin(uid)
-	if err != nil {
+	if err = srv.CheckPermissions(req.ProjectID, uid, app.PermissionView); err != nil {
 		response.APIError(c, err)
 		return
-	}
-
-	if !isAdmin {
-		exist, err := srv.CheckUserIsInProject(req.ProjectID, uid)
-		if err != nil {
-			response.APIError(c, err)
-			return
-		}
-
-		if !exist {
-			response.APIError(c, errors.ErrUnauthorized)
-			return
-		}
 	}
 
 	if res, err = srv.GetWorkerList(req.ProjectID); err != nil {
@@ -107,6 +93,7 @@ func GetClientList(c *gin.Context) {
 // 通过多个projectID来获取所有workerlist
 // GetWorkerListInfoRequest 获取节点的请求参数
 type GetWorkerListInfoRequest struct {
+	OID        string `json:"oid" form:"oid" binding:"required"`
 	ProjectIDs string `json:"project_ids" form:"project_ids"`
 }
 
@@ -137,7 +124,7 @@ func GetWorkerListInfo(c *gin.Context) {
 		return
 	}
 
-	projects, err := srv.GetUserProjects(uid)
+	projects, err := srv.GetUserProjects(uid, req.OID)
 	if err != nil {
 		response.APIError(c, err)
 		return

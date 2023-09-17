@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en" class="tw-h-full tw-w-full">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+    />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+    <link rel="apple-touch-icon" href="/custom-icon.png" />
+    <title>GopherCron</title>
+
+    <script>
+      if (("standalone" in window.navigator) && window.navigator.standalone) {
+        var noddy, remotes = false;
+        document.addEventListener('click', function (event) {
+          noddy = event.target;
+          while (noddy.nodeName !== "A" && noddy.nodeName !== "HTML") {
+            noddy = noddy.parentNode;
+          }
+          if ('href' in noddy && noddy.href.indexOf('http') !== -1 && (noddy.href.indexOf(document.location.host) !== -1 || remotes)) {
+            event.preventDefault();
+            document.location.href = noddy.href;
+          }
+        }, false);
+      }
+    </script>
+    <script type="module" crossorigin src="/assets/index.858abf03.js"></script>
+    <link rel="stylesheet" href="/assets/index.b50b0268.css">
+  </head>
+
+  <body class="tw-h-full tw-w-full">
+    <div id="app" class="tw-h-full tw-w-full"></div>
+    
+  </body>
+</html>

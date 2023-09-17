@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -9,18 +10,32 @@ import (
 	"github.com/holdno/gocommons/selection"
 	"github.com/holdno/gopherCron/pkg/cronpb"
 	"github.com/holdno/gopherCron/pkg/infra"
+
+	cmap "github.com/orcaman/concurrent-map/v2"
 	"github.com/spacegrower/watermelon/infra/wlog"
 	"go.uber.org/zap"
 )
 
-func (a *app) StreamManager() *streamManager {
+func (a *app) StreamManager() *streamManager[*cronpb.Event] {
 	return a.streamManager
 }
 
-type streamManager struct {
-	aliveSrv        map[string]map[string]*Stream
+func (a *app) StreamManagerV2() *streamManager[*cronpb.ServiceEvent] {
+	return a.streamManagerV2
+}
+
+type streamManager[T any] struct {
+	aliveSrv        map[string]map[string]*Stream[T]
 	hostIndex       map[string]streamHostIndex
 	streamStoreLock sync.RWMutex
+	isV2            bool
+	*responseMap
+}
+
+type streamResponse struct {
+	isClose bool
+	recv    chan *cronpb.ClientEvent
+	mu      *sync.Mutex
 }
 
 type streamHostIndex struct {
@@ -28,9 +43,9 @@ type streamHostIndex struct {
 	two string
 }
 
-type Stream struct {
+type Stream[T any] struct {
 	stream interface {
-		Send(*cronpb.Event) error
+		Send(T) error
 	}
 	cancelFunc  func()
 	CreateTime  time.Time
@@ -41,38 +56,38 @@ type Stream struct {
 	System      int64
 }
 
-func (s *Stream) Cancel() {
+func (s *Stream[T]) Cancel() {
 	if s.cancelFunc != nil {
 		s.cancelFunc()
 	}
 }
 
-func (s *Stream) Send(e *cronpb.Event) error {
+func (s *Stream[T]) Send(e T) error {
 	return s.stream.Send(e)
 }
 
-func (c *streamManager) generateKey(projectID int64, srvName string) string {
+func (c *streamManager[T]) generateKey(projectID int64, srvName string) string {
 	return fmt.Sprintf("%d/%s", projectID, srvName)
 }
 
-func (c *streamManager) generateServiceKey(info infra.NodeMeta) string {
+func (c *streamManager[T]) generateServiceKey(info infra.NodeMeta) string {
 	return fmt.Sprintf("%s_%d_%s_%s_%d_%d", info.Region, info.System, info.ServiceName, info.Host, info.Port, info.RegisterTime)
 }
 
-func (c *streamManager) SaveStream(info infra.NodeMeta, stream interface {
-	Send(*cronpb.Event) error
+func (c *streamManager[T]) SaveStreamV2(info infra.NodeMeta, stream interface {
+	Send(T) error
 }, cancelFunc func()) {
 	c.streamStoreLock.Lock()
 	defer c.streamStoreLock.Unlock()
 	k := c.generateKey(info.System, info.ServiceName)
 	srvList, exist := c.aliveSrv[k]
 	if !exist {
-		srvList = make(map[string]*Stream)
+		srvList = make(map[string]*Stream[T])
 		c.aliveSrv[k] = srvList
 	}
 
 	kk := c.generateServiceKey(info)
-	srvList[kk] = &Stream{
+	srvList[kk] = &Stream[T]{
 		cancelFunc:  cancelFunc,
 		stream:      stream,
 		CreateTime:  time.Unix(0, info.RegisterTime),
@@ -89,7 +104,37 @@ func (c *streamManager) SaveStream(info infra.NodeMeta, stream interface {
 	}
 }
 
-func (c *streamManager) RemoveStream(info infra.NodeMeta) {
+func (c *streamManager[T]) SaveStream(info infra.NodeMeta, stream interface {
+	Send(T) error
+}, cancelFunc func()) {
+	c.streamStoreLock.Lock()
+	defer c.streamStoreLock.Unlock()
+	k := c.generateKey(info.System, info.ServiceName)
+	srvList, exist := c.aliveSrv[k]
+	if !exist {
+		srvList = make(map[string]*Stream[T])
+		c.aliveSrv[k] = srvList
+	}
+
+	kk := c.generateServiceKey(info)
+	srvList[kk] = &Stream[T]{
+		cancelFunc:  cancelFunc,
+		stream:      stream,
+		CreateTime:  time.Unix(0, info.RegisterTime),
+		Host:        info.Host,
+		Port:        int32(info.Port),
+		ServiceName: info.ServiceName,
+		Region:      info.Region,
+		System:      info.System,
+	}
+
+	c.hostIndex[fmt.Sprintf("%s:%d", info.Host, info.Port)] = streamHostIndex{
+		one: k,
+		two: kk,
+	}
+}
+
+func (c *streamManager[T]) RemoveStream(info infra.NodeMeta) {
 	c.streamStoreLock.Lock()
 	defer c.streamStoreLock.Unlock()
 	k := c.generateKey(info.System, info.ServiceName)
@@ -103,7 +148,7 @@ func (c *streamManager) RemoveStream(info infra.NodeMeta) {
 	}
 }
 
-func (c *streamManager) GetStreamsByHost(host string) *Stream {
+func (c *streamManager[T]) GetStreamsByHost(host string) *Stream[T] {
 	if index, exist := c.hostIndex[host]; exist {
 		if levelOne, exist := c.aliveSrv[index.one]; exist {
 			return levelOne[index.two]
@@ -112,7 +157,7 @@ func (c *streamManager) GetStreamsByHost(host string) *Stream {
 	return nil
 }
 
-func (c *streamManager) GetStreams(system int64, srvName string) map[string]*Stream {
+func (c *streamManager[T]) GetStreams(system int64, srvName string) map[string]*Stream[T] {
 	c.streamStoreLock.RLock()
 	defer c.streamStoreLock.RUnlock()
 	srvList, exist := c.aliveSrv[c.generateKey(system, srvName)]
@@ -216,6 +261,88 @@ func (a *app) CalcAgentDataConsistency(done <-chan struct{}) error {
 			return nil
 		case <-a.ctx.Done():
 			return nil
+		}
+	}
+}
+
+type responseMap struct {
+	m cmap.ConcurrentMap[string, *streamResponse]
+}
+
+func (rm *responseMap) Set(ctx context.Context, id string) chan *cronpb.ClientEvent {
+	timeouter := time.NewTimer(time.Second * 5)
+	responser := &streamResponse{
+		recv: make(chan *cronpb.ClientEvent, 1),
+		mu:   &sync.Mutex{},
+	}
+	rm.m.Set(id, responser)
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+			case <-timeouter.C:
+			}
+			timeouter.Stop()
+			responser.mu.Lock()
+			responser.isClose = true
+			close(responser.recv)
+			rm.Remove(id)
+			responser.mu.Unlock()
+			return
+		}
+	}()
+	return responser.recv
+}
+
+func (rm *responseMap) Remove(id string) {
+	rm.m.Remove(id)
+}
+
+func (s *streamManager[T]) RecvStreamResponse(event *cronpb.ClientEvent) {
+	resp, exist := s.responseMap.m.Get(event.Id)
+	if !exist {
+		return
+	}
+
+	if !resp.mu.TryLock() {
+		// 加锁可能是正在清理中，直接丢弃数据
+		return
+	}
+	defer resp.mu.Unlock()
+	if resp.isClose {
+		return
+	}
+
+	select {
+	case resp.recv <- event:
+		resp.isClose = true
+	default:
+		wlog.Error("stream receive chan is full", zap.String("id", event.Id))
+		panic("stream receive chan is full")
+	}
+}
+
+func (s *streamManager[T]) SendEventWaitResponse(ctx context.Context, stream *Stream[*cronpb.ServiceEvent], event *cronpb.ServiceEvent) (*cronpb.ClientEvent, error) {
+	if !s.isV2 {
+		return nil, nil
+	}
+	resp := s.responseMap.Set(ctx, event.Id)
+	defer s.responseMap.Remove(event.Id)
+	if err := stream.Send(event); err != nil {
+		return nil, err
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case result, ok := <-resp:
+			if !ok {
+				return nil, fmt.Errorf("request time out")
+			}
+			if result.Error != nil && result.Error.Error != "" {
+				return nil, errors.New(result.Error.Error)
+			}
+			return result, nil
 		}
 	}
 }

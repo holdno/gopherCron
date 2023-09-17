@@ -104,7 +104,9 @@ var (
 	// ErrUserNotFound 用户不存在
 	ErrUserNotFound = Error{Code: CodeUserNotFound, Msg: "用户不存在", MsgEn: "User not found", Log: "用户不存在"}
 	// ErrCron Cron表达式错误
-	ErrCron = Error{Code: CodeCron, Msg: "cron表达式错误", MsgEn: "Cron was wrong", Log: "cron表达式错误"}
+	ErrCron = Error{Code: CodeCron, Msg: "cron表达式错误", MsgEn: "Cron is wrong", Log: "cron表达式错误"}
+	// ErrCronInterval 调度间隔最细粒度为5s
+	ErrCronInterval = Error{Code: CodeCron, Msg: "cron表达式间隔小于5s，该系统支持的任务调度最细粒度为5秒以上", MsgEn: "scheduling interval is wrong", Log: "cron表达式间隔小于5s，该系统支持的任务调度最细粒度为5秒以上"}
 	// ErrLockAlreadyRequired 抢锁失败
 	ErrLockAlreadyRequired = Error{Code: CodeLockAlreadyRequired, Msg: "抢锁失败，锁已经被占用", MsgEn: "lock error, the lock already required", Log: "etcd 分布式锁抢锁失败"}
 	// ErrLocalIPNotFound 没有获取到网卡ip

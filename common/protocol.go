@@ -19,8 +19,6 @@ const (
 	REMOTE_EVENT_TASK_STOP            = "remote_event_task_stop"
 	REMOTE_EVENT_CHECK_TASK_ISRUNNING = "remote_event_check_task_isrunning"
 
-	CENTER_EVENT_WORKFLOW_REFRESH = "workflow_refresh"
-
 	GOPHERCRON_PROXY_TO_MD_KEY      = "gophercron-proxy-to"
 	GOPHERCRON_PROXY_PROJECT_MD_KEY = "gophercron-proxy-project"
 	GOPHERCRON_AGENT_IP_MD_KEY      = "gophercron-agent-ip"
@@ -28,6 +26,12 @@ const (
 	GOPHERCRON_AGENT_AUTH_KEY       = "gophercron-agent-auth"
 	GOPHERCRON_CENTER_AUTH_KEY      = "gophercron-center-auth"
 )
+
+type TaskWithOperator struct {
+	*TaskInfo
+	UserID   int64  `json:"user_id"`
+	UserName string `json:"user_name"`
+}
 
 // TaskInfo 任务详情
 type TaskInfo struct {
@@ -85,6 +89,8 @@ type TaskSchedulePlan struct {
 	TmpID    string
 	NextTime time.Time
 	Type     PlanType
+	UserId   int64
+	UserName string
 }
 
 type PlanType string
@@ -118,9 +124,9 @@ type TaskExecuteResult struct {
 
 // TaskResultLog 任务执行结果日志
 type TaskResultLog struct {
-	Result      string `json:"result"`
-	SystemError string `json:"system_error"`
-	Error       string `json:"error"`
+	Result   string `json:"result"`
+	Error    string `json:"error"`
+	Operator string `json:"operator,omitempty"`
 }
 
 // ETCD_PREFIX topic prefix  default: /cron
@@ -300,8 +306,8 @@ func GenTaskSchedulerKey(projectID int64, taskID string) string {
 	return fmt.Sprintf("%d_%s", projectID, taskID)
 }
 
-func Unmarshal(value []byte) (*TaskInfo, error) {
-	task := new(TaskInfo)
+func Unmarshal(value []byte) (*TaskWithOperator, error) {
+	task := new(TaskWithOperator)
 	err := json.Unmarshal(value, task)
 	if err != nil {
 		return nil, err
@@ -332,10 +338,10 @@ func ExtractAgentCommand(key string) string {
 
 type TaskEvent struct {
 	EventType int // save delete
-	Task      *TaskInfo
+	Task      *TaskWithOperator
 }
 
-func BuildTaskEvent(eventType int, task *TaskInfo) *TaskEvent {
+func BuildTaskEvent(eventType int, task *TaskWithOperator) *TaskEvent {
 	return &TaskEvent{
 		EventType: eventType,
 		Task:      task,
@@ -343,7 +349,7 @@ func BuildTaskEvent(eventType int, task *TaskInfo) *TaskEvent {
 }
 
 // 构造执行计划
-func BuildTaskSchedulerPlan(task *TaskInfo, planType PlanType) (*TaskSchedulePlan, error) {
+func BuildTaskSchedulerPlan(task *TaskWithOperator, planType PlanType) (*TaskSchedulePlan, error) {
 	var (
 		expr *cronexpr.Expression
 		err  error
@@ -354,7 +360,9 @@ func BuildTaskSchedulerPlan(task *TaskInfo, planType PlanType) (*TaskSchedulePla
 	}
 
 	return &TaskSchedulePlan{
-		Task:     task,
+		Task:     task.TaskInfo,
+		UserId:   task.UserID,
+		UserName: task.UserName,
 		Expr:     expr,
 		NextTime: expr.Next(time.Now()),
 		Type:     planType,
@@ -402,4 +410,19 @@ type AckResponseV1 struct {
 	Type     string `json:"ack"`
 	ClientIP string `json:"client_ip"`
 	TmpID    string `json:"tmp_id"`
+}
+
+type TaskFinishedV2 struct {
+	TaskID     string `json:"task_id"`
+	TaskName   string `json:"task_name"`
+	Command    string `json:"command"`
+	ProjectID  int64  `json:"project_id"`
+	Status     string `json:"status"`
+	WorkflowID int64  `json:"workflow_id"`
+	StartTime  int64  `json:"start_time"`
+	EndTime    int64  `json:"end_time"`
+	TmpID      string `json:"tmp_id"`
+	Result     string `json:"result"`
+	Error      string `json:"error"`
+	Operator   string `json:"operator"`
 }

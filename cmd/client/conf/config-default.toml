@@ -1,7 +1,8 @@
+address = "" # 人工配置agent注册地址，否则自动获取网卡地址
 log_level = "debug"
 report_addr=""
-shell = "/bin/bash"
 
+shell = "/bin/bash"
 timeout = 5
 
 [micro]
@@ -10,12 +11,6 @@ org_id = "gophercron"
 weight = 100
 endpoint = "localhost:6306" # 中心服务的地址，域名也请带上端口号(HA等则仅需带上80 / 443端口号)
 
-# report_addr 与 mysql 选一填写，mysql优先使用
-[mysql]
-service="0.0.0.0:3306"
-username=""
-password=""
-database=""  
 
 [auth]
 public_key = """

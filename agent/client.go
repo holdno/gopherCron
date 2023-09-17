@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -13,10 +14,10 @@ import (
 	"github.com/holdno/gopherCron/pkg/infra/register"
 	"github.com/holdno/gopherCron/pkg/warning"
 	"github.com/holdno/gopherCron/utils"
-	"go.uber.org/zap"
 
 	wregister "github.com/spacegrower/watermelon/infra/register"
 	"github.com/spacegrower/watermelon/infra/wlog"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
 
@@ -32,7 +33,6 @@ type client struct {
 
 	isClose   bool
 	closeChan chan struct{}
-	ClientTaskReporter
 	// etcd       protocol.EtcdManager
 	// protocol.ClientEtcdManager
 	warning.Warner
@@ -41,6 +41,7 @@ type client struct {
 	author    *Author
 
 	cronpb.UnimplementedAgentServer
+	metrics *Metrics
 }
 
 type Client interface {
@@ -87,11 +88,11 @@ func (agent *client) loadConfigAndSetupAgentFunc() func() error {
 			// why 1024. view https://github.com/holdno/snowFlakeByGo
 			utils.InitIDWorker(clusterID % 1024)
 			agent.logger = wlog.With()
-			agent.scheduler = initScheduler()
+			agent.scheduler = initScheduler(agent)
 			agent.daemon = daemon.NewProjectDaemon(nil, agent.logger)
 
-			if cfg.Address != "" {
-				agent.localip = strings.Split(cfg.Address, ":")[0]
+			if cfg.RegisterAddress != "" {
+				agent.localip = strings.Split(cfg.RegisterAddress, ":")[0]
 			}
 			if agent.localip == "" {
 				var err error
@@ -99,22 +100,20 @@ func (agent *client) loadConfigAndSetupAgentFunc() func() error {
 					agent.logger.Panic("failed to get local ip", zap.Error(err))
 				}
 			}
-
+			agent.metrics = NewMonitor(agent.localip)
 		} else if agent.configPath == "" {
 			return fmt.Errorf("invalid config path")
 		}
 
 		if cfg.ReportAddr != "" {
 			agent.logger.Info(fmt.Sprintf("init http task log reporter, address: %s", cfg.ReportAddr))
-			reporter := warning.NewHttpReporter(cfg.ReportAddr)
-			agent.ClientTaskReporter = reporter
-			agent.Warner = reporter
+			agent.Warner = warning.NewHttpReporter(cfg.ReportAddr, func() (string, error) {
+				if agent.author != nil {
+					return agent.author.token, nil
+				}
+				return "", errors.New("author is not init")
+			})
 		} else {
-			agent.logger.Info("init default task log reporter, it must be used mysql config")
-			agent.ClientTaskReporter = NewDefaultTaskReporter(agent.logger, cfg.Mysql)
-		}
-
-		if agent.Warner == nil {
 			agent.Warner = warning.NewDefaultWarner(agent.logger)
 		}
 

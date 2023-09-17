@@ -63,3 +63,7 @@ func TestNewReasonWriter(t *testing.T) {
 		t.Fatal("got unexcept string", r.String())
 	}
 }
+
+func TestVersionCompare(t *testing.T) {
+	t.Log(CompareVersion("v2.1.9999", "v2.1.99"))
+}

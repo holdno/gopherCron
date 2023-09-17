@@ -7,9 +7,10 @@ service Center {
     rpc Auth (AuthReq) returns (AuthReply) {}
     rpc TryLock (stream TryLockRequest) returns (stream TryLockReply) {}
     rpc RegisterAgent (stream RegisterAgentReq) returns (stream Event) {}
+    rpc RegisterAgentV2 (stream ClientEvent) returns (stream ServiceEvent) {}
     rpc StatusReporter (ScheduleReply) returns (Result) {}
     // 面向中心的接口
-    rpc SendEvent (SendEventRequest) returns (Result) {}
+    rpc SendEvent (SendEventRequest) returns (ClientEvent) {}
     rpc RemoveStream (RemoveStreamRequest) returns (Result) {}
 }
 
@@ -29,7 +30,8 @@ message RemoveStreamRequest {
 message SendEventRequest {
     string region = 1;
     int64 project_id = 2;
-    Event event = 3;
+    ServiceEvent event = 3;
+    string agent = 4;
 }
 
 message TryLockRequest {
@@ -50,6 +52,10 @@ message RegisterAgentReq {
     repeated AgentInfo agents = 1;
 }
 
+message RegisterInfo {
+    repeated AgentInfo agents = 3;
+}
+
 message AgentInfo {
     string Version = 1;
     repeated int64 Systems = 2;
@@ -68,6 +74,67 @@ message MethodInfo {
     string Name = 1; 
     bool IsClientStream = 2;
     bool IsServerStream = 3;
+}
+
+enum EventType {
+    EVENT_UNKNOWN = 0;
+    EVENT_REGISTER_REQUEST = 1;
+    EVENT_REGISTER_REPLY = 2;
+    EVENT_SCHEDULE_REQUEST = 3;
+    EVENT_SCHEDULE_REPLY = 4;
+    EVENT_CHECK_RUNNING_REQUEST = 5;
+    EVENT_CHECK_RUNNING_REPLY = 6;
+    EVENT_KILL_TASK_REQUEST = 7;
+    EVENT_KILL_TASK_REPLY = 8;
+    EVENT_PROJECT_TASK_HASH_REQUEST = 9;
+    EVENT_PROJECT_TASK_HASH_REPLY = 10;
+    EVENT_COMMAND_REQUEST = 11;
+    EVENT_COMMAND_REPLY = 12;
+    EVENT_REGISTER_HEARTBEAT_PING = 13;
+    EVENT_REGISTER_HEARTBEAT_PONG = 14;
+    EVENT_SERVICE_UNSUPPORT = 15;
+    EVENT_CLIENT_UNSUPPORT = 16;
+    EVENT_WORKFLOW_REFRESH = 17;
+}
+
+message ServiceEvent {
+    string id = 1;
+    EventType type = 2;
+    int64 event_time = 3;
+    oneof event {
+        Event register_reply = 4;
+        ScheduleRequest schedule_request = 5;
+        CheckRunningRequest check_running_request = 6;
+        KillTaskRequest kill_task_request = 7;
+        ProjectTaskHashRequest project_task_hash_request = 8;
+        CommandRequest command_request = 9;
+        EventUnsupport event_unsupport = 10;
+    }
+}
+
+message ClientEvent {
+    string id = 1;
+    EventType type = 2;
+    int64 event_time = 3;
+    oneof event {
+        RegisterInfo register_info = 4;
+        Result schedule_reply = 5;
+        Result check_running_reply = 6;
+        Result kill_task_reply = 7;
+        ProjectTaskHashReply project_task_hash_reply = 8;
+        Result command_reply = 9;
+        EventUnsupport event_unsupport = 10;
+    }
+    Error error = 100;
+}
+
+message Error {
+    string error = 1;
+}
+
+message EventUnsupport {
+    EventType type = 1;
+    string message = 2;
 }
 
 message Event {

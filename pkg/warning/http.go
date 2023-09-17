@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/holdno/gopherCron/common"
-	"github.com/sirupsen/logrus"
 )
 
 const (
@@ -19,17 +18,18 @@ const (
 )
 
 type HttpReporter struct {
-	logger        *logrus.Logger
 	hc            *http.Client
 	reportAddress string
+	getToken      func() (string, error)
 }
 
-func NewHttpReporter(address string) *HttpReporter {
+func NewHttpReporter(address string, getTokenFunc func() (string, error)) *HttpReporter {
 	return &HttpReporter{
 		hc: &http.Client{
 			Timeout: 5 * time.Second,
 		},
 		reportAddress: address,
+		getToken:      getTokenFunc,
 	}
 }
 
@@ -38,10 +38,15 @@ func (r *HttpReporter) GetReportAddress() string {
 }
 
 func (r *HttpReporter) Warning(data WarningData) error {
+	jwt, err := r.getToken()
+	if err != nil {
+		return fmt.Errorf("failed to get jwt")
+	}
 	b, _ := json.Marshal(data)
 	req, _ := http.NewRequest(http.MethodPost, r.reportAddress, bytes.NewReader(b))
 	req.Header.Add("Content-Type", "application/json")
 	req.Header.Add(ReportHeaderKey, ReportTypeWarning)
+	req.Header.Add("Authorization", jwt)
 
 	resp, err := r.hc.Do(req)
 	if err != nil {

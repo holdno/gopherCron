@@ -91,7 +91,8 @@ func (s *remoteRegistry) Register() error {
 
 	if err := s.register(); err != nil {
 		s.log.Error("failed to register service", zap.Error(err))
-		if err == io.EOF {
+		grpcErr, ok := status.FromError(err)
+		if err == io.EOF || !ok || grpcErr.Code() == codes.Unavailable {
 			time.Sleep(time.Second)
 			if innererr := s.reConnect(); innererr == nil {
 				s.log.Error("failed to reconnect registry", zap.Error(innererr))

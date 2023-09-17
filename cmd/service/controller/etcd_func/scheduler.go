@@ -25,6 +25,7 @@ func TmpExecute(c *gin.Context) {
 		req TmpExecuteRequest
 		err error
 		res []common.ClientInfo
+		uid = utils.GetUserID(c)
 
 		srv = app.GetApp(c)
 	)
@@ -41,10 +42,14 @@ func TmpExecute(c *gin.Context) {
 		response.APIError(c, errors.ErrNoWorkingNode)
 		return
 	}
-
+	user, err := srv.GetUserInfo(uid)
+	if err != nil {
+		response.APIError(c, err)
+		return
+	}
 	taskID := fmt.Sprintf("tmp_%s", utils.GetStrID())
 	// 调用etcd的put方法以触发watcher从而调度该任务
-	if err = srv.TemporarySchedulerTask(&common.TaskInfo{
+	if err = srv.TemporarySchedulerTask(user, &common.TaskInfo{
 		TaskID:    taskID,
 		ProjectID: req.ProjectID,
 		Name:      req.Name,
@@ -72,6 +77,7 @@ func ExecuteTask(c *gin.Context) {
 		err  error
 		task *common.TaskInfo
 		res  []common.ClientInfo
+		uid  = utils.GetUserID(c)
 
 		srv = app.GetApp(c)
 	)
@@ -101,8 +107,13 @@ func ExecuteTask(c *gin.Context) {
 		return
 	}
 
+	user, err := srv.GetUserInfo(uid)
+	if err != nil {
+		response.APIError(c, err)
+		return
+	}
 	// 调用etcd的put方法以触发watcher从而调度该任务
-	if err = srv.TemporarySchedulerTask(task); err != nil {
+	if err = srv.TemporarySchedulerTask(user, task); err != nil {
 		response.APIError(c, err)
 		return
 	}

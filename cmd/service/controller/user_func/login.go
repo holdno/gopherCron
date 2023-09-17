@@ -13,6 +13,15 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func GetLoginMethods(c *gin.Context) {
+	srv := app.GetApp(c)
+
+	allowMap := make(map[string]bool)
+	allowMap["oidc"] = srv.GetOIDCService() != nil
+
+	response.APISuccess(c, allowMap)
+}
+
 type LoginRequest struct {
 	Account  string `form:"account" binding:"required"`
 	Password string `form:"password" binding:"required"`

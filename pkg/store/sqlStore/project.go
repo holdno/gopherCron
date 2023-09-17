@@ -51,6 +51,25 @@ func (s *projectStore) UpdateProject(id int64, title, remark string) error {
 	return nil
 }
 
+func (s *projectStore) GetProjectByID(tx *gorm.DB, pid int64) (*common.Project, error) {
+	var (
+		err error
+		res common.Project
+	)
+
+	if tx == nil {
+		tx = s.GetReplica()
+	}
+
+	if err = tx.Table(s.GetTable()).Where("id = ?", pid).Find(&res).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &res, nil
+}
+
 func (s *projectStore) GetProject(selector selection.Selector) ([]*common.Project, error) {
 	var (
 		err error
@@ -79,8 +98,19 @@ func (s *projectStore) DeleteProject(tx *gorm.DB, selector selection.Selector) e
 	return nil
 }
 
-func (s *projectStore) UpdateRelation(projectID int64, relation string) error {
-	if err := s.GetMaster().Table(s.GetTable()).Where("id = ?", projectID).Update("relation", relation).Error; err != nil {
+func (s *projectStore) DeleteProjectV2(tx *gorm.DB, id int64) error {
+	if tx == nil {
+		tx = s.GetMaster()
+	}
+
+	if err := tx.Table(s.GetTable()).Where("id = ?", id).Delete(nil).Error; err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *projectStore) UpdateToken(projectID int64, token string) error {
+	if err := s.GetMaster().Table(s.GetTable()).Where("id = ?", projectID).Update("token", token).Error; err != nil {
 		return err
 	}
 	return nil

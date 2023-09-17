@@ -16,19 +16,19 @@ import (
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/pkg/cronpb"
 	"github.com/holdno/gopherCron/pkg/warning"
-	"github.com/holdno/gopherCron/protocol"
 	"github.com/holdno/gopherCron/utils"
+
+	"github.com/avast/retry-go/v4"
+	"github.com/sirupsen/logrus"
 	"github.com/spacegrower/watermelon/infra/wlog"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-
-	"github.com/holdno/rego"
-	"github.com/sirupsen/logrus"
 )
 
 // Scheduler 任务调度
 type TaskScheduler struct {
+	a                     *client
 	TaskEventChan         chan *common.TaskEvent // 任务事件队列
 	PlanTable             sync.Map
 	consistency           *consistency
@@ -53,8 +53,9 @@ func (ts *TaskScheduler) PlanHashDebouncer() func() {
 	return ts.consistency.debounce
 }
 
-func initScheduler() *TaskScheduler {
+func initScheduler(agent *client) *TaskScheduler {
 	scheduler := &TaskScheduler{
+		a:                     agent,
 		TaskEventChan:         make(chan *common.TaskEvent, 3000),
 		TaskExecuteResultChan: make(chan *common.TaskExecuteResult, 3000),
 		consistency:           &consistency{},
@@ -123,12 +124,17 @@ func (ts *TaskScheduler) CalcPlanHash() {
 	var (
 		projectPlanList = make(map[int64][]string)
 		commandMap      = make(map[string]string)
+		taskCounter     = 0
 	)
+
 	ts.PlanRange(func(key string, value *common.TaskSchedulePlan) bool {
 		projectPlanList[value.Task.ProjectID] = append(projectPlanList[value.Task.ProjectID], key)
 		commandMap[key] = value.Task.Command
+		taskCounter++
 		return true
 	})
+
+	ts.a.metrics.jobs.With(nil).Set(float64(taskCounter))
 
 	ts.consistency.locker.Lock()
 	defer ts.consistency.locker.Unlock()
@@ -252,7 +258,7 @@ func (a *client) handleTaskEvent(event *common.TaskEvent) {
 		a.TryStartTask(taskSchedulePlan)
 	case common.TASK_EVENT_WORKFLOW_SCHEDULE:
 		// 构建执行计划
-		if taskSchedulePlan, err = common.BuildWorkflowTaskSchedulerPlan(event.Task); err != nil {
+		if taskSchedulePlan, err = common.BuildWorkflowTaskSchedulerPlan(event.Task.TaskInfo); err != nil {
 			logrus.WithField("Error", err.Error()).Error("build task schedule plan error")
 			return
 		}
@@ -331,13 +337,13 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 		if plan.Type == common.ActivePlan {
 			errMsg = "任务执行中，请勿重复执行或稍后再试"
 		}
-		a.Warning(warning.WarningData{
-			Type:      warning.WarningTypeTask,
+		a.Warning(warning.NewTaskWarningData(warning.TaskWarning{
 			AgentIP:   a.localip,
 			TaskName:  plan.Task.Name,
+			TaskID:    plan.Task.TaskID,
 			ProjectID: plan.Task.ProjectID,
-			Data:      errMsg,
-		})
+			Message:   errMsg,
+		}))
 		return errors.New(errMsg)
 	}
 
@@ -359,13 +365,13 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 			if r := recover(); r != nil {
 				var buf [4096]byte
 				n := runtime.Stack(buf[:], false)
-				a.Warning(warning.WarningData{
-					Type:      warning.WarningTypeSystem,
+				a.Warning(warning.NewTaskWarningData(warning.TaskWarning{
 					AgentIP:   a.localip,
 					TaskName:  plan.Task.Name,
+					TaskID:    plan.Task.TaskID,
 					ProjectID: plan.Task.ProjectID,
-					Data:      fmt.Sprintf("任务执行失败，panic: %v\n%s", r, string(buf[:n])),
-				})
+					Message:   fmt.Sprintf("任务执行失败，panic: %v\n%s", r, string(buf[:n])),
+				}))
 
 				a.logger.With(zap.Any("fields", map[string]interface{}{
 					"error":      r,
@@ -382,6 +388,11 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 			taskExecuteInfo.CancelFunc()
 		}()
 		lockError := make(chan error)
+
+		var (
+			result *common.TaskExecuteResult
+		)
+
 		if plan.Task.Noseize != common.TASK_EXECUTE_NOSEIZE {
 			// 远程加锁，加锁失败后如果任务还在运行中，则进行重试，如果重试失败，则强行结束任务
 			var (
@@ -418,6 +429,7 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 								resultChan <- err
 							})
 							if !first {
+								a.metrics.SystemErrInc("agent_task_execute_lock_failure")
 								cancelReason.WriteString(fmt.Sprintf("任务执行过程中锁维持失败,错误信息:%s,agent主动终止任务", err.Error()))
 							}
 							return
@@ -456,60 +468,68 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 					if time.Since(taskExecuteInfo.RealTime).Seconds() < 5 {
 						time.Sleep(5*time.Second - time.Duration(time.Now().Sub(taskExecuteInfo.RealTime).Milliseconds()))
 					}
-
 					unLockFunc()
 				}
 			}()
 		}
 
 		a.scheduler.SetExecutingTask(plan.Task.SchedulerKey(), taskExecuteInfo)
-		var (
-			result *common.TaskExecuteResult
-		)
 		defer func() {
 			// 删除任务的正在执行状态
 			a.scheduler.DeleteExecutingTask(plan.Task.SchedulerKey())
-			f := protocol.TaskFinishedV1{
+			f := common.TaskFinishedV2{
+				TaskName:  taskExecuteInfo.Task.Name,
 				TaskID:    taskExecuteInfo.Task.TaskID,
+				Command:   taskExecuteInfo.Task.Command,
 				ProjectID: taskExecuteInfo.Task.ProjectID,
 				Status:    common.TASK_STATUS_DONE_V2,
-				TmpID:     taskExecuteInfo.Task.TmpID,
+				TmpID:     taskExecuteInfo.TmpID,
+			}
+			if plan.UserId != 0 {
+				f.Operator = fmt.Sprintf("%s(%d)", plan.UserName, plan.UserId)
 			}
 			if taskExecuteInfo.Task.FlowInfo != nil {
 				f.WorkflowID = taskExecuteInfo.Task.FlowInfo.WorkflowID
 			}
-			if result != nil && result.Err != "" {
-				f.Status = common.TASK_STATUS_FAIL_V2
-				f.Result = result.Err
+			if result != nil {
+				f.Result = result.Output
+				f.StartTime = result.StartTime.Unix()
+				f.EndTime = result.EndTime.Unix()
+				if result.Err != "" {
+					f.Status = common.TASK_STATUS_FAIL_V2
+					f.Error = result.Err
+				}
 			}
 			value, _ := json.Marshal(f)
-			if err := rego.Retry(func() error {
+			if err := retry.Do(func() error {
 				ctx, cancel := context.WithTimeout(context.Background(), time.Duration(a.cfg.Timeout)*time.Second)
 				defer cancel()
 				_, err := a.GetStatusReporter()(ctx, &cronpb.ScheduleReply{
 					ProjectId: plan.Task.ProjectID,
 					Event: &cronpb.Event{
 						Type:      common.TASK_STATUS_FINISHED_V2,
-						Version:   "v1",
+						Version:   "v2",
 						Value:     value,
 						EventTime: time.Now().Unix(),
 					},
 				})
 				return err
-			}, rego.WithTimes(3), rego.WithLatestError()); err != nil {
-				a.Warning(warning.WarningData{
-					Type:      warning.WarningTypeTask,
+			}, retry.Attempts(3), retry.DelayType(retry.BackOffDelay),
+				retry.MaxJitter(time.Minute), retry.LastErrorOnly(true)); err != nil {
+				a.metrics.SystemErrInc("agent_status_report_failure")
+				a.Warning(warning.NewTaskWarningData(warning.TaskWarning{
 					AgentIP:   a.localip,
 					TaskName:  plan.Task.Name,
+					TaskID:    plan.Task.TaskID,
 					ProjectID: plan.Task.ProjectID,
-					Data:      "agent上报任务运行结束状态失败:" + err.Error(),
-				})
+					Message:   "agent上报任务运行结束状态失败: " + err.Error(),
+				}))
 				a.logger.Error(fmt.Sprintf("task: %s, id: %s, tmp_id: %s, failed to change running status, the task is finished, error: %v",
-					plan.Task.Name, plan.Task.TaskID, plan.Task.TmpID, err))
+					plan.Task.Name, plan.Task.TaskID, plan.TmpID, err))
 			}
 		}()
 
-		if err := rego.Retry(func() error {
+		if err := retry.Do(func() error {
 			value, _ := json.Marshal(taskExecuteInfo)
 			ctx, cancel := context.WithTimeout(context.Background(), time.Duration(a.cfg.Timeout)*time.Second)
 			defer cancel()
@@ -523,10 +543,12 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 				},
 			})
 			return err
-		}, rego.WithTimes(3), rego.WithLatestError()); err != nil {
+		}, retry.Attempts(3), retry.DelayType(retry.BackOffDelay),
+			retry.MaxJitter(time.Minute), retry.LastErrorOnly(true)); err != nil {
+			a.metrics.SystemErrInc("agent_status_report_failure")
 			a.logger.Error(fmt.Sprintf("task: %s, id: %s, tmp_id: %s, change running status error, %v", plan.Task.Name,
-				plan.Task.TaskID, plan.Task.TmpID, err))
-			errDetail := fmt.Errorf("agent上报任务开始运行状态失败: %s", err.Error())
+				plan.Task.TaskID, plan.TmpID, err))
+			errDetail := fmt.Errorf("agent上报任务开始状态失败: %s，任务终止", err.Error())
 			cancelReason.WriteString(errDetail.Error())
 			errSignal.Send(errDetail)
 			taskExecuteInfo.CancelFunc()
@@ -537,7 +559,7 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 		// 执行任务
 		result = a.ExecuteTask(taskExecuteInfo)
 		if result.Err != "" {
-			cancelReason.WriteStringPrefix("任务执行结果:" + result.Err)
+			cancelReason.WriteStringPrefix("任务执行结果: " + result.Err)
 			result.Err = cancelReason.String()
 		}
 		// 执行结束后 返回给scheduler
@@ -551,15 +573,13 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 func (a *client) handleTaskResult(result *common.TaskExecuteResult) {
 	err := utils.RetryFunc(3, func() error {
 		if result.Err != "" {
-			err := a.Warning(warning.WarningData{
-				Data:      result.Err,
-				Type:      warning.WarningTypeTask,
-				TaskName:  result.ExecuteInfo.Task.Name,
-				ProjectID: result.ExecuteInfo.Task.ProjectID,
+			return a.Warning(warning.NewTaskWarningData(warning.TaskWarning{
 				AgentIP:   a.GetIP(),
-			})
-
-			return err
+				TaskName:  result.ExecuteInfo.Task.Name,
+				TaskID:    result.ExecuteInfo.Task.TaskID,
+				ProjectID: result.ExecuteInfo.Task.ProjectID,
+				Message:   result.Err,
+			}))
 		}
 		return nil
 	})
@@ -567,16 +587,6 @@ func (a *client) handleTaskResult(result *common.TaskExecuteResult) {
 	if err != nil {
 		a.logger.Error("task warning report error", zap.Error(err))
 	}
-
-	err = utils.RetryFunc(3, func() error {
-		err := a.ResultReport(result)
-		return err
-	})
-
-	if err != nil {
-		a.logger.Error("task result report error", zap.Error(err))
-	}
-
 }
 
 // 接收任务事件

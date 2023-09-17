@@ -49,10 +49,10 @@ func (s *webHookStore) GetOne(projectID int64, types string) (*common.WebHook, e
 	return &res, nil
 }
 
-func (s *webHookStore) GetList(projectID int64) ([]common.WebHook, error) {
+func (s *webHookStore) GetList(projectID int64) ([]*common.WebHook, error) {
 	var (
 		err error
-		res []common.WebHook
+		res []*common.WebHook
 	)
 
 	err = s.GetReplica().Table(s.GetTable()).Where("project_id = ?", projectID).Find(&res).Error

@@ -13,6 +13,7 @@ import (
 )
 
 type CreateRequest struct {
+	OID    string `json:"oid" form:"oid" binding:"required"`
 	Title  string `json:"title" form:"title" binding:"required"`
 	Remark string `json:"remark" form:"remark"`
 }
@@ -22,7 +23,6 @@ func Create(c *gin.Context) {
 		req     CreateRequest
 		err     error
 		project *common.Project
-		id      int64
 		uid     = utils.GetUserID(c)
 		srv     = app.GetApp(c)
 	)
@@ -32,11 +32,9 @@ func Create(c *gin.Context) {
 		return
 	}
 
-	if project, err = srv.CheckProjectExistByName(req.Title); err != nil {
-		if err != errors.ErrProjectNotExist {
-			response.APIError(c, err)
-			return
-		}
+	if project, err = srv.CheckProjectExist(req.OID, req.Title); err != nil {
+		response.APIError(c, err)
+		return
 	}
 
 	if project != nil {
@@ -53,17 +51,13 @@ func Create(c *gin.Context) {
 		}
 	}()
 
-	if id, err = srv.CreateProject(tx, common.Project{
+	if _, err = srv.CreateProject(tx, common.Project{
+		OID:    req.OID,
 		Title:  req.Title,
 		Remark: req.Remark,
 		UID:    uid,
 		Token:  utils.RandomStr(32),
 	}); err != nil {
-		response.APIError(c, err)
-		return
-	}
-
-	if err = srv.CreateProjectRelevance(tx, id, uid); err != nil {
 		response.APIError(c, err)
 		return
 	}

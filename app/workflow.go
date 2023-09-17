@@ -15,7 +15,6 @@ import (
 	"github.com/holdno/gopherCron/errors"
 	"github.com/holdno/gopherCron/pkg/cronpb"
 	"github.com/holdno/gopherCron/pkg/warning"
-	"github.com/holdno/gopherCron/protocol"
 	"github.com/holdno/gopherCron/utils"
 
 	"github.com/gorhill/cronexpr"
@@ -105,9 +104,24 @@ func (a *app) WorkflowAddUser(workflowID int64, userID int64) error {
 }
 
 func (a *app) CreateWorkflow(userID int64, data common.Workflow) error {
+	isAdmin, err := a.IsAdmin(userID)
+	if err != nil {
+		return err
+	}
+
+	if !isAdmin {
+		exist, err := a.store.OrgRelevance().GetUserOrg(data.OID, userID)
+		if err != nil && err != common.ErrNoRows {
+			return errors.NewError(http.StatusInternalServerError, "创建项目失败，获取用户组织信息失败").WithLog(err.Error())
+		}
+
+		if exist == nil {
+			return errors.NewError(http.StatusForbidden, "无权限")
+		}
+	}
+
 	var (
-		tx  = a.store.BeginTx()
-		err error
+		tx = a.store.BeginTx()
 	)
 
 	if _, err = cronexpr.Parse(data.Cron); err != nil {
@@ -138,18 +152,15 @@ func (a *app) CreateWorkflow(userID int64, data common.Workflow) error {
 	if err = tx.Commit().Error; err != nil {
 		return errors.NewError(http.StatusInternalServerError, "存储事务提交失败").WithLog(err.Error())
 	}
-	err = a.notifyCenterToRefreshWorkflowPlan()
-	return err
+	return a.notifyCenterToRefreshWorkflowPlan()
 }
 
 func (a *app) notifyCenterToRefreshWorkflowPlan() error {
 	err := a.DispatchEvent(&cronpb.SendEventRequest{
 		Region:    a.cfg.Micro.Region,
 		ProjectId: 0,
-		Event: &cronpb.Event{
-			Type:      common.CENTER_EVENT_WORKFLOW_REFRESH,
-			Version:   "v1",
-			Value:     []byte("refresh_now"),
+		Event: &cronpb.ServiceEvent{
+			Type:      cronpb.EventType_EVENT_WORKFLOW_REFRESH,
 			EventTime: time.Now().Unix(),
 		},
 	})
@@ -177,7 +188,7 @@ func checkUserWorkflowPermission(checkFunc interface {
 
 func (a *app) CreateWorkflowTask(userID int64, data common.WorkflowTask) error {
 	var err error
-	if err = a.CheckPermissions(data.ProjectID, userID); err != nil {
+	if err = a.CheckPermissions(data.ProjectID, userID, PermissionView); err != nil {
 		return err
 	}
 
@@ -193,7 +204,7 @@ func (a *app) CreateWorkflowTask(userID int64, data common.WorkflowTask) error {
 }
 
 func (a *app) UpdateWorkflowTask(userID int64, data common.WorkflowTask) error {
-	if err := a.CheckPermissions(data.ProjectID, userID); err != nil {
+	if err := a.CheckPermissions(data.ProjectID, userID, PermissionView); err != nil {
 		return err
 	}
 
@@ -205,7 +216,7 @@ func (a *app) UpdateWorkflowTask(userID int64, data common.WorkflowTask) error {
 }
 
 func (a *app) DeleteWorkflowTask(userID, projectID int64, taskID string) error {
-	if err := a.CheckPermissions(projectID, userID); err != nil {
+	if err := a.CheckPermissions(projectID, userID, PermissionView); err != nil {
 		return err
 	}
 
@@ -434,6 +445,9 @@ func (a *app) GetWorkflow(id int64) (*common.Workflow, error) {
 func (a *app) GetWorkflowList(opts common.GetWorkflowListOptions, page, pagesize uint64) ([]common.Workflow, int, error) {
 	// TODO get user workflow
 	selector := selection.NewSelector()
+	if opts.OID != "" {
+		selector.AddQuery(selection.NewRequirement("oid", selection.Equals, opts.OID))
+	}
 	if len(opts.IDs) > 0 {
 		selector.AddQuery(selection.NewRequirement("id", selection.In, opts.IDs))
 	}
@@ -649,20 +663,61 @@ func (a *app) killWorkflowTasks(region string, killList []WorkflowTaskInfo) erro
 	ctx, _ := utils.GetContextWithTimeout()
 
 	for _, v := range killList {
-		agents, err := a.FindAgents(region, v.ProjectID)
+		err := func() error {
+			streams, err := a.FindAgentsV2(region, v.ProjectID)
+			if err != nil {
+				return err
+			}
+			if len(streams) > 0 {
+				defer func() {
+					for _, stream := range streams {
+						stream.Close()
+					}
+				}()
+				for _, stream := range streams {
+					_, err := stream.SendEvent(ctx, &cronpb.SendEventRequest{
+						Region:    region,
+						ProjectId: v.ProjectID,
+						Agent:     stream.addr,
+						Event: &cronpb.ServiceEvent{
+							Id:        utils.GetStrID(),
+							EventTime: time.Now().Unix(),
+							Type:      cronpb.EventType_EVENT_KILL_TASK_REQUEST,
+							Event: &cronpb.ServiceEvent_KillTaskRequest{
+								KillTaskRequest: &cronpb.KillTaskRequest{
+									ProjectId: v.ProjectID,
+									TaskId:    v.TaskID,
+								},
+							},
+						},
+					})
+					if err != nil {
+						return err
+					}
+				}
+			} else {
+				agents, err := a.FindAgents(region, v.ProjectID)
+				if err != nil {
+					return err
+				}
+				for _, a := range agents {
+					if _, err = a.KillTask(ctx, &cronpb.KillTaskRequest{
+						ProjectId: v.ProjectID,
+						TaskId:    v.TaskID,
+					}); err != nil {
+						a.Close()
+						return errors.NewError(http.StatusInternalServerError, "停止任务请求失败, agent: "+a.addr).WithLog(err.Error())
+					}
+					a.Close()
+				}
+			}
+
+			return nil
+		}()
 		if err != nil {
 			return err
 		}
-		for _, a := range agents {
-			if _, err = a.KillTask(ctx, &cronpb.KillTaskRequest{
-				ProjectId: v.ProjectID,
-				TaskId:    v.TaskID,
-			}); err != nil {
-				a.Close()
-				return errors.NewError(http.StatusInternalServerError, "停止任务请求失败, agent: "+a.addr).WithLog(err.Error())
-			}
-			a.Close()
-		}
+
 	}
 	return nil
 }
@@ -768,12 +823,12 @@ func (p *WorkflowPlan) Finished(withError error) error {
 	defer func() {
 		if failedReason.Len() > 0 {
 			failedReason.WriteStringPrefix(fmt.Sprintf("Workflow \"%s\" 运行失败", p.Workflow.Title))
-			p.runner.app.Warning(warning.WarningData{
-				Type:      warning.WarningTypeTask,
-				TaskName:  p.Workflow.Title,
-				ProjectID: states[0].ProjectID,
-				Data:      failedReason.String(),
-			})
+			p.runner.app.Warning(warning.NewWorkflowWarningData(warning.WorkflowWarning{
+				WorkflowID:    p.Workflow.ID,
+				WorkflowTitle: p.Workflow.Title,
+				ServiceIP:     p.runner.app.GetIP(),
+				Message:       failedReason.String(),
+			}))
 		}
 	}()
 
@@ -813,6 +868,7 @@ func (p *WorkflowPlan) Finished(withError error) error {
 	finalState.Reason = failedReason.String()
 	finalState.Records = states
 	finalState.EndTime = time.Now().Unix()
+	finalState.Status = common.TASK_STATUS_FINISHED_V2
 
 	p.runner.app.PublishMessage(messageWorkflowStatusChanged(p.Workflow.ID, finalState.Status))
 
@@ -826,11 +882,12 @@ func (p *WorkflowPlan) Finished(withError error) error {
 		return clearWorkflowKeys(p.runner.etcd.KV, p.Workflow.ID)
 	}, rego.WithPeriod(time.Second), rego.WithTimes(3), rego.WithLatestError())
 	if err != nil {
-		p.runner.app.Warning(warning.WarningData{
-			Type:     warning.WarningTypeSystem,
-			TaskName: p.Workflow.Title,
-			Data:     fmt.Sprintf("workflow: %s, 运行结束时清除运行状态失败, 失败原因: %s", p.Workflow.Title, err.Error()),
-		})
+		p.runner.app.Warning(warning.NewWorkflowWarningData(warning.WorkflowWarning{
+			WorkflowID:    p.Workflow.ID,
+			WorkflowTitle: p.Workflow.Title,
+			ServiceIP:     p.runner.app.GetIP(),
+			Message:       fmt.Sprintf("workflow: %s, 运行结束时清除运行状态失败, 失败原因: %s", p.Workflow.Title, err.Error()),
+		}))
 		return err
 	}
 
@@ -839,21 +896,23 @@ func (p *WorkflowPlan) Finished(withError error) error {
 			return p.runner.app.killWorkflowTasks(p.runner.app.GetConfig().Micro.Region, killList)
 		}, rego.WithPeriod(time.Second), rego.WithTimes(3), rego.WithLatestError())
 		if err != nil {
-			p.runner.app.Warning(warning.WarningData{
-				Type:     warning.WarningTypeSystem,
-				TaskName: p.Workflow.Title,
-				Data:     fmt.Sprintf("workflow: %s, 运行结束时强杀任务失败, 失败原因: %s", p.Workflow.Title, err.Error()),
-			})
+			p.runner.app.Warning(warning.NewWorkflowWarningData(warning.WorkflowWarning{
+				WorkflowID:    p.Workflow.ID,
+				WorkflowTitle: p.Workflow.Title,
+				ServiceIP:     p.runner.app.GetIP(),
+				Message:       fmt.Sprintf("workflow: %s, 运行结束时强杀任务失败, 失败原因: %s", p.Workflow.Title, err.Error()),
+			}))
 			return err
 		}
 	}
 
 	if err = p.runner.app.CreateWorkflowLog(finalState.WorkflowID, finalState.StartTime, finalState.EndTime, string(result)); err != nil {
-		p.runner.app.Warning(warning.WarningData{
-			Type:     warning.WarningTypeSystem,
-			TaskName: p.Workflow.Title,
-			Data:     fmt.Sprintf("workflow: %s, 执行结果入库失败, 失败原因: %s", p.Workflow.Title, err.Error()),
-		})
+		p.runner.app.Warning(warning.NewWorkflowWarningData(warning.WorkflowWarning{
+			WorkflowID:    p.Workflow.ID,
+			WorkflowTitle: p.Workflow.Title,
+			ServiceIP:     p.runner.app.GetIP(),
+			Message:       fmt.Sprintf("workflow: %s, 执行结果入库失败, 失败原因: %s", p.Workflow.Title, err.Error()),
+		}))
 		return err
 	}
 
@@ -896,16 +955,18 @@ func (a *workflowRunner) scheduleWorkflowPlan(plan *WorkflowPlan) error {
 
 	for _, v := range needToScheduleTasks {
 		task := plan.Tasks[v]
-		a.scheduleEventChan <- common.BuildTaskEvent(common.TASK_EVENT_WORKFLOW_SCHEDULE, &common.TaskInfo{
-			TaskID:    task.TaskID,
-			Name:      task.TaskName,
-			ProjectID: task.ProjectID,
-			Command:   task.Command,
-			Remark:    task.Remark,
-			Timeout:   task.Timeout,
-			Noseize:   task.Noseize,
-			FlowInfo: &common.WorkflowInfo{
-				WorkflowID: plan.Workflow.ID,
+		a.scheduleEventChan <- common.BuildTaskEvent(common.TASK_EVENT_WORKFLOW_SCHEDULE, &common.TaskWithOperator{
+			TaskInfo: &common.TaskInfo{
+				TaskID:    task.TaskID,
+				Name:      task.TaskName,
+				ProjectID: task.ProjectID,
+				Command:   task.Command,
+				Remark:    task.Remark,
+				Timeout:   task.Timeout,
+				Noseize:   task.Noseize,
+				FlowInfo: &common.WorkflowInfo{
+					WorkflowID: plan.Workflow.ID,
+				},
 			},
 		})
 	}
@@ -1339,7 +1400,7 @@ BreakHere:
 	}
 }
 
-func (a *workflowRunner) handleTaskResultV1(agentIP string, data protocol.TaskFinishedV1) error {
+func (a *workflowRunner) handleTaskResultV1(agentIP string, data *common.TaskFinishedV2) error {
 	var (
 		next         = true
 		planFinished bool
@@ -1390,13 +1451,12 @@ func (a *workflowRunner) handleTaskResultV1(agentIP string, data protocol.TaskFi
 func (a *workflowRunner) handleTaskEvent(event *common.TaskEvent) {
 	defer func() {
 		if r := recover(); r != nil {
-			a.app.Warning(warning.WarningData{
-				Data: fmt.Sprintf("workflow任务调度失败，workflow_id: %d\n panic: %v",
+			a.app.Warning(warning.NewWorkflowWarningData(warning.WorkflowWarning{
+				WorkflowID: event.Task.FlowInfo.WorkflowID,
+				ServiceIP:  a.app.GetIP(),
+				Message: fmt.Sprintf("workflow任务调度失败，workflow_id: %d\n panic: %v",
 					event.Task.FlowInfo.WorkflowID, r),
-				Type:      warning.WarningTypeSystem,
-				TaskName:  event.Task.Name,
-				ProjectID: event.Task.ProjectID,
-			})
+			}))
 		}
 	}()
 	switch event.EventType {
@@ -1406,16 +1466,16 @@ func (a *workflowRunner) handleTaskEvent(event *common.TaskEvent) {
 			return
 		}
 
-		err := a.scheduleTask(event.Task)
+		err := a.scheduleTask(event.Task.TaskInfo)
 		if err != nil {
 			wlog.Error("failed to schedule workflow task", zap.Error(err))
-			a.app.Warning(warning.WarningData{
-				Data: fmt.Sprintf("workflow任务调度失败，workflow_id: %d\n%s",
+			a.app.Warning(warning.NewWorkflowWarningData(warning.WorkflowWarning{
+				WorkflowID:    event.Task.FlowInfo.WorkflowID,
+				WorkflowTitle: plan.Workflow.Title,
+				ServiceIP:     a.app.GetIP(),
+				Message: fmt.Sprintf("workflow任务调度失败，workflow_id: %d\n%s",
 					event.Task.FlowInfo.WorkflowID, err.Error()),
-				Type:      warning.WarningTypeSystem,
-				TaskName:  event.Task.Name,
-				ProjectID: event.Task.ProjectID,
-			})
+			}))
 		}
 	}
 }

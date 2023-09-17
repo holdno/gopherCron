@@ -29,12 +29,14 @@ func (n NodeMetaRemote) WithMeta(meta register.NodeMeta) NodeMetaRemote {
 
 // register node meta
 type NodeMeta struct {
-	OrgID        string            `json:"org_id"`
-	Region       string            `json:"region"`
-	System       int64             `json:"system"`
-	Weight       int32             `json:"weigth"`
-	RegisterTime int64             `json:"register_time"`
-	Tags         map[string]string `json:"tags"`
+	OrgID                 string            `json:"org_id"`
+	Region                string            `json:"region"`
+	System                int64             `json:"system"`
+	Weight                int32             `json:"weigth"`
+	RegisterTime          int64             `json:"register_time"`
+	Tags                  map[string]string `json:"tags"`
+	CenterServiceEndpoint string            `json:"cse"`
+	CenterServiceRegion   string            `json:"csr"`
 	register.NodeMeta
 }
 

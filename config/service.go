@@ -3,17 +3,17 @@ package config
 var serviceConf *ServiceConfig
 
 type ClientConfig struct {
-	Shell      string `toml:"shell,omitempty"`
-	LogLevel   string `toml:"log_level"`
-	LogFile    string `toml:"log_file"`
-	ReportAddr string `toml:"report_addr"`
-	Timeout    int    `toml:"timeout"`
-	Token      string `toml:"token"`
-	Address    string `toml:"address"`
+	Shell           string `toml:"shell,omitempty"`
+	LogLevel        string `toml:"log_level"`
+	LogFile         string `toml:"log_file"`
+	ReportAddr      string `toml:"report_addr"`
+	Timeout         int    `toml:"timeout"`
+	Token           string `toml:"token"`
+	Address         string `toml:"address"`
+	RegisterAddress string `toml:"register_address"`
 
-	Auth  AgentAuth  `toml:"auth"`
-	Micro Micro      `toml:"micro"`
-	Mysql *MysqlConf `toml:"mysql"`
+	Auth  AgentAuth `toml:"auth"`
+	Micro Micro     `toml:"micro"`
 }
 
 type AgentAuth struct {
@@ -56,8 +56,9 @@ type OIDC struct {
 }
 
 type Publish struct {
-	Enable   bool   `toml:"enable"`
-	Endpoint string `toml:"endpoint"`
+	Enable   bool              `toml:"enable"`
+	Endpoint string            `toml:"endpoint"`
+	Header   map[string]string `toml:"header"`
 }
 
 type Micro struct {
@@ -86,15 +87,6 @@ type EtcdConf struct {
 	Prefix      string   `toml:"prefix"`
 	Projects    []int64  `toml:"projects,omitempty"`
 	Shell       string   `toml:"shell,omitempty"`
-}
-
-// MongoDBConf mongodb连接配置
-type MongoDBConf struct {
-	Service       []string `toml:"service"`
-	Username      string   `toml:"username"`
-	Password      string   `toml:"password"`
-	Table         string   `toml:"table"`
-	AuthMechanism string   `toml:"auth_mechanism"`
 }
 
 type MysqlConf struct {
