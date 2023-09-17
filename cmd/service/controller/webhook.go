@@ -10,7 +10,7 @@ import (
 type CreateWebHookRequest struct {
 	ProjectID   int64  `json:"project_id" form:"project_id" binding:"required"`
 	CallBackURL string `json:"call_back_url" form:"call_back_url" binding:"required"`
-	Types       string `json:"types" form:"types"`
+	Type        string `json:"type" form:"type" binding:"required"`
 }
 
 func CreateWebHook(c *gin.Context) {
@@ -31,7 +31,7 @@ func CreateWebHook(c *gin.Context) {
 		return
 	}
 
-	if err = srv.CreateWebHook(req.ProjectID, req.Types, req.CallBackURL); err != nil {
+	if err = srv.CreateWebHook(req.ProjectID, req.Type, req.CallBackURL); err != nil {
 		response.APIError(c, err)
 		return
 	}
@@ -72,7 +72,7 @@ func GetWebHookList(c *gin.Context) {
 
 type GetWebHookRequest struct {
 	ProjectID int64  `json:"project_id" form:"project_id" binding:"required"`
-	Types     string `json:"types" form:"types"`
+	Type      string `json:"type" form:"type"`
 }
 
 func GetWebHook(c *gin.Context) {
@@ -93,7 +93,7 @@ func GetWebHook(c *gin.Context) {
 		return
 	}
 
-	webhook, err := srv.GetWebHook(req.ProjectID, req.Types)
+	webhook, err := srv.GetWebHook(req.ProjectID, req.Type)
 	if err != nil {
 		response.APIError(c, err)
 		return
@@ -104,7 +104,7 @@ func GetWebHook(c *gin.Context) {
 
 type DeleteWebHookRequest struct {
 	ProjectID int64  `json:"project_id" form:"project_id" binding:"required"`
-	Types     string `json:"types" form:"types" binding:"required"`
+	Type      string `json:"type" form:"type" binding:"required"`
 }
 
 func DeleteWebHook(c *gin.Context) {
@@ -125,7 +125,7 @@ func DeleteWebHook(c *gin.Context) {
 		return
 	}
 
-	if err = srv.DeleteWebHook(nil, req.ProjectID, req.Types); err != nil {
+	if err = srv.DeleteWebHook(nil, req.ProjectID, req.Type); err != nil {
 		response.APIError(c, err)
 		return
 	}

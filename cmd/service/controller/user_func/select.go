@@ -1,6 +1,8 @@
 package user_func
 
 import (
+	"sort"
+
 	"github.com/holdno/gopherCron/app"
 	"github.com/holdno/gopherCron/cmd/service/response"
 	"github.com/holdno/gopherCron/common"
@@ -140,6 +142,18 @@ func GetUsersUnderTheProject(c *gin.Context) {
 			v.Permission = user.Role
 		}
 	}
+
+	sort.Slice(res, func(i, j int) bool {
+		ic, exist := usersMap.Get(res[i].ID)
+		if !exist {
+			return false
+		}
+		jc, exist := usersMap.Get(res[j].ID)
+		if !exist {
+			return true
+		}
+		return ic.CreateTime > jc.CreateTime
+	})
 
 	response.APISuccess(c, &gin.H{
 		"list": utils.TernaryOperation(res != nil, res, []struct{}{}),

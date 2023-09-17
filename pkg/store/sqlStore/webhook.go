@@ -55,7 +55,7 @@ func (s *webHookStore) GetList(projectID int64) ([]*common.WebHook, error) {
 		res []*common.WebHook
 	)
 
-	err = s.GetReplica().Table(s.GetTable()).Where("project_id = ?", projectID).Find(&res).Error
+	err = s.GetReplica().Table(s.GetTable()).Where("project_id = ?", projectID).Order("create_time DESC").Find(&res).Error
 	if err != nil {
 		return nil, err
 	}

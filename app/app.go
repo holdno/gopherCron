@@ -1052,6 +1052,7 @@ func (a *app) CreateUser(u common.User) error {
 
 func (a *app) GetProjectRelevanceUsers(pid int64) ([]*common.ProjectRelevance, error) {
 	opt := selection.NewSelector(selection.NewRequirement("project_id", selection.Equals, pid))
+	opt.AddOrder("create_time DESC")
 	res, err := a.store.ProjectRelevance().GetList(opt)
 	if err != nil && err != gorm.ErrRecordNotFound {
 		errObj := errors.ErrInternalError

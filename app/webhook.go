@@ -20,11 +20,19 @@ import (
 )
 
 func (a *app) CreateWebHook(projectID int64, types, callbackUrl string) error {
-	err := a.store.WebHook().Create(common.WebHook{
+	hook, err := a.GetWebHook(projectID, types)
+	if err != nil {
+		return err
+	}
+
+	if hook != nil {
+		return errors.NewError(http.StatusForbidden, "当前webhook类型已存在")
+	}
+
+	err = a.store.WebHook().Create(common.WebHook{
 		CallbackURL: callbackUrl,
 		ProjectID:   projectID,
 		Type:        types,
-		Secret:      utils.RandomStr(32),
 		CreateTime:  time.Now().Unix(),
 	})
 
