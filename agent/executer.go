@@ -26,7 +26,8 @@ func (a *client) ExecuteTask(info *common.TaskExecutingInfo) *common.TaskExecute
 		StartTime:   time.Now(), // 记录任务开始时间
 	}
 
-	cmd = exec.CommandContext(info.CancelCtx, a.cfg.Shell, "-c", info.Task.Command)
+	cmd = forkProcess(info.CancelCtx, a.cfg.Shell, info.Task.Command)
+	// cmd = exec.CommandContext(info.CancelCtx, a.cfg.Shell, "-c", info.Task.Command)
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Setpgid: true,
 	}
