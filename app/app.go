@@ -640,42 +640,51 @@ func (a *app) GetUserProjects(uid int64, oid string) ([]*common.ProjectWithUserR
 	if err != nil {
 		return nil, err
 	}
-	if !isAdmin {
-		opt.AddQuery(selection.NewRequirement("uid", selection.Equals, uid))
-	}
-
-	res, err := a.store.ProjectRelevance().GetList(opt)
-	if err != nil {
-		errObj := errors.ErrInternalError
-		errObj.Msg = "无法获取用户关联产品信息"
-		errObj.Log = err.Error()
-		return nil, errObj
-	}
 
 	projectsMap := hashmap.New[int64, *common.ProjectRelevance]()
-	for _, v := range res {
-		projectsMap.Put(v.ProjectID, v)
+	projectOpt := selection.NewSelector(selection.NewRequirement("oid", selection.Equals, oid))
+	if !isAdmin {
+		opt.AddQuery(selection.NewRequirement("uid", selection.Equals, uid))
+		res, err := a.store.ProjectRelevance().GetList(opt)
+		if err != nil {
+			errObj := errors.ErrInternalError
+			errObj.Msg = "无法获取用户关联产品信息"
+			errObj.Log = err.Error()
+			return nil, errObj
+		}
+
+		for _, v := range res {
+			projectsMap.Put(v.ProjectID, v)
+		}
+
+		projectOpt.AddQuery(selection.NewRequirement("id", selection.In, projectsMap.Keys()))
 	}
 
-	opt = selection.NewSelector(selection.NewRequirement("oid", selection.Equals, oid),
-		selection.NewRequirement("id", selection.In, projectsMap.Keys()))
-	projects, err := a.store.Project().GetProject(opt)
+	projects, err := a.store.Project().GetProject(projectOpt)
 	if err != nil && err != gorm.ErrRecordNotFound {
 		return nil, errors.NewError(http.StatusInternalServerError, "无法获取项目信息").WithLog(err.Error())
 	}
 
 	var list []*common.ProjectWithUserRole
 	for _, v := range projects {
-		userPermission, exist := projectsMap.Get(v.ID)
-		if !exist {
-			continue
+		var role string
+		if isAdmin {
+			role = common.PERMISSION_ADMIN
+		} else {
+			userPermission, exist := projectsMap.Get(v.ID)
+			if !exist {
+				continue
+			}
+
+			role = userPermission.Role
+			if role == "" {
+				role = common.PERMISSION_USER
+			}
 		}
-		if userPermission.Role == "" {
-			userPermission.Role = common.PERMISSION_USER
-		}
+
 		list = append(list, &common.ProjectWithUserRole{
 			Project: v,
-			Role:    userPermission.Role,
+			Role:    role,
 		})
 	}
 

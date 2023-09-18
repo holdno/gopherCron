@@ -26,6 +26,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
@@ -357,6 +358,7 @@ type CenterClient struct {
 	cronpb.CenterClient
 	cancel func()
 	addr   string
+	cc     *grpc.ClientConn
 }
 
 func (c *CenterClient) Close() {
@@ -401,7 +403,16 @@ func resolveCenterService(a *app) {
 }
 
 func (a *app) GetCenterSrvList() ([]*CenterClient, error) {
-	return a.__centerConncets.Values(), nil
+	list := a.__centerConncets.Values()
+	for _, v := range list {
+		if v.cc.GetState() != connectivity.Ready {
+			a.refreshCenterSrvList()
+			continue
+		}
+	}
+
+	list = a.__centerConncets.Values()
+	return list, nil
 }
 
 func (a *app) refreshCenterSrvList() error {
@@ -449,17 +460,20 @@ func (a *app) refreshCenterSrvList() error {
 			cancel: func() {
 				cc.Close()
 			},
+			cc: cc,
 		}
 		centerMap.Put(cacheKey, centerSrv)
 	}
 
 	old := a.__centerConncets
-	a.__centerConncets = centerMap
 	for _, key := range old.Keys() {
-		if srv, exist := centerMap.Get(key); exist {
+		if _, exist := centerMap.Get(key); !exist {
+			srv, _ := old.Get(key)
 			srv.Close()
 		}
 	}
+	a.__centerConncets = centerMap
+
 	old.Clear()
 	return err
 }

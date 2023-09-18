@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/holdno/gopherCron/app"
@@ -358,6 +359,8 @@ Here:
 				s.app.StreamManager().SaveStream(meta, req, cancel)
 			}
 
+			registerStream = append(registerStream, registerStreamOnce...)
+
 			for _, info := range multiService.Agents {
 				for _, v := range info.Systems {
 					// Dispatch 依赖 gRPC stream, 所以需要先 SaveStream 再 DispatchAgentJob
@@ -366,8 +369,6 @@ Here:
 					}
 				}
 			}
-
-			registerStream = append(registerStream, registerStreamOnce...)
 
 			go func() {
 				ticker := time.NewTicker(time.Second * 10)
@@ -440,6 +441,8 @@ func (s *cronRpc) RegisterAgentV2(req cronpb.Center_RegisterAgentV2Server) error
 			s.app.StreamManagerV2().RemoveStream(meta)
 		}
 	}()
+
+	heartbeatOnce := sync.Once{}
 Here:
 	for {
 		select {
@@ -499,6 +502,8 @@ Here:
 				s.app.StreamManagerV2().SaveStream(meta, req, cancel)
 			}
 
+			registerStream = append(registerStream, registerStreamOnce...)
+
 			for _, info := range multiService.Agents {
 				for _, v := range info.Systems {
 					// Dispatch 依赖 gRPC stream, 所以需要先 SaveStream 再 DispatchAgentJob
@@ -508,28 +513,29 @@ Here:
 				}
 			}
 
-			registerStream = append(registerStream, registerStreamOnce...)
-
-			go func() {
-				ticker := time.NewTicker(time.Second * 10)
-				defer ticker.Stop()
-				for {
-					select {
-					case <-ctx.Done():
-						return
-					case <-ticker.C:
-						s.eventsMetricsInc()
-						if err := req.Send(&cronpb.ServiceEvent{
-							Id:        utils.GetStrID(),
-							Type:      cronpb.EventType_EVENT_REGISTER_HEARTBEAT_PING,
-							EventTime: time.Now().Unix(),
-						}); err != nil {
-							cancel()
+			heartbeatOnce.Do(func() { // 一个stream仅需要建立一个长连接
+				go func() {
+					ticker := time.NewTicker(time.Second * 10)
+					defer ticker.Stop()
+					for {
+						select {
+						case <-ctx.Done():
 							return
+						case <-ticker.C:
+							s.eventsMetricsInc()
+							if err := req.Send(&cronpb.ServiceEvent{
+								Id:        utils.GetStrID(),
+								Type:      cronpb.EventType_EVENT_REGISTER_HEARTBEAT_PING,
+								EventTime: time.Now().Unix(),
+							}); err != nil {
+								cancel()
+								return
+							}
 						}
 					}
-				}
-			}()
+				}()
+			})
+
 		case <-ctx.Done():
 			break Here
 		}
