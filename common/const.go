@@ -1,5 +1,9 @@
 package common
 
+import (
+	"github.com/jinzhu/gorm"
+)
+
 const (
 	TASK_EVENT_SAVE              = 1
 	TASK_EVENT_DELETE            = 2
@@ -35,14 +39,19 @@ const (
 	AGENT_COMMAND_RELOAD_CONFIG = "reload_config"
 
 	// Database
-	ADMIN_USER_ACCOUNT    = "admin"
-	ADMIN_USER_PASSWORD   = "123456"
-	ADMIN_USER_PERMISSION = "admin,user"
-	ADMIN_USER_NAME       = "administrator"
-	ADMIN_PROJECT         = "admin_project"
+	ADMIN_USER_ID         int64 = 1
+	ADMIN_USER_ACCOUNT          = "admin"
+	ADMIN_USER_PASSWORD         = "123456"
+	ADMIN_USER_PERMISSION       = "admin,user"
+	ADMIN_USER_NAME             = "administrator"
+	ADMIN_PROJECT               = "admin_project"
 
-	WEBHOOK_TYPE_TASK_START    = "task_start"
-	WEBHOOK_TYPE_TASK_FINISHED = "task_finished"
+	PERMISSION_ADMIN   = "admin"
+	PERMISSION_MANAGER = "manager"
+	PERMISSION_USER    = "user"
+
+	WEBHOOK_TYPE_TASK_RESULT  = "task-result"
+	WEBHOOK_TYPE_TASK_FAILURE = "task-failure"
 
 	ACK_RESPONSE_V1 = "v1"
 
@@ -58,3 +67,5 @@ var (
 	// common
 	LocalIP = ""
 )
+
+var ErrNoRows = gorm.ErrRecordNotFound

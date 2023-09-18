@@ -24,10 +24,9 @@ func CleanLogs(c *gin.Context) {
 	}
 
 	var (
-		err   error
-		req   CleanLogsRequest
-		srv   = app.GetApp(c)
-		exist bool
+		err error
+		req CleanLogsRequest
+		srv = app.GetApp(c)
 	)
 
 	if err = utils.BindArgsWithGin(c, &req); err != nil {
@@ -35,22 +34,8 @@ func CleanLogs(c *gin.Context) {
 		return
 	}
 
-	isAdmin, err := srv.IsAdmin(uid)
-	if err != nil {
+	if err = srv.CheckPermissions(req.ProjectID, uid, app.PermissionDelete); err != nil {
 		response.APIError(c, err)
-		return
-	}
-
-	if !isAdmin {
-		if exist, err = srv.CheckUserIsInProject(req.ProjectID, uid); err != nil {
-			response.APIError(c, err)
-			return
-		}
-
-		if !exist {
-			response.APIError(c, errors.ErrProjectNotExist)
-			return
-		}
 	}
 
 	if req.TaskID == "" {

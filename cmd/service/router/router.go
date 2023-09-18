@@ -58,6 +58,7 @@ func SetupRoute(srv app.App, r *gin.Engine, conf *config.ServiceConfig) {
 
 	api := r.Group("/api/v1")
 	{
+		api.GET("/login_methods", user_func.GetLoginMethods)
 		api.GET("/version", system.GetVersion)
 		user := api.Group("/user")
 		{
@@ -83,6 +84,14 @@ func SetupRoute(srv app.App, r *gin.Engine, conf *config.ServiceConfig) {
 			webhook.POST("/delete", controller.DeleteWebHook)
 			webhook.GET("/list", controller.GetWebHookList)
 			webhook.GET("/info", controller.GetWebHook)
+		}
+
+		org := api.Group("/org")
+		{
+			org.Use(middleware.TokenVerify([]byte(conf.JWT.PublicKey)))
+			org.GET("/list", controller.GetUserOrgList)
+			org.POST("/create", controller.CreateOrg)
+			org.POST("/delete", controller.DeleteOrg)
 		}
 
 		cron := api.Group("/crontab")
@@ -160,6 +169,7 @@ func SetupRoute(srv app.App, r *gin.Engine, conf *config.ServiceConfig) {
 			project.GET("/users", user_func.GetUsersUnderTheProject)
 			project.POST("/remove_user", project_func.RemoveUser)
 			project.POST("/add_user", project_func.AddUser)
+			project.POST("/re_gen_token", project_func.ReGenToken)
 			workflow := project.Group("/workflow")
 			{
 				workflow.GET("/task/list", project_func.GetProjectWorkflowTasks)

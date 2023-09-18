@@ -68,7 +68,7 @@ func (r *TaskResultReporter) ResultReport(result *common.TaskExecuteResult) erro
 	}
 
 	if result.Err != "" {
-		taskResult.SystemError = result.Err
+		taskResult.Error = result.Err
 		getError = 1
 	}
 

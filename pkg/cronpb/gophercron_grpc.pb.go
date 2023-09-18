@@ -19,12 +19,13 @@ import (
 const _ = grpc.SupportPackageIsVersion7
 
 const (
-	Center_Auth_FullMethodName           = "/cronpb.Center/Auth"
-	Center_TryLock_FullMethodName        = "/cronpb.Center/TryLock"
-	Center_RegisterAgent_FullMethodName  = "/cronpb.Center/RegisterAgent"
-	Center_StatusReporter_FullMethodName = "/cronpb.Center/StatusReporter"
-	Center_SendEvent_FullMethodName      = "/cronpb.Center/SendEvent"
-	Center_RemoveStream_FullMethodName   = "/cronpb.Center/RemoveStream"
+	Center_Auth_FullMethodName            = "/cronpb.Center/Auth"
+	Center_TryLock_FullMethodName         = "/cronpb.Center/TryLock"
+	Center_RegisterAgent_FullMethodName   = "/cronpb.Center/RegisterAgent"
+	Center_RegisterAgentV2_FullMethodName = "/cronpb.Center/RegisterAgentV2"
+	Center_StatusReporter_FullMethodName  = "/cronpb.Center/StatusReporter"
+	Center_SendEvent_FullMethodName       = "/cronpb.Center/SendEvent"
+	Center_RemoveStream_FullMethodName    = "/cronpb.Center/RemoveStream"
 )
 
 // CenterClient is the client API for Center service.
@@ -34,9 +35,10 @@ type CenterClient interface {
 	Auth(ctx context.Context, in *AuthReq, opts ...grpc.CallOption) (*AuthReply, error)
 	TryLock(ctx context.Context, opts ...grpc.CallOption) (Center_TryLockClient, error)
 	RegisterAgent(ctx context.Context, opts ...grpc.CallOption) (Center_RegisterAgentClient, error)
+	RegisterAgentV2(ctx context.Context, opts ...grpc.CallOption) (Center_RegisterAgentV2Client, error)
 	StatusReporter(ctx context.Context, in *ScheduleReply, opts ...grpc.CallOption) (*Result, error)
 	// 面向中心的接口
-	SendEvent(ctx context.Context, in *SendEventRequest, opts ...grpc.CallOption) (*Result, error)
+	SendEvent(ctx context.Context, in *SendEventRequest, opts ...grpc.CallOption) (*ClientEvent, error)
 	RemoveStream(ctx context.Context, in *RemoveStreamRequest, opts ...grpc.CallOption) (*Result, error)
 }
 
@@ -119,6 +121,37 @@ func (x *centerRegisterAgentClient) Recv() (*Event, error) {
 	return m, nil
 }
 
+func (c *centerClient) RegisterAgentV2(ctx context.Context, opts ...grpc.CallOption) (Center_RegisterAgentV2Client, error) {
+	stream, err := c.cc.NewStream(ctx, &Center_ServiceDesc.Streams[2], Center_RegisterAgentV2_FullMethodName, opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &centerRegisterAgentV2Client{stream}
+	return x, nil
+}
+
+type Center_RegisterAgentV2Client interface {
+	Send(*ClientEvent) error
+	Recv() (*ServiceEvent, error)
+	grpc.ClientStream
+}
+
+type centerRegisterAgentV2Client struct {
+	grpc.ClientStream
+}
+
+func (x *centerRegisterAgentV2Client) Send(m *ClientEvent) error {
+	return x.ClientStream.SendMsg(m)
+}
+
+func (x *centerRegisterAgentV2Client) Recv() (*ServiceEvent, error) {
+	m := new(ServiceEvent)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 func (c *centerClient) StatusReporter(ctx context.Context, in *ScheduleReply, opts ...grpc.CallOption) (*Result, error) {
 	out := new(Result)
 	err := c.cc.Invoke(ctx, Center_StatusReporter_FullMethodName, in, out, opts...)
@@ -128,8 +161,8 @@ func (c *centerClient) StatusReporter(ctx context.Context, in *ScheduleReply, op
 	return out, nil
 }
 
-func (c *centerClient) SendEvent(ctx context.Context, in *SendEventRequest, opts ...grpc.CallOption) (*Result, error) {
-	out := new(Result)
+func (c *centerClient) SendEvent(ctx context.Context, in *SendEventRequest, opts ...grpc.CallOption) (*ClientEvent, error) {
+	out := new(ClientEvent)
 	err := c.cc.Invoke(ctx, Center_SendEvent_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -153,9 +186,10 @@ type CenterServer interface {
 	Auth(context.Context, *AuthReq) (*AuthReply, error)
 	TryLock(Center_TryLockServer) error
 	RegisterAgent(Center_RegisterAgentServer) error
+	RegisterAgentV2(Center_RegisterAgentV2Server) error
 	StatusReporter(context.Context, *ScheduleReply) (*Result, error)
 	// 面向中心的接口
-	SendEvent(context.Context, *SendEventRequest) (*Result, error)
+	SendEvent(context.Context, *SendEventRequest) (*ClientEvent, error)
 	RemoveStream(context.Context, *RemoveStreamRequest) (*Result, error)
 	mustEmbedUnimplementedCenterServer()
 }
@@ -173,10 +207,13 @@ func (UnimplementedCenterServer) TryLock(Center_TryLockServer) error {
 func (UnimplementedCenterServer) RegisterAgent(Center_RegisterAgentServer) error {
 	return status.Errorf(codes.Unimplemented, "method RegisterAgent not implemented")
 }
+func (UnimplementedCenterServer) RegisterAgentV2(Center_RegisterAgentV2Server) error {
+	return status.Errorf(codes.Unimplemented, "method RegisterAgentV2 not implemented")
+}
 func (UnimplementedCenterServer) StatusReporter(context.Context, *ScheduleReply) (*Result, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method StatusReporter not implemented")
 }
-func (UnimplementedCenterServer) SendEvent(context.Context, *SendEventRequest) (*Result, error) {
+func (UnimplementedCenterServer) SendEvent(context.Context, *SendEventRequest) (*ClientEvent, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SendEvent not implemented")
 }
 func (UnimplementedCenterServer) RemoveStream(context.Context, *RemoveStreamRequest) (*Result, error) {
@@ -259,6 +296,32 @@ func (x *centerRegisterAgentServer) Send(m *Event) error {
 
 func (x *centerRegisterAgentServer) Recv() (*RegisterAgentReq, error) {
 	m := new(RegisterAgentReq)
+	if err := x.ServerStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+func _Center_RegisterAgentV2_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(CenterServer).RegisterAgentV2(&centerRegisterAgentV2Server{stream})
+}
+
+type Center_RegisterAgentV2Server interface {
+	Send(*ServiceEvent) error
+	Recv() (*ClientEvent, error)
+	grpc.ServerStream
+}
+
+type centerRegisterAgentV2Server struct {
+	grpc.ServerStream
+}
+
+func (x *centerRegisterAgentV2Server) Send(m *ServiceEvent) error {
+	return x.ServerStream.SendMsg(m)
+}
+
+func (x *centerRegisterAgentV2Server) Recv() (*ClientEvent, error) {
+	m := new(ClientEvent)
 	if err := x.ServerStream.RecvMsg(m); err != nil {
 		return nil, err
 	}
@@ -353,6 +416,12 @@ var Center_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "RegisterAgent",
 			Handler:       _Center_RegisterAgent_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+		{
+			StreamName:    "RegisterAgentV2",
+			Handler:       _Center_RegisterAgentV2_Handler,
 			ServerStreams: true,
 			ClientStreams: true,
 		},

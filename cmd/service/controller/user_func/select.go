@@ -1,11 +1,14 @@
 package user_func
 
 import (
+	"sort"
+
 	"github.com/holdno/gopherCron/app"
 	"github.com/holdno/gopherCron/cmd/service/response"
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/errors"
 	"github.com/holdno/gopherCron/utils"
+	"github.com/ugurcsen/gods-generic/maps/hashmap"
 
 	"github.com/gin-gonic/gin"
 )
@@ -105,7 +108,7 @@ func GetUsersUnderTheProject(c *gin.Context) {
 		return
 	}
 
-	if err = srv.CheckPermissions(req.ProjectID, uid); err != nil {
+	if err = srv.CheckPermissions(req.ProjectID, uid, app.PermissionEdit); err != nil {
 		response.APIError(c, err)
 		return
 	}
@@ -120,15 +123,37 @@ func GetUsersUnderTheProject(c *gin.Context) {
 		return
 	}
 
-	var userIDs []int64
+	usersMap := hashmap.New[int64, *common.ProjectRelevance]()
 	for _, v := range pr {
-		userIDs = append(userIDs, v.UID)
+		usersMap.Put(v.UID, v)
 	}
 
-	if res, err = srv.GetUsersByIDs(userIDs); err != nil {
+	if res, err = srv.GetUsersByIDs(usersMap.Keys()); err != nil {
 		response.APIError(c, err)
 		return
 	}
+
+	for _, v := range res {
+		// 将用户权限替换为项目权限
+		user, exist := usersMap.Get(v.ID)
+		v.Permission = app.RoleUser.IDStr
+		if exist {
+			v.CreateTime = user.CreateTime
+			v.Permission = user.Role
+		}
+	}
+
+	sort.Slice(res, func(i, j int) bool {
+		ic, exist := usersMap.Get(res[i].ID)
+		if !exist {
+			return false
+		}
+		jc, exist := usersMap.Get(res[j].ID)
+		if !exist {
+			return true
+		}
+		return ic.CreateTime > jc.CreateTime
+	})
 
 	response.APISuccess(c, &gin.H{
 		"list": utils.TernaryOperation(res != nil, res, []struct{}{}),

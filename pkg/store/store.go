@@ -16,13 +16,30 @@ type Commons interface {
 	AutoMigrate()
 }
 
+type OrgStore interface {
+	Commons
+	CreateOrg(tx *gorm.DB, obj common.Org) error
+	List(selector selection.Selector) ([]*common.Org, error)
+	Delete(tx *gorm.DB, id string) error
+}
+
+type OrgRelevanceStore interface {
+	Commons
+	Create(tx *gorm.DB, obj common.OrgRelevance) error
+	ListUserOrg(uid int64) ([]*common.OrgRelevance, error)
+	GetUserOrg(oid string, uid int64) (*common.OrgRelevance, error)
+	Delete(tx *gorm.DB, oid string, uid int64) error
+}
+
 type ProjectStore interface {
 	Commons
 	CreateProject(tx *gorm.DB, obj common.Project) (int64, error)
 	UpdateProject(id int64, title, remark string) error
 	GetProject(selector selection.Selector) ([]*common.Project, error)
+	GetProjectByID(tx *gorm.DB, pid int64) (*common.Project, error)
 	DeleteProject(tx *gorm.DB, selector selection.Selector) error
-	UpdateRelation(projectID int64, relation string) error
+	UpdateToken(projectID int64, token string) error
+	DeleteProjectV2(tx *gorm.DB, id int64) error
 }
 
 type ProjectRelevanceStore interface {
@@ -102,7 +119,7 @@ type WorkflowStore interface {
 type TaskWebHookStore interface {
 	Commons
 	Create(data common.WebHook) error
-	GetList(projectID int64) ([]common.WebHook, error)
+	GetList(projectID int64) ([]*common.WebHook, error)
 	GetOne(projectID int64, types string) (*common.WebHook, error)
 	Delete(tx *gorm.DB, projectID int64, types string) error
 	DeleteAll(tx *gorm.DB, projectID int64) error

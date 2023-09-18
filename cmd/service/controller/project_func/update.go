@@ -78,7 +78,7 @@ func RemoveUser(c *gin.Context) {
 		return
 	}
 
-	if err = srv.CheckPermissions(req.ProjectID, uid); err != nil {
+	if err = srv.CheckPermissions(req.ProjectID, uid, app.PermissionEdit); err != nil {
 		response.APIError(c, err)
 		return
 	}
@@ -92,9 +92,35 @@ func RemoveUser(c *gin.Context) {
 	response.APISuccess(c, nil)
 }
 
+type ReGenTokenRequest struct {
+	ProjectID int64 `json:"project_id" form:"project_id" binding:"required"`
+}
+
+func ReGenToken(c *gin.Context) {
+	var (
+		err error
+		req ReGenTokenRequest
+		uid = utils.GetUserID(c)
+		srv = app.GetApp(c)
+	)
+
+	if err = utils.BindArgsWithGin(c, &req); err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	newToken, err := srv.ReGenProjectToken(uid, req.ProjectID)
+	if err != nil {
+		response.APIError(c, err)
+		return
+	}
+	response.APISuccess(c, newToken)
+}
+
 type AddUserRequest struct {
 	ProjectID   int64  `json:"project_id" form:"project_id" binding:"required"`
 	UserAccount string `json:"user_account" form:"user_account" binding:"required"`
+	UserRole    string `json:"user_role" form:"user_role" binding:"required"`
 }
 
 func AddUser(c *gin.Context) {
@@ -111,7 +137,7 @@ func AddUser(c *gin.Context) {
 		return
 	}
 
-	if err = srv.CheckPermissions(req.ProjectID, uid); err != nil {
+	if err = srv.CheckPermissions(req.ProjectID, uid, app.PermissionEdit); err != nil {
 		response.APIError(c, err)
 		return
 	}
@@ -126,15 +152,7 @@ func AddUser(c *gin.Context) {
 		return
 	}
 
-	// 检测用户是否存在项目组中
-	if _, err = srv.CheckUserIsInProject(req.ProjectID, userInfo.ID); err != nil {
-		if err != errors.ErrProjectNotExist {
-			response.APIError(c, err)
-			return
-		}
-	}
-
-	if err = srv.CreateProjectRelevance(nil, req.ProjectID, userInfo.ID); err != nil {
+	if err = srv.CreateProjectRelevance(nil, req.ProjectID, userInfo.ID, req.UserRole); err != nil {
 		response.APIError(c, err)
 		return
 	}

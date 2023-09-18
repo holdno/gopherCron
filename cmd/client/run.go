@@ -25,11 +25,11 @@ func Run(opts *SetupOptions) error {
 	restart := func() {
 		defer func() {
 			if r := recover(); r != nil {
-				_ = client.Warning(warning.WarningData{
-					Data:    fmt.Sprintf("agent %s down", client.GetIP()),
-					Type:    warning.WarningTypeSystem,
-					AgentIP: client.GetIP(),
-				})
+				client.Warning(warning.NewSystemWarningData(warning.SystemWarning{
+					Endpoint: client.GetIP(),
+					Type:     warning.SERVICE_TYPE_AGENT,
+					Message:  fmt.Sprintf("agent %s got panic, %v", client.GetIP(), r),
+				}))
 			}
 		}()
 		client.Loop()

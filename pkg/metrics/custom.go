@@ -1,7 +1,6 @@
 package metrics
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"sync"
@@ -12,15 +11,19 @@ import (
 	"go.uber.org/zap"
 )
 
+var (
+	GOPHERCRON_METRICS_NAMESPACE = "gophercron"
+)
+
 func NewMetrics(serviceName, instance string) *Metrics {
 	m := &Metrics{
 		serviceName: serviceName,
+		ns:          GOPHERCRON_METRICS_NAMESPACE,
 		instance:    instance,
 		counter:     make(map[string]*prometheus.CounterVec),
 		gauge:       make(map[string]*prometheus.GaugeVec),
 		histogram:   make(map[string]*prometheus.HistogramVec),
 		registry:    prometheus.NewRegistry(),
-		pusher:      setupPusherFromEnv(context.TODO(), serviceName),
 	}
 
 	RegisterGoMetrics(m.registry)
@@ -34,6 +37,7 @@ func NewMetrics(serviceName, instance string) *Metrics {
 
 type Metrics struct {
 	serviceName string
+	ns          string
 	instance    string
 	lock        sync.Mutex
 	gauge       map[string]*prometheus.GaugeVec
@@ -52,7 +56,7 @@ func (m *Metrics) CustomInc(name string, key, desc string) {
 	m.lock.Lock()
 	counter, exist := m.counter[name]
 	if !exist {
-		m.counter[name] = m.NewCounterVec(name, "gophercron", m.serviceName, []string{"key", "desc", "instance"})
+		m.counter[name] = m.NewCounterVec(name, []string{"key", "desc", "instance"})
 		counter = m.counter[name]
 	}
 	m.lock.Unlock()
@@ -68,7 +72,7 @@ func (m *Metrics) NewGaugeFunc(name string, labels ...string) func(add float64, 
 	m.lock.Lock()
 	gauge, exist := m.gauge[name]
 	if !exist {
-		m.gauge[name] = m.NewGaugeVec(name, "gophercron", m.serviceName, append([]string{"instance"}, labels...))
+		m.gauge[name] = m.NewGaugeVec(name, append([]string{"instance"}, labels...))
 		gauge = m.gauge[name]
 	} else {
 		wlog.Error("duplic metric registered", zap.String("metric", name), zap.String("component", "metrics.gauge"))
@@ -96,7 +100,7 @@ func (m *Metrics) CustomIncFunc(name string, key, desc string) func() {
 	m.lock.Lock()
 	counter, exist := m.counter[name]
 	if !exist {
-		m.counter[name] = m.NewCounterVec(name, "gophercron", m.serviceName, []string{"key", "desc", "instance"})
+		m.counter[name] = m.NewCounterVec(name, []string{"key", "desc", "instance"})
 		counter = m.counter[name]
 	}
 	m.lock.Unlock()
@@ -115,7 +119,7 @@ func (m *Metrics) NewCounter(name string, labels ...string) func(labels ...strin
 	m.lock.Lock()
 	counter, exist := m.counter[name]
 	if !exist {
-		m.counter[name] = m.NewCounterVec(name, "gophercron", m.serviceName, append([]string{"instance"}, labels...))
+		m.counter[name] = m.NewCounterVec(name, append([]string{"instance"}, labels...))
 		counter = m.counter[name]
 	} else {
 		wlog.Error("duplic metric registered", zap.String("metric", name), zap.String("component", "metrics.counter"))
@@ -142,7 +146,7 @@ func (m *Metrics) NewHistogram(name string, labels ...string) func(labels ...str
 	m.lock.Lock()
 	histogram, exist := m.histogram[name]
 	if !exist {
-		m.histogram[name] = m.NewHistogramVec(name, "gophercron", m.serviceName, append([]string{"instance"}, labels...))
+		m.histogram[name] = m.NewHistogramVec(name, append([]string{"instance"}, labels...))
 		histogram = m.histogram[name]
 	} else {
 		wlog.Error("duplic metric registered", zap.String("metric", name), zap.String("component", "metrics.histogram"))
@@ -169,7 +173,7 @@ func (m *Metrics) CustomHistogramSet(name string, keys ...string) *prometheus.Ti
 	m.lock.Lock()
 	histogram, exist := m.histogram[name]
 	if !exist {
-		m.histogram[name] = m.NewHistogramVec(name, "gophercron", m.serviceName, []string{"key", "instance"})
+		m.histogram[name] = m.NewHistogramVec(name, []string{"key", "instance"})
 		histogram = m.histogram[name]
 	}
 	m.lock.Unlock()

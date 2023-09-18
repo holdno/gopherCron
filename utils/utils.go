@@ -1,17 +1,13 @@
 package utils
 
 import (
-	"bytes"
 	"context"
 	"crypto/md5"
 	"encoding/hex"
-	"encoding/json"
-	"fmt"
 	"math/rand"
 	"net"
 	"os"
 	"reflect"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -184,48 +180,6 @@ RETRY:
 	return nil
 }
 
-func MakeSign(body common.WebHookBody, secret string) string {
-	var (
-		keys       []string
-		signString string
-		params     = make(map[string]interface{})
-	)
-
-	requestString, _ := json.Marshal(body)
-
-	d := json.NewDecoder(bytes.NewReader(requestString))
-	d.UseNumber()
-	_ = d.Decode(&params)
-	for k := range params {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, v := range keys {
-		if params[v] != nil {
-			signString += fmt.Sprintf("%s=%v&", v, params[v])
-		}
-	}
-
-	signString += "key=" + secret
-
-	md5Ctx := md5.New()
-	md5Ctx.Write([]byte(signString))
-	cipherStr := md5Ctx.Sum(nil)
-
-	return hex.EncodeToString(cipherStr)
-}
-
-func VerifySign(body common.WebHookBody, secret string, limit int64) bool {
-	sign := body.Sign
-	body.Sign = ""
-
-	newSign := MakeSign(body, secret)
-	if sign != newSign || time.Now().Unix()-limit > body.RequestTime {
-		return false
-	}
-	return true
-}
-
 func DebugMode() bool {
 	return os.Getenv("GOPHERENV") == "debug"
 }
@@ -328,4 +282,59 @@ func NewReasonWriter() *reasonWriter {
 	return &reasonWriter{
 		s: &strings.Builder{},
 	}
+}
+
+// CompareVersion 后者大于前者返回true
+func CompareVersion(o, n string) bool {
+	o = strings.Split(o, "-")[0]
+	n = strings.Split(n, "-")[0]
+
+	o = strings.TrimPrefix(o, "v")
+	n = strings.TrimPrefix(n, "v")
+
+	parseVersion := func(v string) ([]int, error) {
+		var (
+			newversions []int
+			version     = strings.Split(v, ".")
+		)
+		for _, v := range version {
+			version, err := strconv.Atoi(v)
+			if err != nil {
+				return nil, err
+			}
+
+			newversions = append(newversions, version)
+		}
+		return newversions, nil
+	}
+
+	nvs, err := parseVersion(n)
+	if err != nil {
+		return false
+	}
+	ovs, err := parseVersion(o)
+	if err != nil {
+		return false
+	}
+
+	if len(ovs) != 3 || len(nvs) != 3 {
+		return false
+	}
+
+	if nvs[0] < ovs[0] {
+		return false
+	} else if nvs[0] > ovs[0] {
+		return true
+	}
+
+	if nvs[1] < ovs[1] {
+		return false
+	} else if nvs[1] > ovs[1] {
+		return true
+	}
+
+	if nvs[2] <= ovs[2] {
+		return false
+	}
+	return true
 }

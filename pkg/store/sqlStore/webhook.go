@@ -13,7 +13,7 @@ type webHookStore struct {
 	commonFields
 }
 
-//NewWebHookStore
+// NewWebHookStore
 func NewWebHookStore(provider SqlProviderInterface) store.TaskWebHookStore {
 	repo := &webHookStore{}
 
@@ -30,7 +30,7 @@ func (s *webHookStore) AutoMigrate() {
 }
 
 func (s *webHookStore) Create(data common.WebHook) error {
-	return s.GetMaster().Create(data).Error
+	return s.GetMaster().Table(s.GetTable()).Create(data).Error
 }
 
 func (s *webHookStore) GetOne(projectID int64, types string) (*common.WebHook, error) {
@@ -49,13 +49,13 @@ func (s *webHookStore) GetOne(projectID int64, types string) (*common.WebHook, e
 	return &res, nil
 }
 
-func (s *webHookStore) GetList(projectID int64) ([]common.WebHook, error) {
+func (s *webHookStore) GetList(projectID int64) ([]*common.WebHook, error) {
 	var (
 		err error
-		res []common.WebHook
+		res []*common.WebHook
 	)
 
-	err = s.GetReplica().Table(s.GetTable()).Where("project_id = ?", projectID).Find(&res).Error
+	err = s.GetReplica().Table(s.GetTable()).Where("project_id = ?", projectID).Order("create_time DESC").Find(&res).Error
 	if err != nil {
 		return nil, err
 	}

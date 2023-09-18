@@ -47,14 +47,14 @@ func apiServer(srv app.App, conf *config.ServiceConfig) {
 	for region, proxy := range conf.Micro.RegionProxy {
 		infra.RegisterRegionProxy(region, proxy)
 	}
-
+	rpcImpl := &cronRpc{
+		app:                srv,
+		registerMetricsAdd: srv.Metrics().NewGaugeFunc("agent_register_count", "agent"),
+		eventsMetricsInc:   srv.Metrics().CustomIncFunc("registry_event", "", ""),
+	}
 	newServer := infra.NewCenterServer()
 	server := newServer(func(grpcServer *grpc.Server) {
-		cronpb.RegisterCenterServer(grpcServer, &cronRpc{
-			app:                srv,
-			registerMetricsAdd: srv.Metrics().NewGaugeFunc("agent_register_count", "agent"),
-			eventsMetricsInc:   srv.Metrics().CustomIncFunc("registry_event", "", ""),
-		})
+		cronpb.RegisterCenterServer(grpcServer, rpcImpl)
 	}, newServer.WithRegion(conf.Micro.Region),
 		newServer.WithOrg(conf.Micro.OrgID),
 		newServer.WithAddress([]infra.Address{{ListenAddress: conf.Deploy.Host}}),
@@ -81,6 +81,15 @@ func apiServer(srv app.App, conf *config.ServiceConfig) {
 			return status.Error(codes.Aborted, "header: "+common.GOPHERCRON_AGENT_IP_MD_KEY+" is not found")
 		}
 		middleware.SetAgentIP(ctx, agentIP)
+
+		agentVersion, exist := GetAgentVersionFromContext(ctx)
+		if !exist {
+			// return status.Error(codes.Aborted, "header: "+common.GOPHERCRON_AGENT_VERSION_KEY+" is not found")
+			middleware.SetAgentVersion(ctx, "v2.1.1") // 如果没有version说明是比较老的版本，最后一个没有version的版本是2.1.1
+		} else {
+			middleware.SetAgentVersion(ctx, agentVersion)
+		}
+
 		return nil
 	})
 
@@ -89,6 +98,7 @@ func apiServer(srv app.App, conf *config.ServiceConfig) {
 	// agent 鉴权
 	agentApi.Use(jwt.CenterAuthMiddleware([]byte(srv.GetConfig().JWT.PublicKey)))
 	agentApi.Handler(cronpb.CenterServer.RegisterAgent,
+		cronpb.CenterServer.RegisterAgentV2,
 		cronpb.CenterServer.StatusReporter,
 		cronpb.CenterServer.TryLock)
 
@@ -98,6 +108,8 @@ func apiServer(srv app.App, conf *config.ServiceConfig) {
 
 	server.Use(jwt.AgentAuthMiddleware([]byte(srv.GetConfig().JWT.PublicKey))) // center间鉴权复用agent验证center身份的中间件
 	srv.Run()
+
+	rpcImpl.getCurrentRegisterAddrs = server.Addrs
 	go setupProxy(srv, srv.GetConfig())
 	wlog.Info(fmt.Sprintf("%s, start grpc server, listen on %s\n", utils.GetCurrentTimeText(), conf.Deploy.Host))
 	server.RunUntil(syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL)
@@ -124,11 +136,11 @@ func Run(opts *SetupOptions) error {
 
 	defer func() {
 		if r := recover(); r != nil {
-			srv.Warning(warning.WarningData{
-				Data:    fmt.Sprintf("gophercron service panic: %v", r),
-				Type:    warning.WarningTypeSystem,
-				AgentIP: srv.GetIP(),
-			})
+			srv.Warning(warning.NewSystemWarningData(warning.SystemWarning{
+				Endpoint: srv.GetIP(),
+				Type:     warning.SERVICE_TYPE_CENTER,
+				Message:  fmt.Sprintf("center-service: %s, gophercron service panic: %v", srv.GetIP(), r),
+			}))
 		}
 	}()
 

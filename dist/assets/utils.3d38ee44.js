@@ -1,0 +1,1 @@
+function i(r){return r===""?"EM":r.length>3?r.substring(r.length-2).toUpperCase():r.length<3?r.substring(0,1).toUpperCase():r.substring(1,3).toUpperCase()}function u(r){const e=window.location.search.substring(1).split("&");for(let t=0;t<e.length;t++){const s=e[t].split("=");if(s[0]===r)return s[1]}return""}export{u as a,i as g};

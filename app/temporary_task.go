@@ -1,6 +1,7 @@
 package app
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -143,6 +144,11 @@ func (a *app) TemporaryTaskSchedule(tmpTask common.TemporaryTask) error {
 	if err != nil {
 		return err
 	}
+	userInfo, err := a.GetUserInfo(tmpTask.UserID)
+	if err != nil && err != sql.ErrNoRows {
+		wlog.Error("failed to get tmp task creator", zap.Error(err), zap.Int64("user_id", tmpTask.ID), zap.String("tmp_task_id", tmpTask.TaskID))
+		userInfo = &common.User{}
+	}
 
 	if tmpTask.Command != "" {
 		task.Command = tmpTask.Command
@@ -158,12 +164,11 @@ func (a *app) TemporaryTaskSchedule(tmpTask common.TemporaryTask) error {
 			if err == nil {
 				err = fmt.Errorf("panic: %s", r)
 			}
-			a.Warning(warning.WarningData{
-				Type:      warning.WarningTypeSystem,
-				Data:      fmt.Sprintf("临时任务调度/执行失败, %s, DB Rollback", err.Error()),
-				TaskName:  task.Name,
-				ProjectID: tmpTask.ProjectID,
-			})
+			a.Warning(warning.NewSystemWarningData(warning.SystemWarning{
+				Endpoint: a.GetIP(),
+				Type:     warning.SERVICE_TYPE_CENTER,
+				Message:  fmt.Sprintf("center-service: %s, task-id: %s, 临时任务调度/执行失败, %s, DB Rollback", a.GetIP(), task.TaskID, err.Error()),
+			}))
 			tx.Rollback()
 		} else {
 			tx.Commit()
@@ -174,7 +179,7 @@ func (a *app) TemporaryTaskSchedule(tmpTask common.TemporaryTask) error {
 		return errors.NewError(http.StatusInternalServerError, "更新临时任务调度状态失败").WithLog(err.Error())
 	}
 
-	if err = a.TemporarySchedulerTask(task); err != nil {
+	if err = a.TemporarySchedulerTask(userInfo, task); err != nil {
 		return err
 	}
 	return nil

@@ -7,12 +7,13 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/holdno/gocommons/selection"
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/errors"
 	"github.com/holdno/gopherCron/pkg/cronpb"
-	"github.com/holdno/gopherCron/protocol"
 	"github.com/holdno/gopherCron/utils"
 	"github.com/spacegrower/watermelon/infra/wlog"
+	"github.com/spacegrower/watermelon/pkg/safe"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -56,13 +57,6 @@ func (a *workflowRunner) scheduleTask(taskInfo *common.TaskInfo) error {
 		return nil
 	}
 
-	client, err := a.app.GetAgentClient(a.app.GetConfig().Micro.Region, taskInfo.ProjectID)
-	if err != nil {
-		return errors.NewError(http.StatusInternalServerError, fmt.Sprintf("连接agent客户端失败, project_id: %d", taskInfo.ProjectID)).WithLog(err.Error())
-	}
-
-	defer client.Close()
-
 	_, err = concurrency.NewSTM(cli, func(s concurrency.STM) error {
 		if err = setWorkflowTaskStarting(s, taskInfo); err != nil {
 			return err
@@ -73,26 +67,76 @@ func (a *workflowRunner) scheduleTask(taskInfo *common.TaskInfo) error {
 	ctx, cancel := utils.GetContextWithTimeout()
 	defer cancel()
 	value, _ := json.Marshal(taskInfo)
-	_, err = client.Schedule(ctx, &cronpb.ScheduleRequest{
-		Event: &cronpb.Event{
-			Type:      common.REMOTE_EVENT_WORKFLOW_SCHEDULE,
-			Version:   "v1",
-			Value:     value,
-			EventTime: time.Now().Unix(),
-		},
-	})
-	// addr, taskid, witherr, errdesc
-	a.scheduleAgentMetric(fmt.Sprintf("%d_%s", taskInfo.ProjectID, taskInfo.TaskID), fmt.Sprint(err != nil))
+
+	stream, err := a.app.GetAgentStream(a.app.GetConfig().Micro.Region, taskInfo.ProjectID)
 	if err != nil {
-		wlog.With(zap.Any("fields", map[string]interface{}{
-			"workflow_id": taskInfo.FlowInfo.WorkflowID,
-			"project_id":  taskInfo.ProjectID,
-			"task_id":     taskInfo.TaskID,
-			"tmp_id":      taskInfo.TmpID,
-			"error":       err.Error(),
-		})).Error("schedule workflow task error")
-		return errors.NewError(http.StatusInternalServerError,
-			fmt.Sprintf("调度任务失败, project_id: %d, task_id: %s", taskInfo.ProjectID, taskInfo.TaskID)).WithLog(err.Error())
+		return errors.NewError(http.StatusInternalServerError, fmt.Sprintf("连接agent stream失败, project_id: %d", taskInfo.ProjectID)).WithLog(err.Error())
+	}
+	if stream != nil {
+		defer stream.Close()
+		_, err := stream.SendEvent(ctx, &cronpb.SendEventRequest{
+			Region:    a.app.GetConfig().Micro.Region,
+			ProjectId: taskInfo.ProjectID,
+			Agent:     stream.addr,
+			Event: &cronpb.ServiceEvent{
+				Id:        utils.GetStrID(),
+				EventTime: time.Now().Unix(),
+				Type:      cronpb.EventType_EVENT_SCHEDULE_REQUEST,
+				Event: &cronpb.ServiceEvent_ScheduleRequest{
+					ScheduleRequest: &cronpb.ScheduleRequest{
+						Event: &cronpb.Event{
+							Type:      common.REMOTE_EVENT_WORKFLOW_SCHEDULE,
+							Version:   "v1",
+							Value:     value,
+							EventTime: time.Now().Unix(),
+						},
+					},
+				},
+			},
+		})
+		if err != nil {
+			a.scheduleAgentMetric(fmt.Sprintf("%d_%s", taskInfo.ProjectID, taskInfo.TaskID), fmt.Sprint(err != nil))
+			if err != nil {
+				wlog.With(zap.Any("fields", map[string]interface{}{
+					"workflow_id": taskInfo.FlowInfo.WorkflowID,
+					"project_id":  taskInfo.ProjectID,
+					"task_id":     taskInfo.TaskID,
+					"tmp_id":      taskInfo.TmpID,
+					"error":       err.Error(),
+				})).Error("schedule workflow task error")
+				return errors.NewError(http.StatusInternalServerError,
+					fmt.Sprintf("stream 调度任务失败, project_id: %d, task_id: %s", taskInfo.ProjectID, taskInfo.TaskID)).WithLog(err.Error())
+			}
+		}
+	} else {
+		client, err := a.app.GetAgentClient(a.app.GetConfig().Micro.Region, taskInfo.ProjectID)
+		if err != nil {
+			return errors.NewError(http.StatusInternalServerError, fmt.Sprintf("连接agent客户端失败, project_id: %d", taskInfo.ProjectID)).WithLog(err.Error())
+		}
+
+		defer client.Close()
+
+		_, err = client.Schedule(ctx, &cronpb.ScheduleRequest{
+			Event: &cronpb.Event{
+				Type:      common.REMOTE_EVENT_WORKFLOW_SCHEDULE,
+				Version:   "v1",
+				Value:     value,
+				EventTime: time.Now().Unix(),
+			},
+		})
+		// addr, taskid, witherr, errdesc
+		a.scheduleAgentMetric(fmt.Sprintf("%d_%s", taskInfo.ProjectID, taskInfo.TaskID), fmt.Sprint(err != nil))
+		if err != nil {
+			wlog.With(zap.Any("fields", map[string]interface{}{
+				"workflow_id": taskInfo.FlowInfo.WorkflowID,
+				"project_id":  taskInfo.ProjectID,
+				"task_id":     taskInfo.TaskID,
+				"tmp_id":      taskInfo.TmpID,
+				"error":       err.Error(),
+			})).Error("schedule workflow task error")
+			return errors.NewError(http.StatusInternalServerError,
+				fmt.Sprintf("调度任务失败, project_id: %d, task_id: %s", taskInfo.ProjectID, taskInfo.TaskID)).WithLog(err.Error())
+		}
 	}
 
 	a.app.PublishMessage(messageWorkflowTaskStatusChanged(
@@ -261,7 +305,7 @@ func (s *WorkflowTaskStates) GetLatestScheduleRecord() *WorkflowTaskScheduleReco
 }
 
 // finished 不一定是成功
-func setWorkFlowTaskFinished(kv concurrency.STM, agentIP string, result protocol.TaskFinishedV1) (bool, error) {
+func setWorkFlowTaskFinished(kv concurrency.STM, agentIP string, result *common.TaskFinishedV2) (bool, error) {
 	key := common.BuildWorkflowTaskStatusKey(result.WorkflowID, result.ProjectID, result.TaskID)
 	states := kv.Get(key)
 	planFinished := false
@@ -584,7 +628,7 @@ func clearWorkflowKeys(kv clientv3.KV, workflowID int64) error {
 }
 
 // TemporarySchedulerTask 临时调度任务
-func (a *app) TemporarySchedulerTask(task *common.TaskInfo) error {
+func (a *app) TemporarySchedulerTask(user *common.User, task *common.TaskInfo) error {
 	var (
 		err error
 	)
@@ -592,12 +636,9 @@ func (a *app) TemporarySchedulerTask(task *common.TaskInfo) error {
 	// reset task create time as schedule time
 	task.CreateTime = time.Now().Unix()
 
-	client, err := a.GetAgentClient(a.GetConfig().Micro.Region, task.ProjectID)
-	if err != nil {
-		return err
+	if task.TmpID == "" {
+		task.TmpID = utils.GetStrID()
 	}
-	defer client.Close()
-
 	a.PublishMessage(messageTaskStatusChanged(
 		task.ProjectID,
 		task.TaskID,
@@ -607,24 +648,77 @@ func (a *app) TemporarySchedulerTask(task *common.TaskInfo) error {
 	ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
 	defer cancel()
 
-	value, _ := json.Marshal(task)
-	_, err = client.Schedule(ctx, &cronpb.ScheduleRequest{
-		Event: &cronpb.Event{
-			Type:      common.REMOTE_EVENT_TMP_SCHEDULE,
-			Version:   "v1",
-			Value:     value,
-			EventTime: time.Now().Unix(),
-		},
+	if user == nil {
+		user = &common.User{}
+	}
+	value, _ := json.Marshal(common.TaskWithOperator{
+		TaskInfo: task,
+		UserID:   user.ID,
+		UserName: user.Name,
 	})
+
+	stream, err := a.GetAgentStream(a.GetConfig().Micro.Region, task.ProjectID)
 	if err != nil {
-		grpcErr, _ := status.FromError(err)
-		switch grpcErr.Code() {
-		case codes.AlreadyExists:
-			return errors.NewError(http.StatusInternalServerError,
-				"调度任务失败, 任务运行中...").WithLog(err.Error())
-		default:
-			return errors.NewError(http.StatusInternalServerError,
-				fmt.Sprintf("调度任务失败, project_id: %d, task_id: %s", task.ProjectID, task.TaskID)).WithLog(err.Error())
+		return err
+	}
+	if stream != nil {
+		defer stream.Close()
+		_, err := stream.SendEvent(ctx, &cronpb.SendEventRequest{
+			Region:    a.GetConfig().Micro.Region,
+			ProjectId: task.ProjectID,
+			Agent:     stream.addr,
+			Event: &cronpb.ServiceEvent{
+				Id:        utils.GetStrID(),
+				Type:      cronpb.EventType_EVENT_SCHEDULE_REQUEST,
+				EventTime: time.Now().Unix(),
+				Event: &cronpb.ServiceEvent_ScheduleRequest{
+					ScheduleRequest: &cronpb.ScheduleRequest{
+						Event: &cronpb.Event{
+							Type:      common.REMOTE_EVENT_TMP_SCHEDULE,
+							Version:   "v1",
+							Value:     value,
+							EventTime: time.Now().Unix(),
+						},
+					},
+				},
+			},
+		})
+		if err != nil {
+			grpcErr, _ := status.FromError(err)
+			switch grpcErr.Code() {
+			case codes.AlreadyExists:
+				return errors.NewError(http.StatusInternalServerError,
+					"stream 调度任务失败, 任务运行中...").WithLog(err.Error())
+			default:
+				return errors.NewError(http.StatusInternalServerError,
+					fmt.Sprintf("stream 调度任务失败, project_id: %d, task_id: %s", task.ProjectID, task.TaskID)).WithLog(err.Error())
+			}
+		}
+	} else {
+		client, err := a.GetAgentClient(a.GetConfig().Micro.Region, task.ProjectID)
+		if err != nil {
+			return err
+		}
+		defer client.Close()
+
+		_, err = client.Schedule(ctx, &cronpb.ScheduleRequest{
+			Event: &cronpb.Event{
+				Type:      common.REMOTE_EVENT_TMP_SCHEDULE,
+				Version:   "v1",
+				Value:     value,
+				EventTime: time.Now().Unix(),
+			},
+		})
+		if err != nil {
+			grpcErr, _ := status.FromError(err)
+			switch grpcErr.Code() {
+			case codes.AlreadyExists:
+				return errors.NewError(http.StatusInternalServerError,
+					"调度任务失败, 任务运行中...").WithLog(err.Error())
+			default:
+				return errors.NewError(http.StatusInternalServerError,
+					fmt.Sprintf("调度任务失败, project_id: %d, task_id: %s", task.ProjectID, task.TaskID)).WithLog(err.Error())
+			}
 		}
 	}
 
@@ -671,7 +765,7 @@ func (a *app) SetTaskRunning(agentIP string, execInfo *common.TaskExecutingInfo)
 		return errors.NewError(http.StatusInternalServerError, "设置任务运行状态失败").WithLog(err.Error())
 	}
 
-	a.PublishMessage(messageTaskStatusChanged(execInfo.Task.ProjectID, execInfo.Task.TaskID, execInfo.Task.TmpID, common.TASK_STATUS_RUNNING_V2))
+	a.PublishMessage(messageTaskStatusChanged(execInfo.Task.ProjectID, execInfo.Task.TaskID, execInfo.TmpID, common.TASK_STATUS_RUNNING_V2))
 	return nil
 }
 
@@ -688,16 +782,30 @@ func (a *app) CheckTaskIsRunning(projectID int64, taskID string) ([]common.TaskR
 		return nil, nil
 	}
 	var result []common.TaskRunningInfo
-	agentList, err := a.FindAgents(a.cfg.Micro.Region, projectID)
-	if err != nil {
-		return nil, err
-	}
 
-	defer func() {
-		for _, agent := range agentList {
-			agent.Close()
+	checkFuncV2 := func(stream *CenterClient) (bool, error) {
+		ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
+		defer cancel()
+
+		_, err := stream.SendEvent(ctx, &cronpb.SendEventRequest{
+			Region:    a.cfg.Micro.Region,
+			ProjectId: projectID,
+			Agent:     stream.addr,
+			Event: &cronpb.ServiceEvent{
+				Event: &cronpb.ServiceEvent_CheckRunningRequest{
+					CheckRunningRequest: &cronpb.CheckRunningRequest{
+						ProjectId: projectID,
+						TaskId:    taskID,
+					},
+				},
+			},
+		})
+		if err != nil {
+			return false, err
 		}
-	}()
+
+		return true, nil
+	}
 
 	checkFunc := func(agent *AgentClient) (bool, error) {
 		ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
@@ -717,13 +825,44 @@ func (a *app) CheckTaskIsRunning(projectID int64, taskID string) ([]common.TaskR
 	if err = json.Unmarshal(kv.Value, &runningInfo); err != nil {
 		return nil, err
 	}
-	for _, agent := range agentList {
-		exist, err := checkFunc(agent)
+	streams, err := a.FindAgentsV2(a.cfg.Micro.Region, projectID)
+	if err != nil {
+		return nil, err
+	}
+	if len(streams) > 0 {
+		defer func() {
+			for _, stream := range streams {
+				stream.Close()
+			}
+		}()
+		for _, stream := range streams {
+			exist, err := checkFuncV2(stream)
+			if err != nil {
+				return nil, err
+			}
+			if exist {
+				result = append(result, runningInfo)
+			}
+		}
+	} else {
+		agentList, err := a.FindAgents(a.cfg.Micro.Region, projectID)
 		if err != nil {
 			return nil, err
 		}
-		if exist {
-			result = append(result, runningInfo)
+
+		defer func() {
+			for _, agent := range agentList {
+				agent.Close()
+			}
+		}()
+		for _, agent := range agentList {
+			exist, err := checkFunc(agent)
+			if err != nil {
+				return nil, err
+			}
+			if exist {
+				result = append(result, runningInfo)
+			}
 		}
 	}
 
@@ -749,7 +888,63 @@ func (a *app) DelTaskRunningKey(agentIP string, projectID int64, taskID string) 
 	return nil
 }
 
-func (a *app) HandlerTaskFinished(agentIP string, result protocol.TaskFinishedV1) error {
+func (a *app) SaveTaskLog(agentIP string, result common.TaskFinishedV2) {
+	// log receive
+	logInfo := common.TaskLog{
+		Name:      result.TaskName,
+		Result:    result.Result,
+		StartTime: result.StartTime,
+		EndTime:   result.EndTime,
+		Command:   result.Command,
+		ClientIP:  agentIP,
+		TmpID:     result.TmpID,
+		TaskID:    result.TaskID,
+		ProjectID: result.ProjectID,
+	}
+
+	opts := selection.NewSelector(selection.NewRequirement("id", selection.Equals, result.ProjectID))
+	projects, err := a.store.Project().GetProject(opts)
+	if err != nil {
+		wlog.Error("failed to report task result, the task project not found", zap.Error(err), zap.Int64("project_id", logInfo.ProjectID))
+		return
+	}
+
+	if len(projects) > 0 {
+		logInfo.Project = projects[0].Title
+	}
+
+	taskResult := &common.TaskResultLog{
+		Result:   result.Result,
+		Operator: result.Operator,
+	}
+	if result.Error != "" {
+		logInfo.WithError = 1
+		taskResult.Error = result.Error
+	}
+
+	var (
+		resultBytes    []byte
+		jsonMarshalErr error
+	)
+	if resultBytes, jsonMarshalErr = json.Marshal(taskResult); jsonMarshalErr != nil {
+		resultBytes = []byte("result log json marshal error:" + jsonMarshalErr.Error())
+	}
+
+	logInfo.Result = string(resultBytes)
+
+	if err := a.store.TaskLog().CreateTaskLog(logInfo); err != nil {
+		a.Metrics().CustomInc("system_error", "task_log_saver", result.TaskID)
+		wlog.With(zap.Any("fields", map[string]interface{}{
+			"task_name":  logInfo.Name,
+			"result":     logInfo.Result,
+			"error":      err.Error(),
+			"start_time": time.Unix(logInfo.StartTime, 0).Format("2006-01-02 15:05:05"),
+			"end_time":   time.Unix(logInfo.StartTime, 0).Format("2006-01-02 15:05:05"),
+		})).Error("任务日志入库失败")
+	}
+}
+
+func (a *app) HandlerTaskFinished(agentIP string, result *common.TaskFinishedV2) error {
 	err := a.DelTaskRunningKey(agentIP, result.ProjectID, result.TaskID)
 	if err != nil {
 		return errors.NewError(http.StatusInternalServerError, "设置任务运行状态失败").WithLog(err.Error())
@@ -759,6 +954,10 @@ func (a *app) HandlerTaskFinished(agentIP string, result protocol.TaskFinishedV1
 			return err
 		}
 	}
-	a.PublishMessage(messageTaskStatusChanged(result.ProjectID, result.TaskID, result.TmpID, result.Status))
+
+	safe.Run(func() {
+		a.PublishMessage(messageTaskStatusChanged(result.ProjectID, result.TaskID, result.TmpID, result.Status))
+		a.HandleWebHook(agentIP, result)
+	})
 	return nil
 }

@@ -10,17 +10,11 @@
 <h1 align="center">GopherCron</h1>
 开箱即用的分布式可视化crontab
 
-可以通过配置文件指定某个节点所受理的业务线，从而做到业务统一管理但隔离调度
+[使用文档](https://gophercron.ojbk.io/)
 
-
-### V2.2.0 2023-07-25
-
-增加边缘与中心间的鉴权，配置文件会有调整，等后面稍微有空时我会整理一个使用文档出来。
-
-### Discussions  
+### Discussions
 
 [关于“为系统增加内置环境变量”的讨论](https://github.com/holdno/gopherCron/discussions/21)
-
 
 ### V2
 
@@ -103,4 +97,5 @@ client 配置文件中的 project 配置需要用户先部署 service
 需要将项目 ID 填写在 client 的配置中该 client 才会调度这个项目的任务
 
 ### Chat & QA
+
 - [Discord](https://discord.gg/TCybDnu8)
