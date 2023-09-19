@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/holdno/gopherCron/common"
-	"github.com/spacegrower/watermelon/infra/wlog"
 	"github.com/spacegrower/watermelon/pkg/safe"
 	"go.uber.org/zap"
 )
@@ -19,6 +18,7 @@ import (
 // ExecuteTask 执行任务
 func (a *client) ExecuteTask(info *common.TaskExecutingInfo) *common.TaskExecuteResult {
 	// 启动一个协成来执行shell命令
+
 	var (
 		cmd    *exec.Cmd
 		result *common.TaskExecuteResult
@@ -79,11 +79,11 @@ func (a *client) ExecuteTask(info *common.TaskExecutingInfo) *common.TaskExecute
 			case line := <-stdout:
 				output.WriteString(line)
 				output.WriteString("\n")
-				wlog.Info("task stdout", zap.String("line", line), zap.String("task_id", info.Task.TaskID), zap.String("task_name", info.Task.Name))
+				a.logger.Info("task stdout", zap.String("line", line), zap.String("task_id", info.Task.TaskID), zap.String("task_name", info.Task.Name))
 			case line := <-stderr:
 				output.WriteString(line)
 				output.WriteString("\n")
-				wlog.Info("task stderr", zap.String("line", line), zap.String("task_id", info.Task.TaskID), zap.String("task_name", info.Task.Name))
+				a.logger.Info("task stderr", zap.String("line", line), zap.String("task_id", info.Task.TaskID), zap.String("task_name", info.Task.Name))
 			default:
 			}
 		}
