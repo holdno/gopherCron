@@ -11,6 +11,7 @@ import (
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/errors"
 	"github.com/holdno/gopherCron/pkg/cronpb"
+	"github.com/holdno/gopherCron/pkg/warning"
 	"github.com/holdno/gopherCron/utils"
 	"github.com/spacegrower/watermelon/infra/wlog"
 	"github.com/spacegrower/watermelon/pkg/safe"
@@ -933,7 +934,15 @@ func (a *app) SaveTaskLog(agentIP string, result common.TaskFinishedV2) {
 	logInfo.Result = string(resultBytes)
 
 	if err := a.store.TaskLog().CreateTaskLog(logInfo); err != nil {
-		a.Metrics().CustomInc("system_error", "task_log_saver", result.TaskID)
+		a.Metrics().CustomInc("system_error", "task_log_saver", fmt.Sprintf("%d_%s", result.ProjectID, result.TaskID))
+		a.Warning(warning.NewTaskWarningData(warning.TaskWarning{
+			AgentIP:      logInfo.ClientIP,
+			TaskID:       logInfo.TaskID,
+			TaskName:     logInfo.Name,
+			ProjectID:    logInfo.ProjectID,
+			ProjectTitle: logInfo.Project,
+			Message:      fmt.Sprintf("Center(%s)：任务日志入库失败，原因：%s", a.GetIP(), err.Error()),
+		}))
 		wlog.With(zap.Any("fields", map[string]interface{}{
 			"task_name":  logInfo.Name,
 			"result":     logInfo.Result,

@@ -42,8 +42,11 @@ func (a *client) handlerEventFromCenterV2(ctx context.Context, event *cronpb.Ser
 	case cronpb.EventType_EVENT_REGISTER_HEARTBEAT_PING:
 		replyEvent.Type = cronpb.EventType_EVENT_REGISTER_HEARTBEAT_PONG
 	case cronpb.EventType_EVENT_REGISTER_REPLY:
-		if err := a.handlerEventFromCenter(event.GetRegisterReply()); err != nil {
-			return nil, err
+		data := event.GetRegisterReply()
+		if len(data.Value) != 0 { // 过滤脏数据
+			if err := a.handlerEventFromCenter(data); err != nil {
+				return nil, err
+			}
 		}
 	case cronpb.EventType_EVENT_SCHEDULE_REQUEST:
 		replyEvent.Type = cronpb.EventType_EVENT_SCHEDULE_REPLY
@@ -103,6 +106,8 @@ func (a *client) handlerEventFromCenterV2(ctx context.Context, event *cronpb.Ser
 			Error:     &cronpb.Error{Error: fmt.Sprintf("%s not support", protocol.GetVersion())},
 		}, nil
 	}
+
+	replyEvent.EventTime = time.Now().Unix()
 	return replyEvent, nil
 }
 
@@ -118,7 +123,7 @@ func (a *client) handlerEventFromCenter(event *cronpb.Event) error {
 	case common.REMOTE_EVENT_PUT: // 任务保存
 		// 反序列化task
 		if task, err = common.Unmarshal(event.Value); err != nil {
-			wlog.Error("failed to unmarshal task", zap.String("task", string(event.Value)))
+			wlog.Error("failed to unmarshal task", zap.String("task", string(event.Value)), zap.Error(err))
 			return err
 		}
 		taskEvent = common.BuildTaskEvent(common.TASK_EVENT_SAVE, task)

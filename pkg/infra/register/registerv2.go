@@ -165,7 +165,7 @@ func (s *remoteRegistryV2) register() error {
 	}
 
 	errHandler := func(err error) error {
-		s.log.Warn("recv with error", zap.Error(err))
+		s.log.Error("recv with error", zap.Error(err))
 		time.Sleep(time.Second)
 		grpcErr, ok := status.FromError(err)
 		if err == io.EOF || !ok || grpcErr.Code() == codes.Unavailable {
@@ -206,25 +206,23 @@ func (s *remoteRegistryV2) register() error {
 						continue
 					}
 				}
-				send(reply)
 
-				switch resp.Type {
-				case cronpb.EventType_EVENT_REGISTER_HEARTBEAT_PING:
-					send(&cronpb.ClientEvent{
-						Id:        resp.Id,
-						Type:      cronpb.EventType_EVENT_REGISTER_HEARTBEAT_PONG,
-						EventTime: time.Now().Unix(),
-					})
-				// case "confirm":
-				// 	for _, service := range services {
-				// 		s.log.Info("service registered successful",
-				// 			zap.Any("systems", service.Systems),
-				// 			zap.String("name", service.ServiceName),
-				// 			zap.String("address", fmt.Sprintf("%s:%d", service.Host, service.Port)))
-				// 	}
-				default:
-
+				if reply != nil {
+					if err = send(reply); err != nil {
+						s.log.Error("failed reply center request", zap.Error(err), zap.String("event", resp.Type.String()), zap.String("value", resp.String()))
+					}
 				}
+
+				// switch resp.Type {
+				// case cronpb.EventType_EVENT_REGISTER_HEARTBEAT_PING:
+				// 	send(&cronpb.ClientEvent{
+				// 		Id:        resp.Id,
+				// 		Type:      cronpb.EventType_EVENT_REGISTER_HEARTBEAT_PONG,
+				// 		EventTime: time.Now().Unix(),
+				// 	})
+				// default:
+
+				// }
 			}
 		}
 	})

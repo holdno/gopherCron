@@ -140,7 +140,7 @@ func (a *app) DispatchAgentJob(projectID int64) error {
 		// taskEvent = common.BuildTaskEvent(common.TASK_EVENT_SAVE, task)
 		// 将所有任务加入调度队列
 		// a.scheduler.PushEvent(taskEvent)
-		if strings.Contains(string(kvPair.Key), "t_flow_ack") {
+		if common.IsStatusKey(string(kvPair.Key)) || common.IsAckKey(string(kvPair.Key)) {
 			continue
 		}
 		for _, v := range streamsV1 {

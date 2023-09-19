@@ -4,12 +4,16 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"os/exec"
 	"strings"
-	"syscall"
+	"sync"
 	"time"
 
 	"github.com/holdno/gopherCron/common"
+	"github.com/spacegrower/watermelon/infra/wlog"
+	"github.com/spacegrower/watermelon/pkg/safe"
+	"go.uber.org/zap"
 )
 
 // ExecuteTask 执行任务
@@ -28,17 +32,41 @@ func (a *client) ExecuteTask(info *common.TaskExecutingInfo) *common.TaskExecute
 
 	cmd = forkProcess(info.CancelCtx, a.cfg.Shell, info.Task.Command)
 	// cmd = exec.CommandContext(info.CancelCtx, a.cfg.Shell, "-c", info.Task.Command)
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setpgid: true,
-	}
 	stdoutPipe, _ := cmd.StdoutPipe()
+	stderrPipe, _ := cmd.StderrPipe()
+
+	wait := sync.WaitGroup{}
+	stdScanner := func(ctx context.Context, r io.Reader, lines chan string) {
+		wait.Add(1)
+		s := bufio.NewScanner(r)
+		go safe.Run(func() {
+			defer func() {
+				wait.Done()
+			}()
+			for s.Scan() {
+				lines <- s.Text()
+				if ctx.Err() != nil {
+					return
+				}
+			}
+		})
+	}
 
 	var (
 		output  strings.Builder
 		closeCh = make(chan struct{})
 	)
 	go func() {
-		buf := bufio.NewReader(stdoutPipe)
+		var (
+			stdout = make(chan string)
+			stderr = make(chan string)
+		)
+		defer func() {
+			close(stdout)
+			close(stderr)
+		}()
+		stdScanner(info.CancelCtx, stdoutPipe, stdout)
+		stdScanner(info.CancelCtx, stderrPipe, stderr)
 		for {
 			select {
 			case <-info.CancelCtx.Done():
@@ -48,15 +76,15 @@ func (a *client) ExecuteTask(info *common.TaskExecutingInfo) *common.TaskExecute
 				return
 			case <-closeCh:
 				return
+			case line := <-stdout:
+				output.WriteString(line)
+				output.WriteString("\n")
+				wlog.Info("task stdout", zap.String("line", line), zap.String("task_id", info.Task.TaskID), zap.String("task_name", info.Task.Name))
+			case line := <-stderr:
+				output.WriteString(line)
+				output.WriteString("\n")
+				wlog.Info("task stderr", zap.String("line", line), zap.String("task_id", info.Task.TaskID), zap.String("task_name", info.Task.Name))
 			default:
-				line, err := buf.ReadString('\n')
-				if err != nil {
-					return
-				}
-				if len(line) > 0 {
-					output.WriteString(line)
-					output.WriteString("\n")
-				}
 			}
 		}
 	}()
@@ -110,8 +138,9 @@ func (a *client) ExecuteTask(info *common.TaskExecutingInfo) *common.TaskExecute
 	}
 
 FinishWithError:
+	wait.Wait()
 	close(closeCh)
 	result.EndTime = time.Now()
-	result.Output = output.String()
+	result.Output = strings.TrimSuffix(output.String(), "\n")
 	return result
 }

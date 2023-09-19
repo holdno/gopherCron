@@ -152,6 +152,7 @@ func (a *app) HandleWebHook(agentIP string, res *common.TaskFinishedV2) error {
 	reqData, _ := event.MarshalJSON()
 
 	handleFunc := func(hook *common.WebHook) error {
+		var err error
 		hookURLMaps[hook.CallbackURL].Do(func() {
 			err = retry.Do(func() error {
 				req, _ := http.NewRequest(http.MethodPost, hook.CallbackURL, bytes.NewReader(reqData))
@@ -170,6 +171,7 @@ func (a *app) HandleWebHook(agentIP string, res *common.TaskFinishedV2) error {
 		})
 
 		if err != nil {
+			a.Metrics().CustomInc("handle_webhook", a.GetIP(), fmt.Sprintf("%d", hook.ProjectID))
 			wlog.Error("failed to handle webhook", zap.String("type", hook.Type),
 				zap.Int64("project_id", res.ProjectID), zap.String("task_id", res.TaskID), zap.Error(err))
 			a.Warning(warning.NewTaskWarningData(warning.TaskWarning{

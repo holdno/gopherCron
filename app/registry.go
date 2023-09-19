@@ -164,7 +164,12 @@ func (c *streamManager[T]) GetStreams(system int64, srvName string) map[string]*
 	if !exist {
 		return nil
 	}
-	return srvList
+	// copy map
+	copiedSrvList := make(map[string]*Stream[T], len(srvList))
+	for k, v := range srvList {
+		copiedSrvList[k] = v
+	}
+	return copiedSrvList
 }
 
 type AgentProjectCompareInfo struct {
