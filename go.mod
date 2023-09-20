@@ -30,7 +30,6 @@ require (
 	github.com/gin-contrib/pprof v1.4.0
 	github.com/mikespook/gorbac v2.3.0+incompatible
 	github.com/mwitkow/grpc-proxy v0.0.0-20230212185441-f345521cb9c9
-	github.com/oklog/ulid/v2 v2.1.0
 	github.com/orcaman/concurrent-map/v2 v2.0.1
 	github.com/prometheus/client_golang v1.14.0
 	github.com/spacegrower/watermelon v0.1.1-alpha.23
