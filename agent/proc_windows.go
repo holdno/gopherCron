@@ -10,7 +10,7 @@ import (
 )
 
 func forkProcess(ctx context.Context, shell, command string) *exec.Cmd {
-	cmd := exec.CommandContext(info.CancelCtx, shell, "-c", command)
+	cmd := exec.CommandContext(ctx, shell, "-c", command)
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP,
 	}

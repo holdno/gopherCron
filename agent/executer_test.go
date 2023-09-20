@@ -80,3 +80,20 @@ func TestApp_ExecuteTask(t *testing.T) {
 	time.Sleep(time.Second * 10)
 	fmt.Println("Success!", stdout.String())
 }
+
+func TestResultSub(t *testing.T) {
+	keyword := "啊"
+	var output strings.Builder
+	for i := 0; i < 5000; i++ {
+		output.WriteString(keyword)
+	}
+
+	runeStr := []rune(strings.TrimSuffix(output.String(), "\n"))
+	if len(runeStr) > 5000 {
+		runeStr = runeStr[:5000]
+	}
+
+	result := string(runeStr)
+
+	fmt.Println(len(keyword), len(result), len(runeStr))
+}

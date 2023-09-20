@@ -83,7 +83,7 @@ func (a *client) ExecuteTask(info *common.TaskExecutingInfo) *common.TaskExecute
 			case line := <-stderr:
 				output.WriteString(line)
 				output.WriteString("\n")
-				a.logger.Info("task stderr", zap.String("line", line), zap.String("task_id", info.Task.TaskID), zap.String("task_name", info.Task.Name))
+				a.logger.Error("task stderr", zap.String("line", line), zap.String("task_id", info.Task.TaskID), zap.String("task_name", info.Task.Name))
 			default:
 			}
 		}
@@ -141,6 +141,10 @@ FinishWithError:
 	wait.Wait()
 	close(closeCh)
 	result.EndTime = time.Now()
-	result.Output = strings.TrimSuffix(output.String(), "\n")
+	runeStr := []rune(strings.TrimSuffix(output.String(), "\n"))
+	if len(runeStr) > 5000 {
+		runeStr = runeStr[:5000]
+	}
+	result.Output = string(runeStr)
 	return result
 }
