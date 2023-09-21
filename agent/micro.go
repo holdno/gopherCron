@@ -25,7 +25,9 @@ import (
 	"github.com/spacegrower/watermelon/infra/wlog"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
@@ -98,42 +100,56 @@ func (a *client) MustSetupRemoteRegisterV2() wregister.ServiceRegister[infra.Nod
 		}))
 	}
 
-	r, err := register.NewRemoteRegisterV2(a.localip, func() (register.CenterClient, error) {
-		if a.centerSrv.Cc != nil {
-			a.centerSrv.Cc.Close()
-		}
-		wlog.Debug("start build new center client")
-		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(a.cfg.Timeout)*time.Second)
-		defer cancel()
-		cc, err := grpc.DialContext(ctx, a.cfg.Micro.Endpoint, grpc.WithTransportCredentials(insecure.NewCredentials()),
-			grpc.WithKeepaliveParams(keepalive.ClientParameters{
-				Time:    time.Second * 15,
-				Timeout: time.Second * 5,
-			}),
-			grpc.WithUnaryInterceptor(func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
-				ctx = genMetadata(ctx, cc)
-				if method != cronpb.Center_Auth_FullMethodName {
-					ctx = metadata.AppendToOutgoingContext(ctx, common.GOPHERCRON_AGENT_AUTH_KEY, a.author.Auth(ctx, cc))
+	r, err := register.NewRemoteRegisterV2(a.localip,
+		func() (register.CenterClient, error) { // 建立到center服务的连接
+			if a.centerSrv.Cc != nil { // 每次建立前都尝试关闭一次旧连接，确保不会泄露
+				if a.centerSrv.Cc.GetState() == connectivity.Ready { // 兜底防止错误调用
+					return a.centerSrv, nil
 				}
-				return invoker(ctx, method, req, reply, cc, opts...)
-			}),
-			grpc.WithStreamInterceptor(func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
-				ctx = genMetadata(ctx, cc)
-				if method != cronpb.Center_Auth_FullMethodName {
-					ctx = metadata.AppendToOutgoingContext(ctx, common.GOPHERCRON_AGENT_AUTH_KEY, a.author.Auth(ctx, cc))
-				}
-				return streamer(ctx, desc, cc, method, opts...)
-			}))
-		if err != nil {
-			wlog.Error("failed to dial center service", zap.String("endpoint", a.cfg.Micro.Endpoint), zap.Error(err))
-			return register.CenterClient{}, err
-		}
-		a.centerSrv = register.CenterClient{
-			CenterClient: cronpb.NewCenterClient(cc),
-			Cc:           cc,
-		}
-		return a.centerSrv, nil
-	}, a.handlerEventFromCenterV2)
+				a.centerSrv.Cc.Close()
+			}
+			wlog.Debug("start build new center client")
+			ctx, cancel := context.WithTimeout(context.Background(), time.Duration(a.cfg.Timeout)*time.Second)
+			defer cancel()
+
+			cc, err := grpc.DialContext(ctx, a.cfg.Micro.Endpoint,
+				grpc.WithConnectParams(grpc.ConnectParams{
+					Backoff: backoff.Config{
+						BaseDelay:  backoff.DefaultConfig.BaseDelay,
+						Multiplier: backoff.DefaultConfig.Multiplier,
+						Jitter:     backoff.DefaultConfig.Jitter,
+						MaxDelay:   time.Minute,
+					},
+				}),
+				grpc.WithTransportCredentials(insecure.NewCredentials()),
+				grpc.WithKeepaliveParams(keepalive.ClientParameters{
+					Time:    time.Second * 15,
+					Timeout: time.Second * 5,
+				}),
+				grpc.WithUnaryInterceptor(func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+					ctx = genMetadata(ctx, cc)
+					if method != cronpb.Center_Auth_FullMethodName {
+						ctx = metadata.AppendToOutgoingContext(ctx, common.GOPHERCRON_AGENT_AUTH_KEY, a.author.Auth(ctx, cc))
+					}
+					return invoker(ctx, method, req, reply, cc, opts...)
+				}),
+				grpc.WithStreamInterceptor(func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+					ctx = genMetadata(ctx, cc)
+					if method != cronpb.Center_Auth_FullMethodName {
+						ctx = metadata.AppendToOutgoingContext(ctx, common.GOPHERCRON_AGENT_AUTH_KEY, a.author.Auth(ctx, cc))
+					}
+					return streamer(ctx, desc, cc, method, opts...)
+				}))
+			if err != nil {
+				wlog.Error("failed to dial center service", zap.String("endpoint", a.cfg.Micro.Endpoint), zap.Error(err))
+				return register.CenterClient{}, err
+			}
+			a.centerSrv = register.CenterClient{
+				CenterClient: cronpb.NewCenterClient(cc),
+				Cc:           cc,
+			}
+			return a.centerSrv, nil
+		}, a.handlerEventFromCenterV2)
 	if err != nil {
 		panic(err)
 	}
