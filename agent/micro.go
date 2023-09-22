@@ -101,10 +101,10 @@ func (a *client) MustSetupRemoteRegisterV2() wregister.ServiceRegister[infra.Nod
 	}
 
 	r, err := register.NewRemoteRegisterV2(a.localip,
-		func() (register.CenterClient, error) { // 建立到center服务的连接
+		func() (*register.CenterClient, error) { // 建立到center服务的连接
 			if a.centerSrv.Cc != nil { // 每次建立前都尝试关闭一次旧连接，确保不会泄露
 				if a.centerSrv.Cc.GetState() == connectivity.Ready { // 兜底防止错误调用
-					return a.centerSrv, nil
+					return &a.centerSrv, nil
 				}
 				a.centerSrv.Cc.Close()
 			}
@@ -142,13 +142,13 @@ func (a *client) MustSetupRemoteRegisterV2() wregister.ServiceRegister[infra.Nod
 				}))
 			if err != nil {
 				wlog.Error("failed to dial center service", zap.String("endpoint", a.cfg.Micro.Endpoint), zap.Error(err))
-				return register.CenterClient{}, err
+				return nil, err
 			}
 			a.centerSrv = register.CenterClient{
 				CenterClient: cronpb.NewCenterClient(cc),
 				Cc:           cc,
 			}
-			return a.centerSrv, nil
+			return &a.centerSrv, nil
 		}, a.handlerEventFromCenterV2)
 	if err != nil {
 		panic(err)

@@ -213,34 +213,43 @@ var (
 func NewApp(configPath string) App {
 	var err error
 
-	conf := config.InitServiceConfig(configPath)
+	cfg := config.InitServiceConfig(configPath)
+	infra.RegisterETCDRegisterPrefixKey(cfg.Etcd.Prefix + "/registry")
 
-	infra.RegisterETCDRegisterPrefixKey(conf.Etcd.Prefix + "/registry")
+	if cfg.LogAge == 0 {
+		cfg.LogAge = 1
+	}
+	if cfg.LogSize == 0 {
+		cfg.LogSize = 100
+	}
 	wlog.SetGlobalLogger(wlog.NewLogger(&wlog.Config{
-		Level: wlog.ParseLevel(conf.LogLevel),
+		Name:  "gophercron-center",
+		Level: wlog.ParseLevel(cfg.LogLevel),
+		File:  cfg.LogFile, // print to sedout if config.LogFile is undefined
 		RotateConfig: &wlog.RotateConfig{
-			MaxAge:  24,
-			MaxSize: 1000,
+			MaxAge:     cfg.LogAge,
+			MaxSize:    cfg.LogSize,
+			MaxBackups: cfg.LogBackups,
+			Compress:   cfg.LogCompress,
 		},
-		File: conf.LogPath, // print to sedout if config.File undefined
 	}))
 	app := &app{
 		Warner: warning.NewDefaultWarner(wlog.With(zap.String("component", "warner"))),
-		cfg:    conf,
+		cfg:    cfg,
 		author: &Author{
-			privateKey: []byte(conf.JWT.PrivateKey),
+			privateKey: []byte(cfg.JWT.PrivateKey),
 		},
 		rbacSrv: NewRBACSrv(),
 	}
 	app.ctx, app.cancelFunc = context.WithCancel(context.Background())
-	if conf.ReportAddr != "" {
-		app.Warner = warning.NewHttpReporter(conf.ReportAddr, func() (string, error) {
+	if cfg.ReportAddr != "" {
+		app.Warner = warning.NewHttpReporter(cfg.ReportAddr, func() (string, error) {
 			return app.author.token, nil
 		})
 	}
 
-	if conf.Mysql != nil && conf.Mysql.Service != "" {
-		app.store = sqlStore.MustSetup(conf.Mysql, wlog.With(zap.String("component", "sqlprovider")), conf.Mysql.AutoCreate)
+	if cfg.Mysql != nil && cfg.Mysql.Service != "" {
+		app.store = sqlStore.MustSetup(cfg.Mysql, wlog.With(zap.String("component", "sqlprovider")), cfg.Mysql.AutoCreate)
 	}
 
 	if app.localip, err = utils.GetLocalIP(); err != nil {
@@ -249,9 +258,9 @@ func NewApp(configPath string) App {
 
 	app.metrics = metrics.NewMetrics("center", app.GetIP())
 
-	if conf.OIDC.ClientID != "" {
-		if app.oidcSrv, err = NewOIDCService(app, conf.OIDC); err != nil {
-			wlog.Panic("failed to setup oidc service", zap.Any("config", conf.OIDC), zap.Error(err))
+	if cfg.OIDC.ClientID != "" {
+		if app.oidcSrv, err = NewOIDCService(app, cfg.OIDC); err != nil {
+			wlog.Panic("failed to setup oidc service", zap.Any("config", cfg.OIDC), zap.Error(err))
 		}
 	}
 
@@ -267,10 +276,10 @@ func NewApp(configPath string) App {
 		// register etcd registry
 		// todo register etcd client instead of config
 		infra.RegisterEtcdClient(clientv3.Config{
-			Endpoints:   conf.Etcd.Service, // cluster list
-			Username:    conf.Etcd.Username,
-			Password:    conf.Etcd.Password,
-			DialTimeout: time.Duration(conf.Etcd.DialTimeout) * time.Millisecond,
+			Endpoints:   cfg.Etcd.Service, // cluster list
+			Username:    cfg.Etcd.Username,
+			Password:    cfg.Etcd.Password,
+			DialTimeout: time.Duration(cfg.Etcd.DialTimeout) * time.Millisecond,
 		})
 
 		app.streamManager = &streamManager[*cronpb.Event]{
@@ -288,14 +297,14 @@ func NewApp(configPath string) App {
 	}
 
 	wlog.Info("start to connect etcd ...")
-	if app.etcd, err = etcd.Connect(conf.Etcd); err != nil {
+	if app.etcd, err = etcd.Connect(cfg.Etcd); err != nil {
 		panic(err)
 	}
 
 	wlog.Info("connected to etcd")
 	app.CommonInterface = protocol.NewComm(app.etcd)
 
-	clusterID, err := app.etcd.Inc(conf.Etcd.Prefix + common.CLUSTER_AUTO_INDEX)
+	clusterID, err := app.etcd.Inc(cfg.Etcd.Prefix + common.CLUSTER_AUTO_INDEX)
 	if err != nil {
 		panic(err)
 	}
@@ -350,7 +359,7 @@ func (a *app) Run() {
 	startWebhook(a)
 	startWorkflow(a)
 	startTemporaryTaskWorker(a)
-	startCalcDataConsistency(a)
+	// startCalcDataConsistency(a)
 }
 
 func (a *app) GetVersion() string {

@@ -27,7 +27,7 @@ type remoteRegistryV2 struct {
 	once       sync.Once
 	ctx        context.Context
 	cancelFunc context.CancelFunc
-	client     CenterClient
+	client     *CenterClient
 	metas      []infra.NodeMetaRemote
 	log        wlog.Logger
 	reConnect  func() error
@@ -38,7 +38,7 @@ type remoteRegistryV2 struct {
 	str string
 }
 
-func NewRemoteRegisterV2(localIP string, connect func() (CenterClient, error), eventHandler func(context.Context, *cronpb.ServiceEvent) (*cronpb.ClientEvent, error)) (register.ServiceRegister[infra.NodeMetaRemote], error) {
+func NewRemoteRegisterV2(localIP string, connect func() (*CenterClient, error), eventHandler func(context.Context, *cronpb.ServiceEvent) (*cronpb.ClientEvent, error)) (register.ServiceRegister[infra.NodeMetaRemote], error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	rr := &remoteRegistryV2{
@@ -51,13 +51,14 @@ func NewRemoteRegisterV2(localIP string, connect func() (CenterClient, error), e
 	}
 
 	rr.reConnect = func() (err error) {
-		if rr.client.Cc.GetState() != connectivity.Ready {
-			if rr.client.Cc != nil {
-				rr.client.Cc.Close()
+		if rr.client != nil && rr.client.Cc != nil {
+			if rr.client.Cc.GetState() == connectivity.Ready {
+				return
 			}
-
-			rr.client, err = connect()
+			rr.client.Cc.Close()
 		}
+
+		rr.client, err = connect()
 		return
 	}
 
@@ -246,6 +247,8 @@ func (s *remoteRegistryV2) reRegister() {
 						fallthrough
 					case codes.PermissionDenied:
 						s.cancelFunc()
+						s.log.Error("registration refused", zap.Error(err))
+						return
 					default:
 					}
 				}

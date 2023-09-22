@@ -2,12 +2,10 @@ package agent
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/pkg/cronpb"
-	"github.com/holdno/gopherCron/protocol"
 	"github.com/spacegrower/watermelon/infra/wlog"
 	"go.uber.org/zap"
 )
@@ -103,7 +101,7 @@ func (a *client) handlerEventFromCenterV2(ctx context.Context, event *cronpb.Ser
 			Id:        event.Id,
 			Type:      cronpb.EventType_EVENT_CLIENT_UNSUPPORT,
 			EventTime: time.Now().Unix(),
-			Error:     &cronpb.Error{Error: fmt.Sprintf("%s not support", protocol.GetVersion())},
+			// Error:     &cronpb.Error{Error: fmt.Sprintf("%s not support", protocol.GetVersion())},
 		}, nil
 	}
 

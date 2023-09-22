@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"time"
 
@@ -54,7 +54,7 @@ func (r *HttpReporter) Warning(data WarningData) error {
 	}
 
 	defer resp.Body.Close()
-	body, _ := ioutil.ReadAll(resp.Body)
+	body, _ := io.ReadAll(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("warning report failed, log service status error, response status: %d, content: %s",
@@ -79,7 +79,7 @@ func (r *HttpReporter) ResultReport(result *common.TaskExecuteResult) error {
 	}
 
 	defer resp.Body.Close()
-	body, _ := ioutil.ReadAll(resp.Body)
+	body, _ := io.ReadAll(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("task result report failed, log service status error, response status: %d, content: %s",
