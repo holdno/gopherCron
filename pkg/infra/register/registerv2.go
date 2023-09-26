@@ -12,6 +12,7 @@ import (
 	"github.com/holdno/gopherCron/pkg/infra"
 	u "github.com/holdno/gopherCron/utils"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/status"
 
 	"github.com/spacegrower/watermelon/infra/definition"
@@ -26,7 +27,7 @@ type remoteRegistryV2 struct {
 	once       sync.Once
 	ctx        context.Context
 	cancelFunc context.CancelFunc
-	client     CenterClient
+	client     *CenterClient
 	metas      []infra.NodeMetaRemote
 	log        wlog.Logger
 	reConnect  func() error
@@ -37,7 +38,7 @@ type remoteRegistryV2 struct {
 	str string
 }
 
-func NewRemoteRegisterV2(localIP string, connect func() (CenterClient, error), eventHandler func(context.Context, *cronpb.ServiceEvent) (*cronpb.ClientEvent, error)) (register.ServiceRegister[infra.NodeMetaRemote], error) {
+func NewRemoteRegisterV2(localIP string, connect func() (*CenterClient, error), eventHandler func(context.Context, *cronpb.ServiceEvent) (*cronpb.ClientEvent, error)) (register.ServiceRegister[infra.NodeMetaRemote], error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	rr := &remoteRegistryV2{
@@ -50,7 +51,10 @@ func NewRemoteRegisterV2(localIP string, connect func() (CenterClient, error), e
 	}
 
 	rr.reConnect = func() (err error) {
-		if rr.client.Cc != nil {
+		if rr.client != nil && rr.client.Cc != nil {
+			if rr.client.Cc.GetState() == connectivity.Ready {
+				return
+			}
 			rr.client.Cc.Close()
 		}
 
@@ -84,12 +88,8 @@ func (s *remoteRegistryV2) Register() error {
 	s.log.Debug("start register")
 
 	if err := s.register(); err != nil {
-		s.log.Error("failed to register service", zap.Error(err))
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			time.Sleep(time.Second)
-			if innererr := s.reConnect(); innererr == nil {
-				s.log.Error("failed to reconnect registry", zap.Error(innererr))
-			}
 		}
 		return err
 	}
@@ -167,9 +167,8 @@ func (s *remoteRegistryV2) register() error {
 	errHandler := func(err error) error {
 		s.log.Error("recv with error", zap.Error(err))
 		time.Sleep(time.Second)
-		grpcErr, ok := status.FromError(err)
-		if err == io.EOF || !ok || grpcErr.Code() == codes.Unavailable {
-			s.log.Warn("retry to reconnect", zap.String("status", grpcErr.Code().String()))
+		if gerr, ok := status.FromError(err); ok && gerr.Code() == codes.Canceled {
+			s.log.Warn("retry to reconnect", zap.String("status", gerr.Code().String()))
 			if err = s.reConnect(); err != nil {
 				s.log.Error("failed to reconnect registry", zap.Error(err))
 				return err
@@ -212,17 +211,6 @@ func (s *remoteRegistryV2) register() error {
 						s.log.Error("failed reply center request", zap.Error(err), zap.String("event", resp.Type.String()), zap.String("value", resp.String()))
 					}
 				}
-
-				// switch resp.Type {
-				// case cronpb.EventType_EVENT_REGISTER_HEARTBEAT_PING:
-				// 	send(&cronpb.ClientEvent{
-				// 		Id:        resp.Id,
-				// 		Type:      cronpb.EventType_EVENT_REGISTER_HEARTBEAT_PONG,
-				// 		EventTime: time.Now().Unix(),
-				// 	})
-				// default:
-
-				// }
 			}
 		}
 	})
@@ -247,6 +235,24 @@ func (s *remoteRegistryV2) reRegister() {
 			wlog.Warn("register is down, context done")
 		default:
 			if err := s.Register(); err != nil {
+				if gerr, ok := status.FromError(err); ok {
+					switch gerr.Code() {
+					case codes.Canceled:
+						if innererr := s.reConnect(); innererr == nil {
+							s.log.Error("failed to reconnect registry", zap.Error(innererr))
+						}
+					case codes.Aborted:
+						fallthrough
+					case codes.Unauthenticated:
+						fallthrough
+					case codes.PermissionDenied:
+						s.cancelFunc()
+						s.log.Error("registration refused", zap.Error(err))
+						return
+					default:
+					}
+				}
+				s.log.Error("failed to register service", zap.Error(err))
 				time.Sleep(time.Second)
 				continue
 			}

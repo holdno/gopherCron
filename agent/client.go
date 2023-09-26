@@ -73,18 +73,27 @@ func (agent *client) loadConfigAndSetupAgentFunc() func() error {
 			if agent.configPath == "" {
 				panic("empty config path")
 			}
-
-			var clusterID int64 = 1
+			if cfg.LogAge == 0 {
+				cfg.LogAge = 1
+			}
+			if cfg.LogSize == 0 {
+				cfg.LogSize = 100
+			}
 
 			wlog.SetGlobalLogger(wlog.NewLogger(&wlog.Config{
+				Name:  "gophercron-agent",
 				Level: wlog.ParseLevel(cfg.LogLevel),
 				File:  cfg.LogFile,
 				RotateConfig: &wlog.RotateConfig{
-					MaxAge:  24,
-					MaxSize: 100,
+					MaxAge:     cfg.LogAge,
+					MaxSize:    cfg.LogSize,
+					MaxBackups: cfg.LogBackups,
+					Compress:   cfg.LogCompress,
 				},
 			}))
 
+			// 任务日志及任务结果上报时会带有agent_ip，所以这边snowflake的cluster_id可以在允许值内随便声生成一个
+			var clusterID int64 = int64(utils.Random(0, 1024))
 			// why 1024. view https://github.com/holdno/snowFlakeByGo
 			utils.InitIDWorker(clusterID % 1024)
 			agent.logger = wlog.With()

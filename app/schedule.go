@@ -793,6 +793,9 @@ func (a *app) CheckTaskIsRunning(projectID int64, taskID string) ([]common.TaskR
 			ProjectId: projectID,
 			Agent:     stream.addr,
 			Event: &cronpb.ServiceEvent{
+				Id:        utils.GetStrID(),
+				EventTime: time.Now().Unix(),
+				Type:      cronpb.EventType_EVENT_CHECK_RUNNING_REQUEST,
 				Event: &cronpb.ServiceEvent_CheckRunningRequest{
 					CheckRunningRequest: &cronpb.CheckRunningRequest{
 						ProjectId: projectID,

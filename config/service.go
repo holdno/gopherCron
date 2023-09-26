@@ -6,6 +6,10 @@ type ClientConfig struct {
 	Shell           string `toml:"shell,omitempty"`
 	LogLevel        string `toml:"log_level"`
 	LogFile         string `toml:"log_file"`
+	LogSize         int    `toml:"log_size"`
+	LogBackups      int    `toml:"log_backups"`
+	LogAge          int    `toml:"log_age"`
+	LogCompress     bool   `toml:"log_compress"`
 	ReportAddr      string `toml:"report_addr"`
 	Timeout         int    `toml:"timeout"`
 	Token           string `toml:"token"`
@@ -33,8 +37,13 @@ type Project struct {
 
 // APIConfig 配置文件Root
 type ServiceConfig struct {
-	LogLevel   string `toml:"log_level"`
-	LogPath    string `toml:"log_path"`
+	LogLevel    string `toml:"log_level"`
+	LogFile     string `toml:"log_file"`
+	LogSize     int    `toml:"log_size"`
+	LogBackups  int    `toml:"log_backups"`
+	LogAge      int    `toml:"log_age"`
+	LogCompress bool   `toml:"log_compress"`
+
 	ReportAddr string `toml:"report_addr"`
 
 	Publish Publish     `toml:"publish"`
