@@ -145,7 +145,7 @@ func (a *app) DispatchAgentJob(projectID int64) error {
 		}
 		for _, v := range streamsV1 {
 			if err = v.stream.Send(&cronpb.Event{
-				Version:   "v1",
+				Version:   common.VERSION_TYPE_V1,
 				Type:      common.REMOTE_EVENT_PUT,
 				Value:     kvPair.Value,
 				EventTime: time.Now().Unix(),
@@ -165,7 +165,7 @@ func (a *app) DispatchAgentJob(projectID int64) error {
 					EventTime: time.Now().Unix(),
 					Event: &cronpb.ServiceEvent_RegisterReply{
 						RegisterReply: &cronpb.Event{
-							Version:   "v1",
+							Version:   common.VERSION_TYPE_V1,
 							Type:      common.REMOTE_EVENT_PUT,
 							Value:     kvPair.Value,
 							EventTime: time.Now().Unix(),

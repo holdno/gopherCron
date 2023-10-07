@@ -42,6 +42,7 @@ type remoteRegistry struct {
 type CenterClient struct {
 	cronpb.CenterClient
 	Cc *grpc.ClientConn
+	
 }
 
 func NewRemoteRegister(localIP string, connect func() (CenterClient, error), eventHandler func(*cronpb.Event)) (register.ServiceRegister[infra.NodeMetaRemote], error) {

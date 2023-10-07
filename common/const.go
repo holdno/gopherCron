@@ -54,6 +54,8 @@ const (
 	WEBHOOK_TYPE_TASK_FAILURE = "task-failure"
 
 	ACK_RESPONSE_V1 = "v1"
+	VERSION_TYPE_V1 = "v1"
+	VERSION_TYPE_V2 = "v2"
 
 	// Log
 	ErrorLog   = 1

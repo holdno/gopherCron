@@ -348,12 +348,13 @@ Here:
 					registerStreamOnce = append(registerStreamOnce, meta)
 				}
 			}
+
+			s.registerMetricsAdd(1, agentIP)
 			if err := r.Register(); err != nil {
 				wlog.Error("failed to register service", zap.Error(err), zap.String("method", "Register"))
 				s.app.Metrics().CustomInc("register_error", s.app.GetIP(), err.Error())
 				return status.Error(codes.Internal, "failed to register service")
 			}
-			s.registerMetricsAdd(1, agentIP)
 
 			for _, meta := range registerStreamOnce {
 				s.app.StreamManager().SaveStream(meta, req, cancel)
@@ -381,7 +382,7 @@ Here:
 						s.eventsMetricsInc()
 						if err := req.Send(&cronpb.Event{
 							Type:      "heartbeat",
-							Version:   "v1",
+							Version:   common.VERSION_TYPE_V1,
 							Value:     []byte("heartbeat"),
 							EventTime: time.Now().Unix(),
 						}); err != nil {

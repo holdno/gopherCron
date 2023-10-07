@@ -516,7 +516,7 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 					ProjectId: plan.Task.ProjectID,
 					Event: &cronpb.Event{
 						Type:      common.TASK_STATUS_FINISHED_V2,
-						Version:   "v2",
+						Version:   common.VERSION_TYPE_V2,
 						Value:     value,
 						EventTime: time.Now().Unix(),
 					},
@@ -545,7 +545,7 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 				ProjectId: plan.Task.ProjectID,
 				Event: &cronpb.Event{
 					Type:      common.TASK_STATUS_RUNNING_V2,
-					Version:   "v1",
+					Version:   common.VERSION_TYPE_V2,
 					Value:     value,
 					EventTime: time.Now().Unix(),
 				},
