@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"syscall"
 	"time"
@@ -92,12 +93,20 @@ func (a *client) SetupMicroService() *winfra.Srv[infra.NodeMetaRemote] {
 }
 
 func (a *client) MustSetupRemoteRegisterV2() wregister.ServiceRegister[infra.NodeMetaRemote] {
-
-	genMetadata := func(ctx context.Context, cc *grpc.ClientConn) context.Context {
-		return metadata.NewOutgoingContext(ctx, metadata.New(map[string]string{
+	genMetadata := func(ctx context.Context, cc *grpc.ClientConn, reqMethod string) context.Context {
+		md := metadata.NewOutgoingContext(ctx, metadata.New(map[string]string{
 			common.GOPHERCRON_AGENT_IP_MD_KEY:   a.localip,
 			common.GOPHERCRON_AGENT_VERSION_KEY: protocol.GetVersion(),
 		}))
+		if reqMethod != cronpb.Center_Auth_FullMethodName {
+			token, err := a.authenticator.GetToken(ctx, a.centerSrv)
+			if err != nil {
+				a.metrics.SystemErrInc("agent_authenticator_error")
+				wlog.Error("failed to sign token", zap.Error(err))
+			}
+			ctx = metadata.AppendToOutgoingContext(ctx, common.GOPHERCRON_AGENT_AUTH_KEY, token)
+		}
+		return md
 	}
 
 	r, err := register.NewRemoteRegisterV2(a.localip,
@@ -108,6 +117,7 @@ func (a *client) MustSetupRemoteRegisterV2() wregister.ServiceRegister[infra.Nod
 				}
 				a.centerSrv.Cc.Close()
 			}
+
 			wlog.Debug("start build new center client")
 			ctx, cancel := context.WithTimeout(context.Background(), time.Duration(a.cfg.Timeout)*time.Second)
 			defer cancel()
@@ -123,87 +133,28 @@ func (a *client) MustSetupRemoteRegisterV2() wregister.ServiceRegister[infra.Nod
 				}),
 				grpc.WithTransportCredentials(insecure.NewCredentials()),
 				grpc.WithKeepaliveParams(keepalive.ClientParameters{
-					Time:    time.Second * 15,
+					Time:    time.Second * 15, // todo config?
 					Timeout: time.Second * 5,
 				}),
 				grpc.WithUnaryInterceptor(func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
-					ctx = genMetadata(ctx, cc)
-					if method != cronpb.Center_Auth_FullMethodName {
-						ctx = metadata.AppendToOutgoingContext(ctx, common.GOPHERCRON_AGENT_AUTH_KEY, a.author.Auth(ctx, cc))
-					}
-					return invoker(ctx, method, req, reply, cc, opts...)
+					return invoker(genMetadata(ctx, cc, method), method, req, reply, cc, opts...)
 				}),
 				grpc.WithStreamInterceptor(func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
-					ctx = genMetadata(ctx, cc)
-					if method != cronpb.Center_Auth_FullMethodName {
-						ctx = metadata.AppendToOutgoingContext(ctx, common.GOPHERCRON_AGENT_AUTH_KEY, a.author.Auth(ctx, cc))
-					}
-					return streamer(ctx, desc, cc, method, opts...)
+					return streamer(genMetadata(ctx, cc, method), desc, cc, method, opts...)
 				}))
 			if err != nil {
+				a.metrics.SystemErrInc("agent_setup_remote_register_error")
 				wlog.Error("failed to dial center service", zap.String("endpoint", a.cfg.Micro.Endpoint), zap.Error(err))
 				return nil, err
 			}
+
 			a.centerSrv = register.CenterClient{
 				CenterClient: cronpb.NewCenterClient(cc),
 				Cc:           cc,
 			}
+
 			return &a.centerSrv, nil
 		}, a.handlerEventFromCenterV2)
-	if err != nil {
-		panic(err)
-	}
-	return r
-}
-
-// MustSetupRemoteRegister v2.2.1 版本之后不再维护，使用 MustSetupRemoteRegisterV2
-func (a *client) MustSetupRemoteRegister() wregister.ServiceRegister[infra.NodeMetaRemote] {
-
-	genMetadata := func(ctx context.Context, cc *grpc.ClientConn) context.Context {
-		return metadata.NewOutgoingContext(ctx, metadata.New(map[string]string{
-			common.GOPHERCRON_AGENT_IP_MD_KEY:   a.localip,
-			common.GOPHERCRON_AGENT_VERSION_KEY: protocol.GetVersion(),
-		}))
-	}
-
-	r, err := register.NewRemoteRegister(a.localip, func() (register.CenterClient, error) {
-		if a.centerSrv.Cc != nil {
-			a.centerSrv.Cc.Close()
-		}
-		wlog.Debug("start build new center client")
-		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(a.cfg.Timeout)*time.Second)
-		defer cancel()
-		cc, err := grpc.DialContext(ctx, a.cfg.Micro.Endpoint, grpc.WithTransportCredentials(insecure.NewCredentials()),
-			grpc.WithKeepaliveParams(keepalive.ClientParameters{
-				Time:    time.Second * 10,
-				Timeout: time.Second * 3,
-			}),
-			grpc.WithUnaryInterceptor(func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
-				ctx = genMetadata(ctx, cc)
-				if method != cronpb.Center_Auth_FullMethodName {
-					ctx = metadata.AppendToOutgoingContext(ctx, common.GOPHERCRON_AGENT_AUTH_KEY, a.author.Auth(ctx, cc))
-				}
-				return invoker(ctx, method, req, reply, cc, opts...)
-			}),
-			grpc.WithStreamInterceptor(func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
-				ctx = genMetadata(ctx, cc)
-				if method != cronpb.Center_Auth_FullMethodName {
-					ctx = metadata.AppendToOutgoingContext(ctx, common.GOPHERCRON_AGENT_AUTH_KEY, a.author.Auth(ctx, cc))
-				}
-				return streamer(ctx, desc, cc, method, opts...)
-			}))
-		if err != nil {
-			wlog.Error("failed to dial center service", zap.String("endpoint", a.cfg.Micro.Endpoint), zap.Error(err))
-			return register.CenterClient{}, err
-		}
-		a.centerSrv = register.CenterClient{
-			CenterClient: cronpb.NewCenterClient(cc),
-			Cc:           cc,
-		}
-		return a.centerSrv, nil
-	}, func(e *cronpb.Event) {
-		a.handlerEventFromCenter(e)
-	})
 	if err != nil {
 		panic(err)
 	}
@@ -308,40 +259,41 @@ func (a *client) ProjectTaskHash(ctx context.Context, req *cronpb.ProjectTaskHas
 	}, nil
 }
 
-type Author struct {
+type Authenticator struct {
 	authMeta map[int64]string
 	token    string
 	expTime  time.Time
 }
 
-func NewAuthor(projectAuths []config.ProjectAuth) *Author {
+func NewAuthenticator(projectAuths []config.ProjectAuth) *Authenticator {
 	authKvs := make(map[int64]string)
 	for _, v := range projectAuths {
 		authKvs[v.ProjectID] = v.Token
 	}
-	return &Author{
+	return &Authenticator{
 		authMeta: authKvs,
 	}
 }
 
-func (a *Author) GetToken() string {
-	return a.token
-}
-
-func (a *Author) Auth(ctx context.Context, cc *grpc.ClientConn) string {
-	if !a.expTime.IsZero() && a.expTime.Before(time.Now().Add(time.Second*10)) {
-		return a.token
+func (a *Authenticator) GetToken(ctx context.Context, driver cronpb.CenterClient) (string, error) {
+	if !a.expTime.IsZero() && a.expTime.Before(time.Now().Add(time.Minute)) {
+		return a.token, nil
 	}
 
-	resp, err := cronpb.NewCenterClient(cc).Auth(ctx, &cronpb.AuthReq{
+	if driver == nil {
+		return "", fmt.Errorf("invalid driver")
+	}
+
+	resp, err := driver.Auth(ctx, &cronpb.AuthReq{
 		Kvs: a.authMeta,
 	})
 	if err != nil {
 		wlog.Error("failed to get agent auth token", zap.Error(err))
+		return "", err
 	} else {
 		a.token = resp.Jwt
 		a.expTime = time.Unix(resp.ExpireTime, 0)
 	}
 
-	return a.token
+	return a.token, nil
 }
