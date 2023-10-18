@@ -91,6 +91,9 @@ type App interface {
 	DeleteWebHook(tx *gorm.DB, projectID int64, types string) error
 	DeleteAllWebHook(tx *gorm.DB, projectID int64) error
 	CheckPermissions(projectID, uid int64, permission gorbac.Permission) error
+	CheckUserPermissionAndGreaterOrEqualAnotherUser(projectID, currentUser, anotherUser int64, permission gorbac.Permission) error
+	CheckUserPermissionAndGreaterOrEqualAnotherRole(projectID, user int64, role string, permission gorbac.Permission) error
+	GetRoleParents(roleID string) []string
 	GetErrorLogs(pids []int64, page, pagesize int) ([]*common.TaskLog, int, error)
 	// workflow
 	CreateWorkflow(userID int64, data common.Workflow) error
@@ -949,6 +952,7 @@ func (a *app) CreateProjectRelevance(tx *gorm.DB, pid, uid int64, roleStr string
 }
 
 func (a *app) DeleteProjectRelevance(tx *gorm.DB, pid, uid int64) error {
+
 	if err := a.store.ProjectRelevance().Delete(tx, pid, uid); err != nil {
 		return errors.NewError(http.StatusInternalServerError, "删除项目关联关系失败").WithLog(err.Error())
 	}
@@ -969,6 +973,75 @@ func (a *app) GetUserByAccount(account string) (*common.User, error) {
 	}
 
 	return res[0], nil
+}
+
+func (a *app) GetRoleParents(roleID string) []string {
+	p, _ := a.rbacSrv.GetParents(roleID)
+	return p
+}
+
+func (a *app) CheckUserPermissionAndGreaterOrEqualAnotherRole(projectID, user int64, role string, permission gorbac.Permission) error {
+	// 首先确认操作的用户是否为该项目的管理员
+	isAdmin, err := a.IsAdmin(user)
+	if err != nil {
+		return err
+	}
+
+	if !isAdmin {
+		currRole, err := a.CheckUserIsInProject(projectID, user)
+		if err != nil {
+			return err
+		} else if currRole == nil {
+			return errors.ErrProjectNotExist
+		}
+
+		if !a.rbacSrv.IsGranted(currRole.Role, permission) {
+			return errors.ErrInsufficientPermissions
+		}
+
+		for _, v := range a.GetRoleParents(currRole.Role) {
+			if v == role {
+				return errors.ErrInsufficientPermissions
+			}
+		}
+	}
+	return nil
+}
+
+func (a *app) CheckUserPermissionAndGreaterOrEqualAnotherUser(projectID, currentUser, anotherUser int64, permission gorbac.Permission) error {
+	// 首先确认操作的用户是否为该项目的管理员
+	isAdmin, err := a.IsAdmin(currentUser)
+	if err != nil {
+		return err
+	}
+
+	if !isAdmin {
+		currRole, err := a.CheckUserIsInProject(projectID, currentUser)
+		if err != nil {
+			return err
+		} else if currRole == nil {
+			return errors.ErrProjectNotExist
+		}
+
+		if !a.rbacSrv.IsGranted(currRole.Role, permission) {
+			return errors.ErrInsufficientPermissions
+		}
+
+		anotherUserRole, err := a.CheckUserIsInProject(projectID, anotherUser)
+		if err != nil {
+			return err
+		} else if anotherUserRole == nil {
+			return errors.ErrProjectNotExist
+		}
+
+		for _, v := range a.GetRoleParents(currRole.Role) {
+			if v == anotherUserRole.Role {
+				return errors.ErrInsufficientPermissions
+			}
+		}
+	}
+
+	return nil
 }
 
 func (a *app) CheckPermissions(projectID, uid int64, permission gorbac.Permission) error {

@@ -78,7 +78,8 @@ func RemoveUser(c *gin.Context) {
 		return
 	}
 
-	if err = srv.CheckPermissions(req.ProjectID, uid, app.PermissionEdit); err != nil {
+	// 检测被操作用户的权限是否大于当前请求用户
+	if err = srv.CheckUserPermissionAndGreaterOrEqualAnotherUser(req.ProjectID, uid, req.UserID, app.PermissionEdit); err != nil {
 		response.APIError(c, err)
 		return
 	}
@@ -137,7 +138,7 @@ func AddUser(c *gin.Context) {
 		return
 	}
 
-	if err = srv.CheckPermissions(req.ProjectID, uid, app.PermissionEdit); err != nil {
+	if err = srv.CheckUserPermissionAndGreaterOrEqualAnotherRole(req.ProjectID, uid, req.UserRole, app.PermissionEdit); err != nil {
 		response.APIError(c, err)
 		return
 	}

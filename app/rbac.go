@@ -11,6 +11,7 @@ type RBACSrv struct {
 type RBACImpl interface {
 	IsGranted(id string, p gorbac.Permission) (rslt bool)
 	GetRole(id string) (gorbac.Role, bool)
+	GetParents(id string) ([]string, error)
 }
 
 var (
@@ -66,4 +67,8 @@ func (s *RBACSrv) GetRole(id string) (gorbac.Role, bool) {
 		return nil, false
 	}
 	return role, true
+}
+
+func (s *RBACSrv) GetParents(id string) ([]string, error) {
+	return s.rbac.GetParents(id)
 }
