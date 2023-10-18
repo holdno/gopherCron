@@ -301,7 +301,7 @@ func (a *app) DeleteTask(projectID int64, taskID string) (*common.TaskInfo, erro
 			Event: &cronpb.ServiceEvent_RegisterReply{
 				RegisterReply: &cronpb.Event{
 					Type:    common.REMOTE_EVENT_DELETE,
-					Version: "v1",
+					Version: common.VERSION_TYPE_V1,
 					Value:   resp.Kvs[0].Value,
 				},
 			},
@@ -365,7 +365,7 @@ func (a *app) DeleteProjectAllTasks(projectID int64) error {
 				Event: &cronpb.ServiceEvent_RegisterReply{
 					RegisterReply: &cronpb.Event{
 						Type:      common.REMOTE_EVENT_DELETE,
-						Version:   "v1",
+						Version:   common.VERSION_TYPE_V1,
 						Value:     kv.Value,
 						EventTime: time.Now().Unix(),
 					},
@@ -461,7 +461,7 @@ func (a *app) SaveTask(task *common.TaskInfo, opts ...clientv3.OpOption) (*commo
 			Event: &cronpb.ServiceEvent_RegisterReply{
 				RegisterReply: &cronpb.Event{
 					Type:      common.REMOTE_EVENT_PUT,
-					Version:   "v1",
+					Version:   common.VERSION_TYPE_V1,
 					Value:     saveByte,
 					EventTime: time.Now().Unix(),
 				},

@@ -87,7 +87,7 @@ func (a *workflowRunner) scheduleTask(taskInfo *common.TaskInfo) error {
 					ScheduleRequest: &cronpb.ScheduleRequest{
 						Event: &cronpb.Event{
 							Type:      common.REMOTE_EVENT_WORKFLOW_SCHEDULE,
-							Version:   "v1",
+							Version:   common.VERSION_TYPE_V1,
 							Value:     value,
 							EventTime: time.Now().Unix(),
 						},
@@ -120,7 +120,7 @@ func (a *workflowRunner) scheduleTask(taskInfo *common.TaskInfo) error {
 		_, err = client.Schedule(ctx, &cronpb.ScheduleRequest{
 			Event: &cronpb.Event{
 				Type:      common.REMOTE_EVENT_WORKFLOW_SCHEDULE,
-				Version:   "v1",
+				Version:   common.VERSION_TYPE_V1,
 				Value:     value,
 				EventTime: time.Now().Unix(),
 			},
@@ -676,7 +676,7 @@ func (a *app) TemporarySchedulerTask(user *common.User, task *common.TaskInfo) e
 					ScheduleRequest: &cronpb.ScheduleRequest{
 						Event: &cronpb.Event{
 							Type:      common.REMOTE_EVENT_TMP_SCHEDULE,
-							Version:   "v1",
+							Version:   common.VERSION_TYPE_V1,
 							Value:     value,
 							EventTime: time.Now().Unix(),
 						},
@@ -705,7 +705,7 @@ func (a *app) TemporarySchedulerTask(user *common.User, task *common.TaskInfo) e
 		_, err = client.Schedule(ctx, &cronpb.ScheduleRequest{
 			Event: &cronpb.Event{
 				Type:      common.REMOTE_EVENT_TMP_SCHEDULE,
-				Version:   "v1",
+				Version:   common.VERSION_TYPE_V1,
 				Value:     value,
 				EventTime: time.Now().Unix(),
 			},
@@ -793,6 +793,9 @@ func (a *app) CheckTaskIsRunning(projectID int64, taskID string) ([]common.TaskR
 			ProjectId: projectID,
 			Agent:     stream.addr,
 			Event: &cronpb.ServiceEvent{
+				Id:        utils.GetStrID(),
+				EventTime: time.Now().Unix(),
+				Type:      cronpb.EventType_EVENT_CHECK_RUNNING_REQUEST,
 				Event: &cronpb.ServiceEvent_CheckRunningRequest{
 					CheckRunningRequest: &cronpb.CheckRunningRequest{
 						ProjectId: projectID,

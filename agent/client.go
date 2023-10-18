@@ -10,12 +10,10 @@ import (
 	"github.com/holdno/gopherCron/config"
 	"github.com/holdno/gopherCron/pkg/cronpb"
 	"github.com/holdno/gopherCron/pkg/daemon"
-	"github.com/holdno/gopherCron/pkg/infra"
 	"github.com/holdno/gopherCron/pkg/infra/register"
 	"github.com/holdno/gopherCron/pkg/warning"
 	"github.com/holdno/gopherCron/utils"
 
-	wregister "github.com/spacegrower/watermelon/infra/register"
 	"github.com/spacegrower/watermelon/infra/wlog"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -36,9 +34,9 @@ type client struct {
 	// etcd       protocol.EtcdManager
 	// protocol.ClientEtcdManager
 	warning.Warner
-	centerSrv register.CenterClient
-	onCommand func(*cronpb.CommandRequest) (*cronpb.Result, error)
-	author    *Author
+	centerSrv     register.CenterClient
+	onCommand     func(*cronpb.CommandRequest) (*cronpb.Result, error)
+	authenticator *Authenticator
 
 	cronpb.UnimplementedAgentServer
 	metrics *Metrics
@@ -52,7 +50,6 @@ type Client interface {
 	Cfg() *config.ClientConfig
 	warning.Warner
 
-	MustSetupRemoteRegister() wregister.ServiceRegister[infra.NodeMetaRemote]
 	Schedule(ctx context.Context, req *cronpb.ScheduleRequest) (*cronpb.Result, error)
 	CheckRunning(ctx context.Context, req *cronpb.CheckRunningRequest) (*cronpb.Result, error)
 	KillTask(ctx context.Context, req *cronpb.KillTaskRequest) (*cronpb.Result, error)
@@ -73,18 +70,27 @@ func (agent *client) loadConfigAndSetupAgentFunc() func() error {
 			if agent.configPath == "" {
 				panic("empty config path")
 			}
-
-			var clusterID int64 = 1
+			if cfg.LogAge == 0 {
+				cfg.LogAge = 1
+			}
+			if cfg.LogSize == 0 {
+				cfg.LogSize = 100
+			}
 
 			wlog.SetGlobalLogger(wlog.NewLogger(&wlog.Config{
+				Name:  "gophercron-agent",
 				Level: wlog.ParseLevel(cfg.LogLevel),
 				File:  cfg.LogFile,
 				RotateConfig: &wlog.RotateConfig{
-					MaxAge:  24,
-					MaxSize: 100,
+					MaxAge:     cfg.LogAge,
+					MaxSize:    cfg.LogSize,
+					MaxBackups: cfg.LogBackups,
+					Compress:   cfg.LogCompress,
 				},
 			}))
 
+			// 任务日志及任务结果上报时会带有agent_ip，所以这边snowflake的cluster_id可以在允许值内随便声生成一个
+			var clusterID int64 = int64(utils.Random(0, 1024))
 			// why 1024. view https://github.com/holdno/snowFlakeByGo
 			utils.InitIDWorker(clusterID % 1024)
 			agent.logger = wlog.With()
@@ -108,8 +114,10 @@ func (agent *client) loadConfigAndSetupAgentFunc() func() error {
 		if cfg.ReportAddr != "" {
 			agent.logger.Info(fmt.Sprintf("init http task log reporter, address: %s", cfg.ReportAddr))
 			agent.Warner = warning.NewHttpReporter(cfg.ReportAddr, func() (string, error) {
-				if agent.author != nil {
-					return agent.author.token, nil
+				if agent.authenticator != nil {
+					ctx, cancel := context.WithTimeout(context.Background(), 5)
+					defer cancel()
+					return agent.authenticator.GetToken(ctx, agent.centerSrv)
 				}
 				return "", errors.New("author is not init")
 			})
@@ -124,12 +132,13 @@ func (agent *client) loadConfigAndSetupAgentFunc() func() error {
 		agent.scheduler.RemoveAll()
 
 		agent.cfg = cfg
-		if shutDown != nil {
+		agent.authenticator = NewAuthenticator(cfg.Auth.Projects)
+
+		if shutDown != nil { // 先停掉旧配置启动的服务
 			shutDown()
 		}
-		agent.author = NewAuthor(cfg.Auth.Projects)
-		srv := agent.SetupMicroService()
-		shutDown = func() {
+		srv := agent.SetupMicroService() // 获取新的服务
+		shutDown = func() {              // 注册服务的停止方法
 			srv.ShutDown()
 		}
 

@@ -422,7 +422,10 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 							zap.Int64("project_id", taskExecuteInfo.Task.ProjectID),
 							zap.String("task_name", taskExecuteInfo.Task.Name),
 							zap.Error(err))
-						if gerr, ok := status.FromError(err); ok && gerr.Code() == codes.Aborted || tryTimes == 3 {
+						if gerr, ok := status.FromError(err); ok && gerr.Code() == codes.Aborted ||
+							gerr.Code() == codes.Unauthenticated ||
+							tryTimes == 5 {
+
 							first := false
 							once.Do(func() {
 								first = true
@@ -434,7 +437,7 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 							}
 							return
 						}
-						time.Sleep(time.Second)
+						time.Sleep(time.Second * time.Duration(tryTimes))
 						continue
 					}
 
@@ -452,6 +455,11 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 							zap.String("task_id", taskExecuteInfo.Task.TaskID),
 							zap.Int64("project_id", taskExecuteInfo.Task.ProjectID),
 							zap.String("task_name", taskExecuteInfo.Task.Name))
+
+						if gerr, ok := status.FromError(err); ok && gerr.Code() == codes.Canceled {
+							// 到中心的连接被关闭了，说明agent注册出现了问题，需要等待注册逻辑中重新实现建联
+							time.Sleep(time.Second)
+						}
 					}
 				}
 			}()
@@ -508,7 +516,7 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 					ProjectId: plan.Task.ProjectID,
 					Event: &cronpb.Event{
 						Type:      common.TASK_STATUS_FINISHED_V2,
-						Version:   "v2",
+						Version:   common.VERSION_TYPE_V2,
 						Value:     value,
 						EventTime: time.Now().Unix(),
 					},
@@ -537,7 +545,7 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 				ProjectId: plan.Task.ProjectID,
 				Event: &cronpb.Event{
 					Type:      common.TASK_STATUS_RUNNING_V2,
-					Version:   "v1",
+					Version:   common.VERSION_TYPE_V2,
 					Value:     value,
 					EventTime: time.Now().Unix(),
 				},
@@ -604,7 +612,7 @@ func tryLock(cli cronpb.CenterClient, plan *common.TaskSchedulePlan, ctx context
 		ProjectId: plan.Task.ProjectID,
 		TaskId:    plan.Task.TaskID,
 	}); err != nil {
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			if _, err = locker.Recv(); err != nil {
 				return nil, err
 			}
