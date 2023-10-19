@@ -93,7 +93,6 @@ type App interface {
 	CheckPermissions(projectID, uid int64, permission gorbac.Permission) error
 	CheckUserPermissionAndGreaterOrEqualAnotherUser(projectID, currentUser, anotherUser int64, permission gorbac.Permission) error
 	CheckUserPermissionAndGreaterOrEqualAnotherRole(projectID, user int64, role string, permission gorbac.Permission) error
-	GetRoleParents(roleID string) []string
 	GetErrorLogs(pids []int64, page, pagesize int) ([]*common.TaskLog, int, error)
 	// workflow
 	CreateWorkflow(userID int64, data common.Workflow) error
@@ -984,11 +983,6 @@ func (a *app) GetUserByAccount(account string) (*common.User, error) {
 	return res[0], nil
 }
 
-func (a *app) GetRoleParents(roleID string) []string {
-	p, _ := a.rbacSrv.GetParents(roleID)
-	return p
-}
-
 func (a *app) CheckUserPermissionAndGreaterOrEqualAnotherRole(projectID, user int64, role string, permission gorbac.Permission) error {
 	// 首先确认操作的用户是否为该项目的管理员
 	isAdmin, err := a.IsAdmin(user)
@@ -1008,10 +1002,16 @@ func (a *app) CheckUserPermissionAndGreaterOrEqualAnotherRole(projectID, user in
 			return errors.ErrInsufficientPermissions
 		}
 
-		for _, v := range a.GetRoleParents(currRole.Role) {
-			if v == role {
-				return errors.ErrInsufficientPermissions
-			}
+		currentRole, exist := a.rbacSrv.GetRole(currRole.Role)
+		if !exist {
+			return errors.ErrRoleNotFound
+		}
+		anotherRole, exist := a.rbacSrv.GetRole(role)
+		if !exist {
+			return errors.ErrRoleNotFound
+		}
+		if CompareRole(currentRole, anotherRole) < 0 {
+			return errors.ErrInsufficientPermissions
 		}
 	}
 	return nil
@@ -1043,10 +1043,16 @@ func (a *app) CheckUserPermissionAndGreaterOrEqualAnotherUser(projectID, current
 			return errors.ErrProjectNotExist
 		}
 
-		for _, v := range a.GetRoleParents(currRole.Role) {
-			if v == anotherUserRole.Role {
-				return errors.ErrInsufficientPermissions
-			}
+		currentRole, exist := a.rbacSrv.GetRole(currRole.Role)
+		if !exist {
+			return errors.ErrRoleNotFound
+		}
+		anotherRole, exist := a.rbacSrv.GetRole(anotherUserRole.Role)
+		if !exist {
+			return errors.ErrRoleNotFound
+		}
+		if CompareRole(currentRole, anotherRole) < 0 {
+			return errors.ErrInsufficientPermissions
 		}
 	}
 

@@ -1,6 +1,7 @@
 package project_func
 
 import (
+	"net/http"
 	"time"
 
 	"github.com/holdno/gopherCron/app"
@@ -74,7 +75,7 @@ func RemoveUser(c *gin.Context) {
 	// 验证该项目是否属于该用户
 	if req.UserID == uid {
 		// 不能将项目管理员移出项目
-		response.APIError(c, errors.ErrDontRemoveProjectAdmin)
+		response.APIError(c, errors.NewError(http.StatusForbidden, "无法移除自身账号"))
 		return
 	}
 
@@ -150,6 +151,17 @@ func AddUser(c *gin.Context) {
 
 	if userInfo == nil {
 		response.APIError(c, errors.ErrUserNotFound)
+		return
+	}
+
+	userProjectRole, err := srv.CheckUserIsInProject(req.ProjectID, userInfo.ID)
+	if err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	if userProjectRole != nil {
+		response.APIError(c, errors.NewError(http.StatusForbidden, "该用户已存在于项目中"))
 		return
 	}
 
