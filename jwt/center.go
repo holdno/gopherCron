@@ -18,11 +18,11 @@ import (
 
 type agentProjectIdsKey struct{}
 
-type ProjectAuthor struct {
+type ProjectAuthenticator struct {
 	projectIDs map[int64]bool
 }
 
-func (p *ProjectAuthor) Allow(pid int64) bool {
+func (p *ProjectAuthenticator) Allow(pid int64) bool {
 	if p == nil {
 		return false
 	}
@@ -38,8 +38,6 @@ func CenterAuthMiddleware(publicKey []byte) func(ctx context.Context) error {
 
 		jwt := md.Get(common.GOPHERCRON_AGENT_AUTH_KEY)
 		if len(jwt) == 0 {
-			// TODO 迁移完成后下个版本移除nil
-			return nil
 			return status.Error(codes.Unauthenticated, "agent auth key is undefined")
 		}
 		claims, err := ParseAgentJWT(jwt[0], publicKey)
@@ -48,22 +46,22 @@ func CenterAuthMiddleware(publicKey []byte) func(ctx context.Context) error {
 		}
 
 		if len(claims.ProjectIDs) != 0 {
-			projectAuthor := &ProjectAuthor{
+			authenticator := &ProjectAuthenticator{
 				projectIDs: make(map[int64]bool),
 			}
 			for _, v := range claims.ProjectIDs {
-				projectAuthor.projectIDs[v] = true
+				authenticator.projectIDs[v] = true
 			}
-			middleware.SetInto(ctx, agentProjectIdsKey{}, projectAuthor)
+			middleware.SetInto(ctx, agentProjectIdsKey{}, authenticator)
 		}
 		return nil
 	}
 }
 
-func GetProjectAuthor(ctx context.Context) interface{ Allow(int64) bool } {
+func GetProjectAuthenticator(ctx context.Context) interface{ Allow(int64) bool } {
 	author := middleware.GetFrom(ctx, agentProjectIdsKey{})
 	if author != nil {
-		return author.(*ProjectAuthor)
+		return author.(*ProjectAuthenticator)
 	}
 	return nil
 }

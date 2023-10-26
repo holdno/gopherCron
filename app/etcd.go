@@ -296,6 +296,7 @@ func (a *app) DeleteTask(projectID int64, taskID string) (*common.TaskInfo, erro
 		Region:    a.cfg.Micro.Region,
 		ProjectId: projectID,
 		Event: &cronpb.ServiceEvent{
+			Id:        utils.GetStrID(),
 			Type:      cronpb.EventType_EVENT_REGISTER_REPLY,
 			EventTime: time.Now().Unix(),
 			Event: &cronpb.ServiceEvent_RegisterReply{
@@ -362,6 +363,7 @@ func (a *app) DeleteProjectAllTasks(projectID int64) error {
 			Event: &cronpb.ServiceEvent{
 				Id:        utils.GetStrID(),
 				EventTime: time.Now().Unix(),
+				Type:      cronpb.EventType_EVENT_REGISTER_REPLY,
 				Event: &cronpb.ServiceEvent_RegisterReply{
 					RegisterReply: &cronpb.Event{
 						Type:      common.REMOTE_EVENT_DELETE,

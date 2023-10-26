@@ -203,7 +203,7 @@ func (a *app) GetAgentClient(region string, projectID int64) (*AgentClient, erro
 		newConn.WithRegion(region),
 		newConn.WithSystem(projectID),
 		newConn.WithOrg(a.cfg.Micro.OrgID),
-		newConn.WithGrpcDialOptions(grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithPerRPCCredentials(a.author)),
+		newConn.WithGrpcDialOptions(grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithPerRPCCredentials(a.authenticator)),
 		newConn.WithServiceResolver(infra.MustSetupEtcdResolver()))
 	if err != nil {
 		return nil, errors.NewError(http.StatusInternalServerError, fmt.Sprintf("连接agent失败，project_id: %d", projectID)).WithLog(err.Error())
@@ -246,7 +246,7 @@ func (a *app) GetAgentStream(region string, projectID int64) (*CenterClient, err
 			dialAddress := addr.Attr().CenterServiceEndpoint
 			ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
 			defer cancel()
-			gopts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithPerRPCCredentials(a.author)}
+			gopts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithPerRPCCredentials(a.authenticator)}
 			if addr.Attr().CenterServiceRegion != a.cfg.Micro.Region {
 				dialAddress, gopts = BuildProxyDialerInfo(ctx, addr.Attr().CenterServiceRegion, dialAddress, gopts)
 			}
@@ -286,7 +286,7 @@ func (a *app) FindAgentsV2(region string, projectID int64) ([]*CenterClient, err
 			dialAddress := addr.Attr().CenterServiceEndpoint
 			ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
 			defer cancel()
-			gopts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithPerRPCCredentials(a.author)}
+			gopts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithPerRPCCredentials(a.authenticator)}
 			if addr.Attr().CenterServiceRegion != a.cfg.Micro.Region {
 				dialAddress, gopts = BuildProxyDialerInfo(ctx, addr.Attr().CenterServiceRegion, dialAddress, gopts)
 			}
@@ -327,7 +327,7 @@ func (a *app) FindAgents(region string, projectID int64) ([]*AgentClient, error)
 		err := func() error {
 			ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
 			defer cancel()
-			gopts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithPerRPCCredentials(a.author)}
+			gopts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithPerRPCCredentials(a.authenticator)}
 			dialAddress := addr.Address()
 			if addr.Attr().Region != a.cfg.Micro.Region {
 				dialAddress, gopts = BuildProxyDialerInfo(ctx, addr.Attr().Region, addr.Address(), gopts)
@@ -421,6 +421,7 @@ func (a *app) refreshCenterSrvList() error {
 	}
 	mtimer := a.metrics.CustomHistogramSet("get_center_srv_list")
 	defer mtimer.ObserveDuration()
+
 	finder := etcd.NewFinder[infra.NodeMeta](infra.ResolveEtcdClient())
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
 	defer cancel()
@@ -429,6 +430,15 @@ func (a *app) refreshCenterSrvList() error {
 	if err != nil {
 		a.metrics.CustomInc("find_centers_error", findKey, err.Error())
 		return err
+	}
+
+	genMetadata := func(ctx context.Context) context.Context {
+		md, exist := metadata.FromOutgoingContext(ctx)
+		if !exist {
+			md = metadata.New(map[string]string{})
+		}
+		md.Set(common.GOPHERCRON_AGENT_IP_MD_KEY, a.GetIP())
+		return metadata.NewOutgoingContext(ctx, md)
 	}
 
 	centerMap := hashmap.New[string, *CenterClient]()
@@ -440,7 +450,16 @@ func (a *app) refreshCenterSrvList() error {
 
 		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
 		defer cancel()
-		gopts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithPerRPCCredentials(a.author)}
+		gopts := []grpc.DialOption{
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithPerRPCCredentials(a.authenticator),
+			grpc.WithUnaryInterceptor(func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+				return invoker(genMetadata(ctx), method, req, reply, cc, opts...)
+			}),
+			grpc.WithStreamInterceptor(func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+				return streamer(genMetadata(ctx), desc, cc, method, opts...)
+			}),
+		}
 		dialAddress := addr.Address()
 		if addr.Attr().Region != a.cfg.Micro.Region {
 			dialAddress, gopts = BuildProxyDialerInfo(ctx, addr.Attr().Region, addr.Address(), gopts)
@@ -595,13 +614,13 @@ func BuildProxyDialerInfo(ctx context.Context, region, address string, opts []gr
 	return dialAddress, gopts
 }
 
-type Author struct {
+type Authenticator struct {
 	privateKey []byte
 	token      string
 	expireTime time.Time
 }
 
-func (s *Author) GetRequestMetadata(ctx context.Context, uri ...string) (map[string]string, error) {
+func (s *Authenticator) GetRequestMetadata(ctx context.Context, uri ...string) (map[string]string, error) {
 	if s.expireTime.After(time.Now().Add(time.Second * 10)) {
 		return map[string]string{
 			common.GOPHERCRON_CENTER_AUTH_KEY: s.token,
@@ -625,6 +644,6 @@ func (s *Author) GetRequestMetadata(ctx context.Context, uri ...string) (map[str
 	}, nil
 }
 
-func (s *Author) RequireTransportSecurity() bool {
+func (s *Authenticator) RequireTransportSecurity() bool {
 	return false
 }

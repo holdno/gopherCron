@@ -84,7 +84,7 @@ func (s *cronRpc) RemoveStream(ctx context.Context, req *cronpb.RemoveStreamRequ
 }
 
 func (s *cronRpc) TryLock(req cronpb.Center_TryLockServer) error {
-	author := jwt.GetProjectAuthor(req.Context())
+	authenticator := jwt.GetProjectAuthenticator(req.Context())
 	agentIP, exist := GetAgentIPFromContext(req.Context())
 	if !exist {
 		return status.Error(codes.PermissionDenied, codes.PermissionDenied.String())
@@ -116,7 +116,7 @@ func (s *cronRpc) TryLock(req cronpb.Center_TryLockServer) error {
 			if err != nil || task == nil {
 				return err
 			}
-			if author != nil && !author.Allow(task.ProjectId) {
+			if authenticator != nil && !authenticator.Allow(task.ProjectId) {
 				return status.Error(codes.Unauthenticated, codes.Unauthenticated.String())
 			}
 			locker = s.app.GetTaskLocker(&common.TaskInfo{TaskID: task.TaskId, ProjectID: task.ProjectId})
@@ -130,34 +130,29 @@ func (s *cronRpc) TryLock(req cronpb.Center_TryLockServer) error {
 				return err
 			}
 
-			pass := false
-			if len(runningInfo) > 0 {
+			pass := len(runningInfo) == 0
+			if !pass {
 				for _, info := range runningInfo {
 					if info.AgentIP == agentIP {
 						pass = true
 						break
 					}
 				}
-			} else {
-				pass = true
 			}
 
 			if pass {
-				if err = req.Send(&cronpb.TryLockReply{
+				return req.Send(&cronpb.TryLockReply{
 					Result:  true,
 					Message: "ok",
-				}); err != nil {
-					return err
-				}
-			} else {
-				return status.Error(codes.Aborted, "任务运行中")
+				})
 			}
+			return status.Error(codes.Aborted, "任务运行中")
 		}
 	}
 }
 
 func (s *cronRpc) StatusReporter(ctx context.Context, req *cronpb.ScheduleReply) (*cronpb.Result, error) {
-	author := jwt.GetProjectAuthor(ctx)
+	author := jwt.GetProjectAuthenticator(ctx)
 	if author != nil && !author.Allow(req.ProjectId) {
 		return nil, status.Error(codes.Unauthenticated, codes.Unauthenticated.String())
 	}
@@ -271,7 +266,7 @@ func (s *cronRpc) Auth(ctx context.Context, req *cronpb.AuthReq) (*cronpb.AuthRe
 }
 
 func (s *cronRpc) RegisterAgent(req cronpb.Center_RegisterAgentServer) error {
-	author := jwt.GetProjectAuthor(req.Context())
+	author := jwt.GetProjectAuthenticator(req.Context())
 	newRegister := make(chan *cronpb.RegisterAgentReq)
 	go safe.Run(func() {
 		for {
@@ -401,7 +396,7 @@ Here:
 }
 
 func (s *cronRpc) RegisterAgentV2(req cronpb.Center_RegisterAgentV2Server) error {
-	author := jwt.GetProjectAuthor(req.Context())
+	author := jwt.GetProjectAuthenticator(req.Context())
 	newRegisterInfo := make(chan *cronpb.RegisterInfo)
 	go safe.Run(func() {
 		for {

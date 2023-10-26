@@ -65,16 +65,8 @@ func apiServer(srv app.App, conf *config.ServiceConfig) {
 		newServer.WithServiceRegister(infra.MustSetupEtcdRegister()),
 		newServer.WithGrpcServerOptions(grpc.ReadBufferSize(protocol.GrpcBufferSize), grpc.WriteBufferSize(protocol.GrpcBufferSize)))
 
-	grpcRequestCounter := srv.Metrics().NewCounter("grpc_request", "method")
-	grpcRequestDuration := srv.Metrics().NewHistogram("grpc_request", "method")
-	server.Use(func(ctx context.Context) error {
-		method := middleware.GetFullMethodFrom(ctx)
-		grpcRequestCounter(method)
-		timer := grpcRequestDuration(method)
-		defer timer.ObserveDuration()
-		return middleware.Next(ctx)
-	})
-	server.Handler(cronpb.CenterServer.SendEvent)
+	grpcRequestCounter := srv.Metrics().NewCounter("grpc_request", "method", "source")
+	grpcRequestDuration := srv.Metrics().NewHistogram("grpc_request", "method", "source")
 	server.Use(func(ctx context.Context) error {
 		agentIP, exist := GetAgentIPFromContext(ctx)
 		if !exist {
@@ -92,6 +84,14 @@ func apiServer(srv app.App, conf *config.ServiceConfig) {
 
 		return nil
 	})
+	server.Use(func(ctx context.Context) error {
+		method := middleware.GetFullMethodFrom(ctx)
+		agentIP, _ := middleware.GetAgentIP(ctx)
+		grpcRequestCounter(method, agentIP)
+		timer := grpcRequestDuration(method, agentIP)
+		defer timer.ObserveDuration()
+		return middleware.Next(ctx)
+	})
 
 	server.Handler(cronpb.CenterServer.Auth)
 	agentApi := server.Group()
@@ -107,6 +107,7 @@ func apiServer(srv app.App, conf *config.ServiceConfig) {
 	})
 
 	server.Use(jwt.AgentAuthMiddleware([]byte(srv.GetConfig().JWT.PublicKey))) // center间鉴权复用agent验证center身份的中间件
+	server.Handler(cronpb.CenterServer.SendEvent, cronpb.CenterServer.RemoveStream)
 	srv.Run()
 
 	rpcImpl.getCurrentRegisterAddrs = server.Addrs

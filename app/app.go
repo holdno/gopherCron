@@ -189,9 +189,9 @@ type app struct {
 	streamManager   *streamManager[*cronpb.Event]
 	streamManagerV2 *streamManager[*cronpb.ServiceEvent]
 
-	oidcSrv *OIDCService
-	author  *Author
-	rbacSrv RBACImpl
+	oidcSrv       *OIDCService
+	authenticator *Authenticator
+	rbacSrv       RBACImpl
 
 	__centerConncets *hashmap.Map[string, *CenterClient]
 }
@@ -238,7 +238,7 @@ func NewApp(configPath string) App {
 	app := &app{
 		Warner: warning.NewDefaultWarner(wlog.With(zap.String("component", "warner"))),
 		cfg:    cfg,
-		author: &Author{
+		authenticator: &Authenticator{
 			privateKey: []byte(cfg.JWT.PrivateKey),
 		},
 		rbacSrv: NewRBACSrv(),
@@ -246,7 +246,7 @@ func NewApp(configPath string) App {
 	app.ctx, app.cancelFunc = context.WithCancel(context.Background())
 	if cfg.ReportAddr != "" {
 		app.Warner = warning.NewHttpReporter(cfg.ReportAddr, func() (string, error) {
-			return app.author.token, nil
+			return app.authenticator.token, nil
 		})
 	}
 

@@ -3,6 +3,6 @@ IMAGE_PROJECT=holdnowby
 IMAGE_NAME=gophercron
 
 # Make full image name
-IMAGE=${IMAGE_PROJECT}/${IMAGE_NAME}:v2.4.4
+IMAGE=${IMAGE_PROJECT}/${IMAGE_NAME}:v2.4.4-rc.1
 
 docker build -t ${IMAGE} .

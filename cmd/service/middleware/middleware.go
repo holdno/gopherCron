@@ -4,11 +4,12 @@ import (
 	"context"
 
 	"github.com/gin-gonic/gin"
+	"github.com/spacegrower/watermelon/infra/middleware"
+
 	"github.com/holdno/gopherCron/cmd/service/response"
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/errors"
 	"github.com/holdno/gopherCron/jwt"
-	"github.com/spacegrower/watermelon/infra/middleware"
 )
 
 var (

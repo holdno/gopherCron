@@ -276,7 +276,7 @@ func NewAuthenticator(projectAuths []config.ProjectAuth) *Authenticator {
 }
 
 func (a *Authenticator) GetToken(ctx context.Context, driver cronpb.CenterClient) (string, error) {
-	if !a.expTime.IsZero() && a.expTime.Before(time.Now().Add(time.Minute)) {
+	if !a.expTime.IsZero() && a.expTime.After(time.Now().Add(-time.Minute)) {
 		return a.token, nil
 	}
 
@@ -290,10 +290,9 @@ func (a *Authenticator) GetToken(ctx context.Context, driver cronpb.CenterClient
 	if err != nil {
 		wlog.Error("failed to get agent auth token", zap.Error(err))
 		return "", err
-	} else {
-		a.token = resp.Jwt
-		a.expTime = time.Unix(resp.ExpireTime, 0)
 	}
+	a.token = resp.Jwt
+	a.expTime = time.Unix(resp.ExpireTime, 0)
 
 	return a.token, nil
 }
