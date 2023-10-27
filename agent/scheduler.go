@@ -422,14 +422,15 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 							zap.Int64("project_id", taskExecuteInfo.Task.ProjectID),
 							zap.String("task_name", taskExecuteInfo.Task.Name),
 							zap.Error(err))
-						if gerr, ok := status.FromError(err); ok && gerr.Code() == codes.Aborted ||
-							gerr.Code() == codes.Unauthenticated ||
+						if gerr, ok := status.FromError(err); (ok && gerr.Code() == codes.Aborted ||
+							gerr.Code() == codes.Unauthenticated) ||
 							tryTimes == 5 {
 
 							first := false
 							once.Do(func() {
 								first = true
 								resultChan <- err
+								close(resultChan)
 							})
 							if !first {
 								a.metrics.SystemErrInc("agent_task_execute_lock_failure")
@@ -485,61 +486,12 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 		defer func() {
 			// 删除任务的正在执行状态
 			a.scheduler.DeleteExecutingTask(plan.Task.SchedulerKey())
-			f := common.TaskFinishedV2{
-				TaskName:  taskExecuteInfo.Task.Name,
-				TaskID:    taskExecuteInfo.Task.TaskID,
-				Command:   taskExecuteInfo.Task.Command,
-				ProjectID: taskExecuteInfo.Task.ProjectID,
-				Status:    common.TASK_STATUS_DONE_V2,
-				TmpID:     taskExecuteInfo.TmpID,
-			}
-			if plan.UserId != 0 {
-				f.Operator = fmt.Sprintf("%s(%d)", plan.UserName, plan.UserId)
-			}
-			if taskExecuteInfo.Task.FlowInfo != nil {
-				f.WorkflowID = taskExecuteInfo.Task.FlowInfo.WorkflowID
-			}
-			if result != nil {
-				f.Result = result.Output
-				f.StartTime = result.StartTime.Unix()
-				f.EndTime = result.EndTime.Unix()
-				if result.Err != "" {
-					f.Status = common.TASK_STATUS_FAIL_V2
-					f.Error = result.Err
-				}
-			}
-			value, _ := json.Marshal(f)
-			if err := retry.Do(func() error {
-				ctx, cancel := context.WithTimeout(context.Background(), time.Duration(a.cfg.Timeout)*time.Second)
-				defer cancel()
-				_, err := a.GetStatusReporter()(ctx, &cronpb.ScheduleReply{
-					ProjectId: plan.Task.ProjectID,
-					Event: &cronpb.Event{
-						Type:      common.TASK_STATUS_FINISHED_V2,
-						Version:   common.VERSION_TYPE_V2,
-						Value:     value,
-						EventTime: time.Now().Unix(),
-					},
-				})
-				return err
-			}, retry.Attempts(3), retry.DelayType(retry.BackOffDelay),
-				retry.MaxJitter(time.Minute), retry.LastErrorOnly(true)); err != nil {
-				a.metrics.SystemErrInc("agent_status_report_failure")
-				a.Warning(warning.NewTaskWarningData(warning.TaskWarning{
-					AgentIP:   a.localip,
-					TaskName:  plan.Task.Name,
-					TaskID:    plan.Task.TaskID,
-					ProjectID: plan.Task.ProjectID,
-					Message:   "agent上报任务运行结束状态失败: " + err.Error(),
-				}))
-				a.logger.Error(fmt.Sprintf("task: %s, id: %s, tmp_id: %s, failed to change running status, the task is finished, error: %v",
-					plan.Task.Name, plan.Task.TaskID, plan.TmpID, err))
-			}
+			reportTaskResult(a, taskExecuteInfo, plan, result)
 		}()
 
 		if err := retry.Do(func() error {
 			value, _ := json.Marshal(taskExecuteInfo)
-			ctx, cancel := context.WithTimeout(context.Background(), time.Duration(a.cfg.Timeout)*time.Second)
+			ctx, cancel := context.WithTimeout(taskExecuteInfo.CancelCtx, time.Duration(a.cfg.Timeout)*time.Second)
 			defer cancel()
 			_, err := a.GetStatusReporter()(ctx, &cronpb.ScheduleReply{
 				ProjectId: plan.Task.ProjectID,
@@ -552,14 +504,14 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 			})
 			return err
 		}, retry.Attempts(3), retry.DelayType(retry.BackOffDelay),
-			retry.MaxJitter(time.Minute), retry.LastErrorOnly(true)); err != nil {
+			retry.MaxJitter(time.Second*30), retry.LastErrorOnly(true)); err != nil {
+			taskExecuteInfo.CancelFunc()
 			a.metrics.SystemErrInc("agent_status_report_failure")
 			a.logger.Error(fmt.Sprintf("task: %s, id: %s, tmp_id: %s, change running status error, %v", plan.Task.Name,
 				plan.Task.TaskID, plan.TmpID, err))
 			errDetail := fmt.Errorf("agent上报任务开始状态失败: %s，任务终止", err.Error())
 			cancelReason.WriteString(errDetail.Error())
 			errSignal.Send(errDetail)
-			taskExecuteInfo.CancelFunc()
 		}
 
 		errSignal.Close()
@@ -575,6 +527,59 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 	}()
 
 	return errSignal.WaitOne()
+}
+
+func reportTaskResult(a *client, taskExecuteInfo *common.TaskExecutingInfo, plan *common.TaskSchedulePlan, result *common.TaskExecuteResult) {
+	f := common.TaskFinishedV2{
+		TaskName:  taskExecuteInfo.Task.Name,
+		TaskID:    taskExecuteInfo.Task.TaskID,
+		Command:   taskExecuteInfo.Task.Command,
+		ProjectID: taskExecuteInfo.Task.ProjectID,
+		Status:    common.TASK_STATUS_DONE_V2,
+		TmpID:     taskExecuteInfo.TmpID,
+	}
+	if plan.UserId != 0 {
+		f.Operator = fmt.Sprintf("%s(%d)", plan.UserName, plan.UserId)
+	}
+	if taskExecuteInfo.Task.FlowInfo != nil {
+		f.WorkflowID = taskExecuteInfo.Task.FlowInfo.WorkflowID
+	}
+	if result != nil {
+		f.Result = result.Output
+		f.StartTime = result.StartTime.Unix()
+		f.EndTime = result.EndTime.Unix()
+		if result.Err != "" {
+			f.Status = common.TASK_STATUS_FAIL_V2
+			f.Error = result.Err
+		}
+	}
+	value, _ := json.Marshal(f)
+	if err := retry.Do(func() error {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(a.cfg.Timeout)*time.Second)
+		defer cancel()
+		_, err := a.GetStatusReporter()(ctx, &cronpb.ScheduleReply{
+			ProjectId: plan.Task.ProjectID,
+			Event: &cronpb.Event{
+				Type:      common.TASK_STATUS_FINISHED_V2,
+				Version:   common.VERSION_TYPE_V2,
+				Value:     value,
+				EventTime: time.Now().Unix(),
+			},
+		})
+		return err
+	}, retry.Attempts(3), retry.DelayType(retry.BackOffDelay),
+		retry.MaxJitter(time.Minute), retry.LastErrorOnly(true)); err != nil {
+		a.metrics.SystemErrInc("agent_status_report_failure")
+		a.Warning(warning.NewTaskWarningData(warning.TaskWarning{
+			AgentIP:   a.localip,
+			TaskName:  plan.Task.Name,
+			TaskID:    plan.Task.TaskID,
+			ProjectID: plan.Task.ProjectID,
+			Message:   "agent上报任务运行结束状态失败: " + err.Error(),
+		}))
+		a.logger.Error(fmt.Sprintf("task: %s, id: %s, tmp_id: %s, failed to change running status, the task is finished, error: %v",
+			plan.Task.Name, plan.Task.TaskID, plan.TmpID, err))
+	}
 }
 
 // 处理任务结果
