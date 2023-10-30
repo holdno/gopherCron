@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/config"
@@ -34,9 +35,10 @@ type client struct {
 	// etcd       protocol.EtcdManager
 	// protocol.ClientEtcdManager
 	warning.Warner
-	centerSrv     register.CenterClient
-	onCommand     func(*cronpb.CommandRequest) (*cronpb.Result, error)
-	authenticator *Authenticator
+	centerSrv       register.CenterClient
+	srvShutdownFunc func()
+	onCommand       func(*cronpb.CommandRequest) (*cronpb.Result, error)
+	authenticator   *Authenticator
 
 	cronpb.UnimplementedAgentServer
 	metrics *Metrics
@@ -59,11 +61,11 @@ type Client interface {
 
 func (agent *client) loadConfigAndSetupAgentFunc() func() error {
 	inited := false
-	var shutDown func()
 
 	return func() error {
 		// var err error
 		cfg := config.InitClientConfig(agent.configPath)
+
 		if !inited {
 			inited = true
 			agent.cfg = &config.ClientConfig{}
@@ -75,6 +77,9 @@ func (agent *client) loadConfigAndSetupAgentFunc() func() error {
 			}
 			if cfg.LogSize == 0 {
 				cfg.LogSize = 100
+			}
+			if cfg.Timeout == 0 {
+				cfg.Timeout = 5
 			}
 
 			wlog.SetGlobalLogger(wlog.NewLogger(&wlog.Config{
@@ -115,7 +120,7 @@ func (agent *client) loadConfigAndSetupAgentFunc() func() error {
 			agent.logger.Info(fmt.Sprintf("init http task log reporter, address: %s", cfg.ReportAddr))
 			agent.Warner = warning.NewHttpReporter(cfg.ReportAddr, func() (string, error) {
 				if agent.authenticator != nil {
-					ctx, cancel := context.WithTimeout(context.Background(), 5)
+					ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.Timeout)*time.Second)
 					defer cancel()
 					return agent.authenticator.GetToken(ctx, agent.centerSrv)
 				}
@@ -134,11 +139,11 @@ func (agent *client) loadConfigAndSetupAgentFunc() func() error {
 		agent.cfg = cfg
 		agent.authenticator = NewAuthenticator(cfg.Auth.Projects)
 
-		if shutDown != nil { // 先停掉旧配置启动的服务
-			shutDown()
+		if agent.srvShutdownFunc != nil { // 先停掉旧配置启动的服务
+			agent.srvShutdownFunc()
 		}
 		srv := agent.SetupMicroService() // 获取新的服务
-		shutDown = func() {              // 注册服务的停止方法
+		agent.srvShutdownFunc = func() { // 注册服务的停止方法
 			srv.ShutDown()
 		}
 
@@ -187,8 +192,18 @@ func (c *client) Cfg() *config.ClientConfig {
 func (c *client) Close() {
 	if !c.isClose {
 		c.isClose = true
-		c.daemon.Close()
-		c.scheduler.Stop()
+		// 中断服务，停止接收新的调度信息
+		if c.srvShutdownFunc != nil {
+			c.srvShutdownFunc()
+		}
+		// 关闭本地调度器
+		if c.scheduler != nil {
+			c.scheduler.Stop()
+		}
+		// 等待所有任务运行结束
+		if c.daemon != nil {
+			c.daemon.Close()
+		}
 		<-c.closeChan
 		wlog.Info("agent has been shut down")
 	}
