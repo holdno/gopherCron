@@ -15,10 +15,6 @@
 
 [关于“为系统增加内置环境变量”的讨论](https://github.com/holdno/gopherCron/discussions/21)
 
-### V2
-
-全新 V2 版本支持 workflow，重写任务调度方式，移除 client 对 etcd 的依赖
-
 ### 依赖
 
 - Etcd # 服务注册与发现
@@ -27,9 +23,9 @@
 ### 引用
 
 - [Gin](https://github.com/gin-gonic/gin) 提供 webapi
+- 🍉[水瓜](https://github.com/spacegrower/watermelon) 提供服务注册发现能力(中心与边缘通信)
 - [gopherCronFe](https://github.com/holdno/gopherCronFe) 提供可视化管理界面(已将构建后的文件内置于 dist/view 目录下)
 - [cronexpr](https://github.com/gorhill/cronexpr) 提供 cron 表达式解析器
-- 🍉[水瓜](https://github.com/spacegrower/watermelon) 提供服务注册发现能力(中心与边缘通信)
 
 ### 实现功能
 
@@ -47,6 +43,8 @@
 ![Grafana Dashboard](./static/grafana_example.jpg)
 
 ### 配套前端
+
+项目地址 [gopherCronFe](https://github.com/holdno/gopherCronFe)
 
 ![image](./static/dashboard_login.jpg)  
 ![image](./static/dashboard_homepage.jpg)  
