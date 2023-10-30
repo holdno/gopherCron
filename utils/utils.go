@@ -16,6 +16,7 @@ import (
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/config"
 	"github.com/holdno/gopherCron/errors"
+	"github.com/spacegrower/watermelon/pkg/safe"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
@@ -337,4 +338,44 @@ func CompareVersion(o, n string) bool {
 		return false
 	}
 	return true
+}
+
+type WaitGroupWithTimeout struct {
+	w       *sync.WaitGroup
+	pctx    context.Context
+	pcancel context.CancelFunc
+}
+
+func NewTimeoutWaitGroup(ctx context.Context, cancel context.CancelFunc) *WaitGroupWithTimeout {
+	w := &WaitGroupWithTimeout{
+		w:       &sync.WaitGroup{},
+		pctx:    ctx,
+		pcancel: cancel,
+	}
+	return w
+}
+
+func (w *WaitGroupWithTimeout) Add(i int) {
+	w.w.Add(i)
+}
+
+func (w *WaitGroupWithTimeout) Done() {
+	w.w.Done()
+}
+
+func (w *WaitGroupWithTimeout) Wait(timeout time.Duration) {
+	ctx, cancel := context.WithTimeout(w.pctx, timeout)
+	defer cancel()
+	closedChan := make(chan struct{})
+	go safe.Run(func() {
+		w.w.Wait()
+		close(closedChan)
+	})
+
+	select {
+	case <-closedChan:
+	case <-ctx.Done():
+		// ctx done后会调用 w.pcancel()，调用后，parent ctx会被cancel掉，理论上所有的w.Done()均会被触发
+	}
+	w.pcancel()
 }

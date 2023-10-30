@@ -1,10 +1,9 @@
-<p align="center"><a href="/" target="_blank" rel="noopener noreferrer"><img width="200" src="http://img.holdno.com/github/holdno/gopher_cron/gopherCronLogo.png" alt="firetower logo"></a></p>
+<p align="center"><a href="/" target="_blank" rel="noopener noreferrer"><img width="200" src="./static/logo.png" alt="gophercron logo"></a></p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/download-fast-brightgreen.svg" alt="Downloads"></a>
   <img src="https://img.shields.io/badge/build-passing-brightgreen.svg" alt="Build Status">
   <img src="https://img.shields.io/badge/package%20utilities-go modules-blue.svg" alt="Package Utilities">
-  <img src="https://img.shields.io/badge/golang-1.11.0-%23ff69b4.svg" alt="Version">
+  <img src="https://img.shields.io/badge/golang-1.20.0-%23ff69b4.svg" alt="Version">
   <img src="https://img.shields.io/badge/license-MIT-brightgreen.svg" alt="license">
 </p>
 <h1 align="center">GopherCron</h1>
@@ -30,16 +29,29 @@
 - [Gin](https://github.com/gin-gonic/gin) 提供 webapi
 - [gopherCronFe](https://github.com/holdno/gopherCronFe) 提供可视化管理界面(已将构建后的文件内置于 dist/view 目录下)
 - [cronexpr](https://github.com/gorhill/cronexpr) 提供 cron 表达式解析器
-- 🍉[水瓜](https://github.com/spacegrower/watermelon) 提供服务注册发现能力
+- 🍉[水瓜](https://github.com/spacegrower/watermelon) 提供服务注册发现能力(中心与边缘通信)
 
 ### 实现功能
 
-- 秒级定时任务
+- 秒级定时任务(最细 5s 周期)
 - 任务日志查看
 - 随时结束任务进程
 - 分布式扩展
 - 健康节点检测 (分项目显示对应的健康节点 IP 及节点数)
 - workflow 任务编排
+
+### 监控面板
+
+[Grafana Dashboard 19874](https://grafana.com/grafana/dashboards/19874-gophercron-dashboard/)
+
+![Grafana Dashboard](./static/grafana_example.jpg)
+
+### 配套前端
+
+![image](./static/dashboard_login.jpg)  
+![image](./static/dashboard_homepage.jpg)  
+![image](./static/dashboard_task-detail.jpg)  
+![image](./static/dashboard_task-log.jpg)
 
 ### 任务日志集中上报
 
@@ -85,10 +97,6 @@ v2.1.0 + 版本中移除了 client 对 etcd 的依赖
 访问地址: localhost:6306/admin
 
 > 管理员初始账号密码为 admin 123456
-
-![image](http://img.holdno.com/github/holdno/gopher_cron/admin_home.png)
-
-![image](http://img.holdno.com/github/holdno/gopher_cron/admin_task.png)
 
 ### 注意
 

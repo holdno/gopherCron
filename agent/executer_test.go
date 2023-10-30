@@ -1,18 +1,16 @@
 package agent
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
 	"github.com/holdno/gopherCron/common"
+	"github.com/spacegrower/watermelon/infra/wlog"
 )
 
 func TestTaskUnmarshal(t *testing.T) {
@@ -33,52 +31,23 @@ func fatal(format string, args ...interface{}) {
 }
 
 func TestApp_ExecuteTask(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*15)
 	defer cancel()
 
-	// var output bytes.Buffer
-	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", "sleep 8 && echo hello world")
-	stdoutPipe, err := cmd.StdoutPipe()
-	if err != nil {
-		fatal("no pipe: %v", err)
-	}
-	start := time.Now()
-
-	if err = cmd.Start(); err != nil {
-		fatal("start failed: %v", err)
-	}
-	var stdout strings.Builder
 	go func() {
-		buf := bufio.NewReader(stdoutPipe)
-		for {
-			line, err := buf.ReadString('\n')
-			if err != nil {
-				return
-			}
-			if len(line) > 0 {
-				stdout.WriteString(line)
-				stdout.WriteString("\n")
-			}
-		}
+		time.Sleep(time.Second * 3)
+		cancel()
+		fmt.Println("canceled")
 	}()
 
-	err = cmd.Wait()
-	d := time.Since(start)
-
+	std, err := execute(ctx, "/bin/sh", "echo hello world", wlog.With())
 	if err != nil {
-		exiterr := err.(*exec.ExitError)
-		status := exiterr.Sys().(syscall.WaitStatus)
-		if status.ExitStatus() != 0 {
-			t.Logf("wrong exit status: %v, %v", status.ExitStatus(), cmd.ProcessState.ExitCode())
-		}
+		t.Fatal(err)
 	}
 
-	if d.Seconds() >= 3 {
-		t.Logf("Cancelation took too long: %v", d)
+	if std != nil {
+		fmt.Println("got stdout/error", std.String())
 	}
-
-	time.Sleep(time.Second * 10)
-	fmt.Println("Success!", stdout.String())
 }
 
 func TestResultSub(t *testing.T) {

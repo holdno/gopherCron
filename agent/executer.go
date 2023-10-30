@@ -3,91 +3,83 @@ package agent
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
-	"os/exec"
 	"strings"
-	"sync"
 	"time"
 
-	"github.com/holdno/gopherCron/common"
+	"github.com/spacegrower/watermelon/infra/wlog"
 	"github.com/spacegrower/watermelon/pkg/safe"
 	"go.uber.org/zap"
+
+	"github.com/holdno/gopherCron/common"
+	"github.com/holdno/gopherCron/utils"
 )
 
-// ExecuteTask 执行任务
-func (a *client) ExecuteTask(info *common.TaskExecutingInfo) *common.TaskExecuteResult {
-	// 启动一个协成来执行shell命令
-
-	var (
-		cmd    *exec.Cmd
-		result *common.TaskExecuteResult
-		err    error
-	)
-
-	result = &common.TaskExecuteResult{
-		ExecuteInfo: info,
-		StartTime:   time.Now(), // 记录任务开始时间
-	}
-
-	cmd = forkProcess(info.CancelCtx, a.cfg.Shell, info.Task.Command)
-	// cmd = exec.CommandContext(info.CancelCtx, a.cfg.Shell, "-c", info.Task.Command)
-	stdoutPipe, _ := cmd.StdoutPipe()
-	stderrPipe, _ := cmd.StderrPipe()
-
-	wait := sync.WaitGroup{}
-	stdScanner := func(ctx context.Context, r io.Reader, lines chan string) {
+// 处理任务stdio到本地日志和远端日志(strings.Builder)
+func handleRealTimeResult(ctx context.Context, output *strings.Builder, logOutput wlog.Logger, stdoutPipe, stderrPipe io.Reader) *utils.WaitGroupWithTimeout {
+	ctx, cancel := context.WithCancel(ctx)
+	wait := utils.NewTimeoutWaitGroup(ctx, cancel)
+	newScanner := func(ctx context.Context, r io.Reader) chan string {
 		wait.Add(1)
 		s := bufio.NewScanner(r)
+		msgChan := make(chan string, 10)
 		go safe.Run(func() {
-			defer func() {
-				wait.Done()
-			}()
+			defer close(msgChan)
+			defer wait.Done()
 			for s.Scan() {
-				lines <- s.Text()
-				if ctx.Err() != nil {
+				select {
+				case <-ctx.Done():
 					return
+				case msgChan <- s.Text():
 				}
+			}
+
+			if s.Err() != nil && !errors.Is(s.Err(), io.EOF) {
+				logOutput.Error("real-time scanner finished with error", zap.Error(s.Err()))
 			}
 		})
+		return msgChan
 	}
 
-	var (
-		output  strings.Builder
-		closeCh = make(chan struct{})
-	)
-	go func() {
-		var (
-			stdout = make(chan string)
-			stderr = make(chan string)
-		)
-		defer func() {
-			close(stdout)
-			close(stderr)
-		}()
-		stdScanner(info.CancelCtx, stdoutPipe, stdout)
-		stdScanner(info.CancelCtx, stderrPipe, stderr)
+	stdout := newScanner(ctx, stdoutPipe)
+	stderr := newScanner(ctx, stderrPipe)
+	go safe.Run(func() {
 		for {
+			var (
+				line      string
+				ok        bool
+				logStdout = logOutput.With(zap.String("source", "stdout"))
+				logStderr = logOutput.With(zap.String("source", "stderr"))
+				writeLog  func(msg string, fields ...zap.Field)
+			)
 			select {
-			case <-info.CancelCtx.Done():
-				if cmd.Process != nil {
-					cmd.Process.Kill()
-				}
+			case <-ctx.Done():
 				return
-			case <-closeCh:
-				return
-			case line := <-stdout:
+			case line, ok = <-stdout:
+				writeLog = logStdout.Info
+			case line, ok = <-stderr:
+				writeLog = logStderr.Error
+			}
+			if ok {
 				output.WriteString(line)
 				output.WriteString("\n")
-				a.logger.Info("task stdout", zap.String("line", line), zap.String("task_id", info.Task.TaskID), zap.String("task_name", info.Task.Name))
-			case line := <-stderr:
-				output.WriteString(line)
-				output.WriteString("\n")
-				a.logger.Error("task stderr", zap.String("line", line), zap.String("task_id", info.Task.TaskID), zap.String("task_name", info.Task.Name))
-			default:
+				writeLog(line)
 			}
 		}
-	}()
+	})
+	return wait
+}
+
+func execute(ctx context.Context, shell, command string, logger wlog.Logger) (*strings.Builder, error) {
+	var (
+		cmd           = forkProcess(ctx, shell, command)
+		stdoutPipe, _ = cmd.StdoutPipe()
+		stderrPipe, _ = cmd.StderrPipe()
+		output        = &strings.Builder{}
+		err           error
+	)
 	// 多命令语句会导致 cmd.CombineOutput()阻塞，无法正常timeout，例如：sleep 20 && echo 123，timeout 设为5则无效
 	// https://github.com/golang/go/issues/23019
 	// output, err = cmd.CombinedOutput()
@@ -98,53 +90,59 @@ func (a *client) ExecuteTask(info *common.TaskExecutingInfo) *common.TaskExecute
 
 	// 执行命令
 	if err := cmd.Start(); err != nil {
-		result.Err = err.Error()
-		goto FinishWithError
+		return nil, err
 	}
 
-	if err = cmd.Wait(); err != nil {
-		ctxErr := info.CancelCtx.Err()
-		if ctxErr == context.DeadlineExceeded {
-			result.Err = "timeout"
-		} else if ctxErr == context.Canceled {
-			result.Err = "canceled"
-		} else {
-			switch cmd.ProcessState.ExitCode() {
-			case 1:
-				result.Err = err.Error()
-			case 2:
-				result.Err = "terminal interrupt"
-			case 9:
-				result.Err = "process terminated"
-			case 126:
-				result.Err = "unexecutable command"
-			case 127:
-				result.Err = "command not found"
-			case 128:
-				result.Err = "invalid exit parameter"
-			case 130:
-				result.Err = "sig exit"
-			case 255:
-				result.Err = "error exit code"
-			default:
-				result.Err = fmt.Sprintf("exit code: %d", cmd.ProcessState.ExitCode())
-			}
+	wait := handleRealTimeResult(ctx, output, logger, stdoutPipe, stderrPipe)
 
-			if err.Error() != "" {
-				result.Err += ", " + err.Error()
+	if err := cmd.Wait(); err != nil {
+		ctxErr := ctx.Err()
+		var errMsg string
+		if cmd.ProcessState.ExitCode() == -1 {
+			if ctxErr == context.DeadlineExceeded {
+				errMsg = "context timeout"
+			} else if ctxErr == context.Canceled {
+				errMsg = "context canceled"
 			}
 		}
-		goto FinishWithError
+
+		if errMsg == "" {
+			errMsg = err.Error()
+		}
+
+		err = fmt.Errorf("%s, exit code: %d", errMsg, cmd.ProcessState.ExitCode())
 	}
 
-FinishWithError:
-	wait.Wait()
-	close(closeCh)
-	result.EndTime = time.Now()
-	runeStr := []rune(strings.TrimSuffix(output.String(), "\n"))
-	if len(runeStr) > 5000 {
-		runeStr = runeStr[:5000]
+	wait.Wait(time.Second * 5)
+	return output, err
+}
+
+// ExecuteTask 执行任务
+func (a *client) ExecuteTask(info *common.TaskExecutingInfo) *common.TaskExecuteResult {
+	result := &common.TaskExecuteResult{
+		StartTime: time.Now(),
 	}
-	result.Output = string(runeStr)
+	if info.CancelCtx.Err() != nil {
+		result.Err = info.CancelCtx.Err().Error()
+		result.EndTime = time.Now()
+		return result
+	}
+
+	// 启动一个协成来执行shell命令
+	std, err := execute(info.CancelCtx, a.cfg.Shell, info.Task.Command,
+		a.logger.With(zap.String("task_id", info.Task.TaskID),
+			zap.Int64("project_id", info.Task.ProjectID)))
+	if err != nil {
+		result.Err = err.Error()
+	}
+	result.EndTime = time.Now()
+	if std != nil {
+		runeStr := []rune(strings.TrimSuffix(std.String(), "\n"))
+		if len(runeStr) > 5000 {
+			runeStr = runeStr[:5000]
+		}
+		result.Output = string(runeStr)
+	}
+
 	return result
 }

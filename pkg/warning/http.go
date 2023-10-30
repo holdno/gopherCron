@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/avast/retry-go/v4"
 	"github.com/holdno/gopherCron/common"
 )
 
@@ -48,20 +49,23 @@ func (r *HttpReporter) Warning(data WarningData) error {
 	req.Header.Add(ReportHeaderKey, ReportTypeWarning)
 	req.Header.Add("Authorization", jwt)
 
-	resp, err := r.hc.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to post warning alert, %w", err)
-	}
+	err = retry.Do(func() error {
+		resp, err := r.hc.Do(req)
+		if err != nil {
+			return fmt.Errorf("failed to post warning alert, %w", err)
+		}
 
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
 
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("warning report failed, log service status error, response status: %d, content: %s",
-			resp.StatusCode, string(body))
-	}
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("warning report failed, log service status error, response status: %d, content: %s",
+				resp.StatusCode, string(body))
+		}
+		return nil
+	}, retry.Attempts(3), retry.MaxDelay(time.Second*3))
 
-	return nil
+	return err
 }
 
 func (r *HttpReporter) ResultReport(result *common.TaskExecuteResult) error {

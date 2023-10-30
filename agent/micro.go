@@ -133,7 +133,7 @@ func (a *client) MustSetupRemoteRegisterV2() wregister.ServiceRegister[infra.Nod
 				}),
 				grpc.WithTransportCredentials(insecure.NewCredentials()),
 				grpc.WithKeepaliveParams(keepalive.ClientParameters{
-					Time:    time.Second * 15, // todo config?
+					Time:    time.Second * 15, // todo config
 					Timeout: time.Second * 5,
 				}),
 				grpc.WithUnaryInterceptor(func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
