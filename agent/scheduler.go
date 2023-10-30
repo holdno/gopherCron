@@ -21,6 +21,7 @@ import (
 	"github.com/avast/retry-go/v4"
 	"github.com/sirupsen/logrus"
 	"github.com/spacegrower/watermelon/infra/wlog"
+	"github.com/spacegrower/watermelon/pkg/safe"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -332,6 +333,10 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 		taskExecuting   bool
 	)
 
+	if a.isClose {
+		return fmt.Errorf("agent %s is closing", a.GetIP())
+	}
+
 	if taskExecuteInfo, taskExecuting = a.scheduler.CheckTaskExecuting(plan.Task.SchedulerKey()); taskExecuting {
 		errMsg := "任务执行中，重复调度，请确保任务超时时间配置合理或检查任务是否运行正常"
 		if plan.Type == common.ActivePlan {
@@ -347,7 +352,7 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 		return errors.New(errMsg)
 	}
 
-	plan.Task.ClientIP = a.localip
+	plan.Task.ClientIP = a.GetIP()
 	taskExecuteInfo = common.BuildTaskExecuteInfo(plan)
 	errSignal := utils.NewSignalChannel[error]()
 	if plan.Type != common.ActivePlan {
@@ -382,102 +387,44 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 			}
 		}()
 
-		cancelReason := utils.NewReasonWriter()
+		var (
+			cancelReason = utils.NewReasonWriter() // 异常终止的信息会写入这里
+			result       *common.TaskExecuteResult // 任务执行结果
+		)
+
 		// 构建执行状态信息
 		defer func() {
 			taskExecuteInfo.CancelFunc()
 		}()
-		lockError := make(chan error)
-
-		var (
-			result *common.TaskExecuteResult
-		)
 
 		if plan.Task.Noseize != common.TASK_EXECUTE_NOSEIZE {
 			// 远程加锁，加锁失败后如果任务还在运行中，则进行重试，如果重试失败，则强行结束任务
-			var (
-				unLockFunc func()
-				err        error
-				once       sync.Once
-				resultChan = make(chan error)
-			)
-
-			go func() {
-				tryTimes := 0
-				defer func() {
-					taskExecuteInfo.CancelFunc()
-				}()
-				// 避免分布式集群上锁偏斜 (每台机器的时钟可能不是特别的准确 导致某一台机器总能抢到锁)
-				time.Sleep(time.Duration(rand.Intn(300)) * time.Millisecond)
-				for {
-					if taskExecuteInfo.CancelCtx.Err() != nil {
-						return
-					}
-					unLockFunc, err = tryLock(a.GetCenterSrv(), plan, taskExecuteInfo.CancelCtx, lockError)
-					tryTimes++
-
-					if err != nil {
-						wlog.Error("failed to get task execute lock",
-							zap.String("task_id", taskExecuteInfo.Task.TaskID),
-							zap.Int64("project_id", taskExecuteInfo.Task.ProjectID),
-							zap.String("task_name", taskExecuteInfo.Task.Name),
-							zap.Error(err))
-						if gerr, ok := status.FromError(err); (ok && gerr.Code() == codes.Aborted ||
-							gerr.Code() == codes.Unauthenticated) ||
-							tryTimes == 5 {
-
-							first := false
-							once.Do(func() {
-								first = true
-								resultChan <- err
-								close(resultChan)
-							})
-							if !first {
-								a.metrics.SystemErrInc("agent_task_execute_lock_failure")
-								cancelReason.WriteString(fmt.Sprintf("任务执行过程中锁维持失败,错误信息:%s,agent主动终止任务", err.Error()))
-							}
-							return
-						}
-						time.Sleep(time.Second * time.Duration(tryTimes))
-						continue
-					}
-
-					once.Do(func() {
-						close(resultChan)
-					})
-
-					tryTimes = 0
-
-					select {
-					case <-taskExecuteInfo.CancelCtx.Done():
-						return
-					case err := <-lockError:
-						wlog.Error("failed to keep task lock", zap.Error(err),
-							zap.String("task_id", taskExecuteInfo.Task.TaskID),
-							zap.Int64("project_id", taskExecuteInfo.Task.ProjectID),
-							zap.String("task_name", taskExecuteInfo.Task.Name))
-
-						if gerr, ok := status.FromError(err); ok && gerr.Code() == codes.Canceled {
-							// 到中心的连接被关闭了，说明agent注册出现了问题，需要等待注册逻辑中重新实现建联
-							time.Sleep(time.Second)
-						}
+			unlockFunc, err := tryLockTaskForExec(a, taskExecuteInfo, cancelReason)
+			if err != nil {
+				if grpcErr, ok := status.FromError(err); ok {
+					if grpcErr.Code() != codes.Aborted {
+						// send warning
+						a.Warning(warning.NewTaskWarningData(warning.TaskWarning{
+							AgentIP:   a.GetIP(),
+							TaskName:  taskExecuteInfo.Task.Name,
+							TaskID:    taskExecuteInfo.Task.TaskID,
+							ProjectID: taskExecuteInfo.Task.ProjectID,
+							Message:   fmt.Sprintf("任务执行加锁失败: %s", err.Error()),
+						}))
 					}
 				}
-			}()
-
-			if err = <-resultChan; err != nil {
 				errSignal.Send(err)
 				return
 			}
 
 			defer func() {
-				if unLockFunc != nil {
+				if unlockFunc != nil {
 					// 任务执行后锁最少保持5s
 					// 防止分布式部署下多台机器共同执行
 					if time.Since(taskExecuteInfo.RealTime).Seconds() < 5 {
 						time.Sleep(5*time.Second - time.Duration(time.Now().Sub(taskExecuteInfo.RealTime).Milliseconds()))
 					}
-					unLockFunc()
+					unlockFunc()
 				}
 			}()
 		}
@@ -522,13 +469,88 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 			cancelReason.WriteStringPrefix("任务执行结果: " + result.Err)
 			result.Err = cancelReason.String()
 		}
-		// 执行结束后 返回给scheduler
+		// 执行结束后 返回给scheduler，执行结果中携带错误的话会触发告警
 		a.scheduler.PushTaskResult(result)
 	}()
 
 	return errSignal.WaitOne()
 }
 
+func tryLockTaskForExec(a *client, taskExecuteInfo *common.TaskExecutingInfo, taskResultWriter interface{ WriteString(s string) }) (unLockFunc func(), err error) {
+	// 远程加锁，加锁失败后如果任务还在运行中，则进行重试，如果重试失败，则强行结束任务
+	var (
+		once       sync.Once
+		resultChan = make(chan error)
+	)
+
+	go safe.Run(func() {
+		tryTimes := 0 // 初始化重试次数
+		realtimeError := make(chan error)
+		defer func() { // 锁维持结束或失败意味着任务运行结束或者也不能再继续运行了
+			taskExecuteInfo.CancelFunc()
+		}()
+		// 避免分布式集群上锁偏斜 (每台机器的时钟可能不是特别的准确 导致某一台机器总能抢到锁)
+		time.Sleep(time.Duration(rand.Intn(300)) * time.Millisecond)
+		for {
+			if taskExecuteInfo.CancelCtx.Err() != nil {
+				return
+			}
+			unLockFunc, err = tryLock(a.GetCenterSrv(), taskExecuteInfo, realtimeError)
+			tryTimes++
+
+			if err != nil {
+				a.logger.Error("failed to get task execute lock",
+					zap.String("task_id", taskExecuteInfo.Task.TaskID),
+					zap.Int64("project_id", taskExecuteInfo.Task.ProjectID),
+					zap.String("task_name", taskExecuteInfo.Task.Name),
+					zap.Error(err))
+				if gerr, ok := status.FromError(err); (ok && gerr.Code() == codes.Aborted || gerr.Code() == codes.Unauthenticated) ||
+					tryTimes == 5 {
+
+					first := false
+					once.Do(func() {
+						first = true
+						resultChan <- err
+						close(resultChan)
+					})
+					if !first {
+						a.metrics.SystemErrInc("agent_task_execute_lock_failure")
+						taskResultWriter.WriteString(fmt.Sprintf("任务执行过程中锁维持失败,错误信息:%s,agent主动终止任务", err.Error()))
+					}
+					return
+				}
+				time.Sleep(time.Second * time.Duration(tryTimes))
+				continue
+			}
+
+			once.Do(func() {
+				close(resultChan)
+			})
+
+			tryTimes = 0
+
+			select {
+			case <-taskExecuteInfo.CancelCtx.Done():
+				return
+			case err := <-realtimeError:
+				a.logger.Error("failed to keep task lock", zap.Error(err),
+					zap.String("task_id", taskExecuteInfo.Task.TaskID),
+					zap.Int64("project_id", taskExecuteInfo.Task.ProjectID),
+					zap.String("task_name", taskExecuteInfo.Task.Name))
+
+				if gerr, ok := status.FromError(err); ok && gerr.Code() == codes.Canceled {
+					// 到中心的连接被关闭了，说明agent注册出现了问题，需要等待注册逻辑中重新实现建联
+					time.Sleep(time.Second)
+				}
+			}
+		}
+	})
+
+	err = <-resultChan
+	return
+}
+
+// 将任务结果上报到中心服务
 func reportTaskResult(a *client, taskExecuteInfo *common.TaskExecutingInfo, plan *common.TaskSchedulePlan, result *common.TaskExecuteResult) {
 	f := common.TaskFinishedV2{
 		TaskName:  taskExecuteInfo.Task.Name,
@@ -568,7 +590,7 @@ func reportTaskResult(a *client, taskExecuteInfo *common.TaskExecutingInfo, plan
 		})
 		return err
 	}, retry.Attempts(3), retry.DelayType(retry.BackOffDelay),
-		retry.MaxJitter(time.Minute), retry.LastErrorOnly(true)); err != nil {
+		retry.MaxJitter(time.Second*30), retry.LastErrorOnly(true)); err != nil {
 		a.metrics.SystemErrInc("agent_status_report_failure")
 		a.Warning(warning.NewTaskWarningData(warning.TaskWarning{
 			AgentIP:   a.localip,
@@ -607,15 +629,15 @@ func (ts *TaskScheduler) PushEvent(event *common.TaskEvent) {
 	ts.TaskEventChan <- event
 }
 
-func tryLock(cli cronpb.CenterClient, plan *common.TaskSchedulePlan, ctx context.Context, disconnectChan chan error) (func(), error) {
-	locker, err := cli.TryLock(ctx)
+func tryLock(cli cronpb.CenterClient, execInfo *common.TaskExecutingInfo, disconnectChan chan error) (func(), error) {
+	locker, err := cli.TryLock(execInfo.CancelCtx)
 	if err != nil {
 		return nil, err
 	}
 
 	if err = locker.Send(&cronpb.TryLockRequest{
-		ProjectId: plan.Task.ProjectID,
-		TaskId:    plan.Task.TaskID,
+		ProjectId: execInfo.Task.ProjectID,
+		TaskId:    execInfo.Task.TaskID,
 	}); err != nil {
 		if errors.Is(err, io.EOF) {
 			if _, err = locker.Recv(); err != nil {
@@ -632,7 +654,7 @@ func tryLock(cli cronpb.CenterClient, plan *common.TaskSchedulePlan, ctx context
 	go func() {
 		for {
 			select {
-			case <-ctx.Done():
+			case <-execInfo.CancelCtx.Done():
 				return
 			default:
 				if _, err = locker.Recv(); err != nil {

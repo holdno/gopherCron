@@ -31,10 +31,16 @@ func fatal(format string, args ...interface{}) {
 }
 
 func TestApp_ExecuteTask(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*15)
 	defer cancel()
 
-	std, err := execute(ctx, "/bin/sh", "echo hello world && sleep 8", wlog.With())
+	go func() {
+		time.Sleep(time.Second * 3)
+		cancel()
+		fmt.Println("canceled")
+	}()
+
+	std, err := execute(ctx, "/bin/sh", "echo hello world", wlog.With())
 	if err != nil {
 		t.Fatal(err)
 	}

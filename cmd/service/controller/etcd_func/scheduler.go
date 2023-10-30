@@ -112,7 +112,7 @@ func ExecuteTask(c *gin.Context) {
 		response.APIError(c, err)
 		return
 	}
-	// 调用etcd的put方法以触发watcher从而调度该任务
+
 	if err = srv.TemporarySchedulerTask(user, task); err != nil {
 		response.APIError(c, err)
 		return
