@@ -11,7 +11,6 @@ import (
 	"github.com/holdno/gopherCron/app"
 	"github.com/holdno/gopherCron/cmd/service/middleware"
 	"github.com/holdno/gopherCron/cmd/service/router"
-	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/config"
 	"github.com/holdno/gopherCron/jwt"
 	"github.com/holdno/gopherCron/pkg/cronpb"
@@ -26,8 +25,6 @@ import (
 	"github.com/spacegrower/watermelon/infra/graceful"
 	"github.com/spacegrower/watermelon/infra/wlog"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 var shutdownFunc func()
@@ -67,23 +64,7 @@ func apiServer(srv app.App, conf *config.ServiceConfig) {
 
 	grpcRequestCounter := srv.Metrics().NewCounter("grpc_request", "method", "source")
 	grpcRequestDuration := srv.Metrics().NewHistogram("grpc_request", "method", "source")
-	server.Use(func(ctx context.Context) error {
-		agentIP, exist := GetAgentIPFromContext(ctx)
-		if !exist {
-			return status.Error(codes.Aborted, "header: "+common.GOPHERCRON_AGENT_IP_MD_KEY+" is not found")
-		}
-		middleware.SetAgentIP(ctx, agentIP)
-
-		agentVersion, exist := GetAgentVersionFromContext(ctx)
-		if !exist {
-			// return status.Error(codes.Aborted, "header: "+common.GOPHERCRON_AGENT_VERSION_KEY+" is not found")
-			middleware.SetAgentVersion(ctx, "v2.1.1") // 如果没有version说明是比较老的版本，最后一个没有version的版本是2.1.1
-		} else {
-			middleware.SetAgentVersion(ctx, agentVersion)
-		}
-
-		return nil
-	})
+	server.Use(middleware.CheckoutAgentMeta)
 	server.Use(func(ctx context.Context) error {
 		method := middleware.GetFullMethodFrom(ctx)
 		agentIP, _ := middleware.GetAgentIP(ctx)

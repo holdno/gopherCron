@@ -5,6 +5,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/spacegrower/watermelon/infra/middleware"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 
 	"github.com/holdno/gopherCron/cmd/service/response"
 	"github.com/holdno/gopherCron/common"
@@ -59,7 +62,51 @@ func TokenVerify(pubKey []byte) gin.HandlerFunc {
 	}
 }
 
+func GetAgentVersionFromContext(ctx context.Context) (string, bool) {
+	md, exist := metadata.FromIncomingContext(ctx)
+	if !exist {
+		return "", exist
+	}
+
+	version := md.Get(common.GOPHERCRON_AGENT_VERSION_KEY)
+	if len(version) == 0 {
+		return "", false
+	}
+	return version[0], true
+}
+
 type agentIPKey struct{}
+
+func CheckoutAgentMeta(ctx context.Context) error {
+	agentIP, exist := GetAgentIPFromContext(ctx)
+	if !exist {
+		return status.Error(codes.Aborted, "header: "+common.GOPHERCRON_AGENT_IP_MD_KEY+" is not found")
+	}
+	SetAgentIP(ctx, agentIP)
+
+	agentVersion, exist := GetAgentVersionFromContext(ctx)
+	if !exist {
+		// return status.Error(codes.Aborted, "header: "+common.GOPHERCRON_AGENT_VERSION_KEY+" is not found")
+		SetAgentVersion(ctx, "v2.1.1") // 如果没有version说明是比较老的版本，最后一个没有version的版本是2.1.1
+	} else {
+		SetAgentVersion(ctx, agentVersion)
+	}
+
+	return nil
+}
+
+func GetAgentIPFromContext(ctx context.Context) (string, bool) {
+	md, exist := metadata.FromIncomingContext(ctx)
+	if !exist {
+		return "", exist
+	}
+
+	agentIP := md.Get(common.GOPHERCRON_AGENT_IP_MD_KEY)
+	if len(agentIP) == 0 {
+		return "", false
+	}
+	return agentIP[0], true
+}
 
 func SetAgentIP(ctx context.Context, agentIP string) {
 	middleware.SetInto(ctx, agentIPKey{}, agentIP)

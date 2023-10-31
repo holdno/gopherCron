@@ -46,14 +46,14 @@ func handleRealTimeResult(ctx context.Context, output *strings.Builder, logOutpu
 	stdout := newScanner(ctx, stdoutPipe)
 	stderr := newScanner(ctx, stderrPipe)
 	go safe.Run(func() {
+		var (
+			line      string
+			ok        bool
+			logStdout = logOutput.With(zap.String("source", "stdout"))
+			logStderr = logOutput.With(zap.String("source", "stderr"))
+			writeLog  func(msg string, fields ...zap.Field)
+		)
 		for {
-			var (
-				line      string
-				ok        bool
-				logStdout = logOutput.With(zap.String("source", "stdout"))
-				logStderr = logOutput.With(zap.String("source", "stderr"))
-				writeLog  func(msg string, fields ...zap.Field)
-			)
 			select {
 			case <-ctx.Done():
 				return
