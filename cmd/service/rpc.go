@@ -26,7 +26,6 @@ import (
 	"github.com/spacegrower/watermelon/pkg/safe"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
 
@@ -36,32 +35,6 @@ type cronRpc struct {
 	registerMetricsAdd      func(add float64, labels ...string)
 	eventsMetricsInc        func()
 	getCurrentRegisterAddrs func() []*net.TCPAddr
-}
-
-func GetAgentIPFromContext(ctx context.Context) (string, bool) {
-	md, exist := metadata.FromIncomingContext(ctx)
-	if !exist {
-		return "", exist
-	}
-
-	agentIP := md.Get(common.GOPHERCRON_AGENT_IP_MD_KEY)
-	if len(agentIP) == 0 {
-		return "", false
-	}
-	return agentIP[0], true
-}
-
-func GetAgentVersionFromContext(ctx context.Context) (string, bool) {
-	md, exist := metadata.FromIncomingContext(ctx)
-	if !exist {
-		return "", exist
-	}
-
-	version := md.Get(common.GOPHERCRON_AGENT_VERSION_KEY)
-	if len(version) == 0 {
-		return "", false
-	}
-	return version[0], true
 }
 
 func (s *cronRpc) RemoveStream(ctx context.Context, req *cronpb.RemoveStreamRequest) (*cronpb.Result, error) {
@@ -85,7 +58,7 @@ func (s *cronRpc) RemoveStream(ctx context.Context, req *cronpb.RemoveStreamRequ
 
 func (s *cronRpc) TryLock(req cronpb.Center_TryLockServer) error {
 	authenticator := jwt.GetProjectAuthenticator(req.Context())
-	agentIP, exist := GetAgentIPFromContext(req.Context())
+	agentIP, exist := middleware.GetAgentIPFromContext(req.Context())
 	if !exist {
 		return status.Error(codes.PermissionDenied, codes.PermissionDenied.String())
 	}

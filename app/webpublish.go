@@ -9,9 +9,10 @@ import (
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/holdno/firetower/protocol"
-	"github.com/holdno/gopherCron/utils"
 	"github.com/spacegrower/watermelon/infra/wlog"
 	"go.uber.org/zap"
+
+	"github.com/holdno/gopherCron/utils"
 )
 
 type WebClientEvent struct {

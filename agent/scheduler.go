@@ -135,7 +135,7 @@ func (ts *TaskScheduler) CalcPlanHash() {
 		return true
 	})
 
-	ts.a.metrics.jobs.With(nil).Set(float64(taskCounter))
+	ts.a.metrics.task.With(nil).Set(float64(taskCounter))
 
 	ts.consistency.locker.Lock()
 	defer ts.consistency.locker.Unlock()
@@ -430,10 +430,12 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 		}
 
 		a.scheduler.SetExecutingTask(plan.Task.SchedulerKey(), taskExecuteInfo)
+		taskRuntimeMetrics := a.metrics.TaskRuntimeRecord(taskExecuteInfo.Task.ProjectID, taskExecuteInfo.Task.TaskID, taskExecuteInfo.Task.Name)
 		defer func() {
 			// 删除任务的正在执行状态
 			a.scheduler.DeleteExecutingTask(plan.Task.SchedulerKey())
 			reportTaskResult(a, taskExecuteInfo, plan, result)
+			taskRuntimeMetrics.ObserveDuration()
 		}()
 
 		if err := retry.Do(func() error {
