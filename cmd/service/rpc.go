@@ -69,7 +69,6 @@ func (s *cronRpc) TryLock(req cronpb.Center_TryLockServer) error {
 	defer func() {
 		heartbeat.Stop()
 		if locker != nil {
-			time.Sleep(time.Second * 3)
 			locker.Unlock()
 		}
 	}()

@@ -757,6 +757,9 @@ func (a *app) SetTaskRunning(agentIP string, execInfo *common.TaskExecutingInfo)
 	ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
 	defer cancel()
 
+	if execInfo.Task.Timeout == 0 {
+		execInfo.Task.Timeout = common.DEFAULT_TASK_TIMEOUT_SECONDS
+	}
 	lease, err := a.etcd.Lease().Grant(ctx, int64(execInfo.Task.Timeout))
 	if err != nil {
 		return errors.NewError(http.StatusInternalServerError, "设置任务运行状态失败，创建lease失败").WithLog(err.Error())
