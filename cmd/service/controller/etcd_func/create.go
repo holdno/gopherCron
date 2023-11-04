@@ -51,7 +51,7 @@ func SaveTask(c *gin.Context) {
 	}
 
 	scheduleInterval := exp.NextN(time.Now(), 2)
-	if scheduleInterval[1].Sub(scheduleInterval[0]) < time.Second*5-time.Nanosecond {
+	if len(scheduleInterval) == 2 && scheduleInterval[1].Sub(scheduleInterval[0]) < time.Second*5-time.Nanosecond {
 		response.APIError(c, errors.ErrCronInterval)
 		return
 	}

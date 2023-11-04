@@ -18,6 +18,14 @@ func TestCron(t *testing.T) {
 	t.Log(e.Next(time.Now()))
 }
 
+func TestCronNextN(t *testing.T) {
+	e, err := cronexpr.Parse("* * * * * * 2000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fmt.Println(e.NextN(time.Now(), 2))
+}
+
 func TestEtcdLease(t *testing.T) {
 	client, err := clientv3.New(clientv3.Config{
 		Endpoints: []string{"localhost:2379"},

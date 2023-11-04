@@ -392,12 +392,12 @@ func BuildTaskExecuteInfo(plan *TaskSchedulePlan) *TaskExecutingInfo {
 		TmpID:    plan.TmpID,
 	}
 
-	if plan.Task.Timeout != 0 {
-		info.CancelCtx, info.CancelFunc = context.WithTimeout(context.Background(), time.Duration(plan.Task.Timeout)*time.Second)
-	} else {
-		info.CancelCtx, info.CancelFunc = context.WithCancel(context.Background())
+	if plan.Task.Timeout == 0 {
+		// v2.4.4版本开始不再允许没有超时时间的任务执行
+		plan.Task.Timeout = DEFAULT_TASK_TIMEOUT_SECONDS
 	}
 
+	info.CancelCtx, info.CancelFunc = context.WithTimeout(context.Background(), time.Duration(plan.Task.Timeout)*time.Second)
 	return info
 }
 
