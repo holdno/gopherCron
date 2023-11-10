@@ -13,7 +13,7 @@ import (
 )
 
 func RegisterGoMetrics(r *prometheus.Registry) {
-	r.Register(collectors.NewGoCollector(collectors.WithGoCollections(collectors.GoRuntimeMetricsCollection | collectors.GoRuntimeMemStatsCollection)))
+	r.Register(collectors.NewGoCollector(collectors.WithGoCollectorRuntimeMetrics(collectors.MetricsAll)))
 }
 
 func (m *Metrics) NewCounterVec(name string, labels []string) *prometheus.CounterVec {
