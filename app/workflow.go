@@ -456,6 +456,7 @@ func (a *app) GetWorkflowList(opts common.GetWorkflowListOptions, page, pagesize
 	}
 	selector.Page = int(page)
 	selector.Pagesize = int(pagesize)
+	selector.OrderBy = "id DESC"
 	list, err := a.store.Workflow().GetList(selector)
 	if err != nil {
 		return nil, 0, errors.NewError(http.StatusInternalServerError, "获取workflow列表失败").WithLog(err.Error())
