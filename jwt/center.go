@@ -44,9 +44,9 @@ func CenterAuthMiddleware(publicKey []byte) func(ctx context.Context) error {
 
 		jwt := md.Get(common.GOPHERCRON_AGENT_AUTH_KEY)
 		if len(jwt) == 0 {
-			middleware.SetInto(ctx, agentProjectIdsKey{}, AlwaysPassAuthenticator{})
+			middleware.SetInto(ctx, agentProjectIdsKey{}, &AlwaysPassAuthenticator{})
 			return nil
-			return status.Error(codes.Unauthenticated, "agent auth key is undefined")
+			// return status.Error(codes.Unauthenticated, "agent auth key is undefined")
 		}
 		claims, err := ParseAgentJWT(jwt[0], publicKey)
 		if err != nil {
