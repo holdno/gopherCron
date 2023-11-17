@@ -29,6 +29,12 @@ func (p *ProjectAuthenticator) Allow(pid int64) bool {
 	return p.projectIDs[pid]
 }
 
+type AlwaysPassAuthenticator struct{}
+
+func (p *AlwaysPassAuthenticator) Allow(_ int64) bool {
+	return true
+}
+
 func CenterAuthMiddleware(publicKey []byte) func(ctx context.Context) error {
 	return func(ctx context.Context) error {
 		md, exist := metadata.FromIncomingContext(ctx)
@@ -38,6 +44,8 @@ func CenterAuthMiddleware(publicKey []byte) func(ctx context.Context) error {
 
 		jwt := md.Get(common.GOPHERCRON_AGENT_AUTH_KEY)
 		if len(jwt) == 0 {
+			middleware.SetInto(ctx, agentProjectIdsKey{}, AlwaysPassAuthenticator{})
+			return nil
 			return status.Error(codes.Unauthenticated, "agent auth key is undefined")
 		}
 		claims, err := ParseAgentJWT(jwt[0], publicKey)

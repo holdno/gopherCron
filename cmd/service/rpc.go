@@ -113,12 +113,15 @@ func (s *cronRpc) TryLock(req cronpb.Center_TryLockServer) error {
 			}
 
 			if pass {
-				return req.Send(&cronpb.TryLockReply{
+				if err = req.Send(&cronpb.TryLockReply{
 					Result:  true,
 					Message: "ok",
-				})
+				}); err != nil {
+					return err
+				}
+			} else {
+				return status.Error(codes.Aborted, "任务运行中")
 			}
-			return status.Error(codes.Aborted, "任务运行中")
 		}
 	}
 }

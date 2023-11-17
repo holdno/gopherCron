@@ -5,9 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/spacegrower/watermelon/infra/middleware"
-	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/status"
 
 	"github.com/holdno/gopherCron/cmd/service/response"
 	"github.com/holdno/gopherCron/common"
@@ -80,7 +78,8 @@ type agentIPKey struct{}
 func CheckoutAgentMeta(ctx context.Context) error {
 	agentIP, exist := GetAgentIPFromContext(ctx)
 	if !exist {
-		return status.Error(codes.Aborted, "header: "+common.GOPHERCRON_AGENT_IP_MD_KEY+" is not found")
+		agentIP = "old-version-agent"
+		// return status.Error(codes.Aborted, "header: "+common.GOPHERCRON_AGENT_IP_MD_KEY+" is not found")
 	}
 	SetAgentIP(ctx, agentIP)
 

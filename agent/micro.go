@@ -104,7 +104,7 @@ func (a *client) MustSetupRemoteRegisterV2() wregister.ServiceRegister[infra.Nod
 				a.metrics.SystemErrInc("agent_authenticator_error")
 				wlog.Error("failed to sign token", zap.Error(err))
 			}
-			ctx = metadata.AppendToOutgoingContext(ctx, common.GOPHERCRON_AGENT_AUTH_KEY, token)
+			md = metadata.AppendToOutgoingContext(md, common.GOPHERCRON_AGENT_AUTH_KEY, token)
 		}
 		return md
 	}

@@ -149,7 +149,7 @@ func (tl *Locker) TryLockWithOwner(agentIP string) error {
 		// 事务没有执行成功
 		// 分布式场景下相同的agent(锁持有者)可以进行锁继承操作，如果发现上一个加锁的agent与本次请求的agent ip相同，则允许继承锁
 		// 导致锁需要继承的原因可能是持有锁的center突然宕机，从而导致agent重新尝试连接其他center进行加锁，但是锁又被lease keep在一定的ttl中没有及时释放
-		if agentIP == "" || len(txnResp.Responses) == 0 ||
+		if len(txnResp.Responses) == 0 ||
 			len(txnResp.Responses[0].GetResponseRange().Kvs) == 0 ||
 			string(txnResp.Responses[0].GetResponseRange().Kvs[0].Value) != agentIP {
 			failFunc()
