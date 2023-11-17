@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dgrijalva/jwt-go"
+	"github.com/golang-jwt/jwt"
 	"github.com/holdno/gopherCron/common"
 	"github.com/spacegrower/watermelon/infra/middleware"
 	"google.golang.org/grpc/codes"
