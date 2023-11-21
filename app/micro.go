@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -17,20 +18,79 @@ import (
 	"github.com/holdno/gopherCron/pkg/warning"
 	"github.com/holdno/gopherCron/utils"
 
+	"github.com/holdno/go-instrumentation/conncache"
 	etcdregister "github.com/spacegrower/watermelon/infra/register/etcd"
 	"github.com/spacegrower/watermelon/infra/resolver/etcd"
 	"github.com/spacegrower/watermelon/infra/wlog"
 	"github.com/spacegrower/watermelon/pkg/safe"
-	"github.com/ugurcsen/gods-generic/maps/hashmap"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/resolver"
 	"google.golang.org/grpc/status"
 )
+
+type ConnCacheKey struct {
+	Endpoint string
+	Region   string
+}
+
+func (k ConnCacheKey) String() string {
+	return fmt.Sprintf("%s?region=%s", k.Endpoint, k.Region)
+}
+
+func installConnCache(a *app) {
+	poolSize := 1000
+	expire := time.Minute * 30
+	poolGauge := a.metrics.NewGaugeVec("connect_cache_pool_size", nil)
+	usageGauge := a.metrics.NewGaugeVec("connect_cache_usage", nil)
+	expireGauge := a.metrics.NewGaugeVec("connect_cache_expire_duration", nil)
+	expirationsTotal := a.metrics.NewCounterVec("connect_cache_expirations_total", []string{"key", "reason"})
+
+	poolGauge.WithLabelValues().Set(float64(poolSize))
+	expireGauge.WithLabelValues().Set(float64(expire.Seconds()))
+
+	genMetadata := func(ctx context.Context) context.Context {
+		md, exist := metadata.FromOutgoingContext(ctx)
+		if !exist {
+			md = metadata.New(map[string]string{})
+		}
+		md.Set(common.GOPHERCRON_AGENT_IP_MD_KEY, a.GetIP())
+		return metadata.NewOutgoingContext(ctx, md)
+	}
+
+	a.__centerConncets = conncache.NewConnCache[CenterConnCacheKey, *conncache.GRPCConn[CenterConnCacheKey, *grpc.ClientConn]](poolSize, expire,
+		func(ctx context.Context, addr CenterConnCacheKey) (*conncache.GRPCConn[CenterConnCacheKey, *grpc.ClientConn], error) {
+			gopts := []grpc.DialOption{
+				grpc.WithTransportCredentials(insecure.NewCredentials()),
+				grpc.WithPerRPCCredentials(a.authenticator),
+				grpc.WithUnaryInterceptor(func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+					return invoker(genMetadata(ctx), method, req, reply, cc, opts...)
+				}),
+				grpc.WithStreamInterceptor(func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+					return streamer(genMetadata(ctx), desc, cc, method, opts...)
+				}),
+			}
+			dialAddress := addr.Endpoint
+
+			if addr.Region != a.cfg.Micro.Region {
+				dialAddress, gopts = BuildProxyDialerInfo(ctx, addr.Region, addr.Endpoint, gopts)
+			}
+			cc, err := grpc.DialContext(ctx, dialAddress, gopts...)
+			if err != nil {
+				return nil, fmt.Errorf("failed to connect center %s, error: %s", addr.Endpoint, err.Error())
+			}
+			return conncache.WrapGrpcConn[CenterConnCacheKey, *grpc.ClientConn](addr, cc), err
+		}, func(_ CenterConnCacheKey) {
+			usageGauge.WithLabelValues().Set(float64(a.__centerConncets.Len()))
+		}, func(sm CenterConnCacheKey, rr conncache.RemoveReason) {
+			usageGauge.WithLabelValues().Set(float64(a.__centerConncets.Len()))
+			expirationsTotal.WithLabelValues(sm.Endpoint, rr.Reason()).Inc()
+		})
+}
 
 func (a *app) RemoveClientRegister(client string) error {
 	list, err := a.GetCenterSrvList()
@@ -38,16 +98,11 @@ func (a *app) RemoveClientRegister(client string) error {
 		return err
 	}
 
-	// defer func() {
-	// 	for _, v := range list {
-	// 		v.Close()
-	// 	}
-	// }()
-
 	removed := false
 
 	disposeOne := func(v *CenterClient) (*cronpb.Result, error) {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
+		defer v.Close()
+		ctx, cancel := context.WithTimeout(a.ctx, time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
 		defer cancel()
 		resp, err := v.RemoveStream(ctx, &cronpb.RemoveStreamRequest{
 			Client: client,
@@ -220,7 +275,12 @@ func (a *app) GetAgentClient(region string, projectID int64) (*AgentClient, erro
 	return client, nil
 }
 
-func (a *app) getAgentAddrs(region string, projectID int64) ([]etcd.FindedResult[infra.NodeMeta], error) {
+type FinderResult struct {
+	addr resolver.Address
+	attr infra.NodeMeta
+}
+
+func (a *app) getAgentAddrs(region string, projectID int64) ([]FinderResult, error) {
 	mtimer := a.metrics.CustomHistogramSet("get_agents_list")
 	defer mtimer.ObserveDuration()
 	finder := etcd.NewFinder[infra.NodeMeta](infra.ResolveEtcdClient())
@@ -231,7 +291,19 @@ func (a *app) getAgentAddrs(region string, projectID int64) ([]etcd.FindedResult
 		a.metrics.CustomInc("find_agents_error", fmt.Sprintf("%s_%d", region, projectID), err.Error())
 		return nil, err
 	}
-	return addrs, nil
+
+	var list []FinderResult
+	for _, v := range addrs {
+		attr, ok := infra.GetNodeMetaAttribute(v)
+		if !ok {
+			wlog.Error("failed to get agent node attribute", zap.String("address", v.Addr))
+		}
+		list = append(list, FinderResult{
+			addr: v,
+			attr: attr,
+		})
+	}
+	return list, nil
 }
 
 func (a *app) GetAgentStream(region string, projectID int64) (*CenterClient, error) {
@@ -241,28 +313,27 @@ func (a *app) GetAgentStream(region string, projectID int64) (*CenterClient, err
 		return nil, err
 	}
 
-	for _, addr := range addrs {
-		if addr.Attr().CenterServiceEndpoint != "" {
-			dialAddress := addr.Attr().CenterServiceEndpoint
-			ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
-			defer cancel()
-			gopts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithPerRPCCredentials(a.authenticator)}
-			if addr.Attr().CenterServiceRegion != a.cfg.Micro.Region {
-				dialAddress, gopts = BuildProxyDialerInfo(ctx, addr.Attr().CenterServiceRegion, dialAddress, gopts)
-			}
-			cc, err := grpc.DialContext(ctx, dialAddress, gopts...)
-			if err != nil {
-				return nil, fmt.Errorf("failed to connect agent stream %s, error: %s", dialAddress, err.Error())
-			}
-			client := &CenterClient{
-				CenterClient: cronpb.NewCenterClient(cc),
-				addr:         addr.Address(),
-				cancel: func() {
-					cc.Close()
-				},
-			}
-			return client, nil
+	for _, item := range addrs {
+		if item.attr.CenterServiceEndpoint == "" {
+			continue
 		}
+
+		dialAddress := item.attr.CenterServiceEndpoint
+		ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
+		defer cancel()
+		cc, err := a.getCenterConnect(ctx, item.attr.Region, dialAddress)
+		if err != nil {
+			return nil, fmt.Errorf("failed to connect agent stream %s, error: %s", dialAddress, err.Error())
+		}
+		client := &CenterClient{
+			CenterClient: cronpb.NewCenterClient(cc.ClientConn()),
+			addr:         item.addr.Addr,
+			cancel: func() {
+				cc.Close()
+			},
+		}
+		return client, nil
+
 	}
 
 	return nil, nil
@@ -274,34 +345,26 @@ func (a *app) FindAgentsV2(region string, projectID int64) ([]*CenterClient, err
 		return nil, err
 	}
 	var (
-		list      []*CenterClient
-		connCache = make(map[string]*grpc.ClientConn)
+		list []*CenterClient
 	)
 
-	for _, addr := range addrs {
+	for _, item := range addrs {
 		err := func() error {
-			if addr.Attr().CenterServiceEndpoint == "" {
+			if item.attr.CenterServiceEndpoint == "" {
 				return nil
 			}
-			dialAddress := addr.Attr().CenterServiceEndpoint
-			ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
+			dialAddress := item.attr.CenterServiceEndpoint
+			ctx, cancel := context.WithTimeout(a.ctx, time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
 			defer cancel()
-			gopts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithPerRPCCredentials(a.authenticator)}
-			if addr.Attr().CenterServiceRegion != a.cfg.Micro.Region {
-				dialAddress, gopts = BuildProxyDialerInfo(ctx, addr.Attr().CenterServiceRegion, dialAddress, gopts)
+
+			cc, err := a.getCenterConnect(ctx, item.attr.CenterServiceRegion, dialAddress)
+			if err != nil {
+				return fmt.Errorf("failed to connect agent stream %s, error: %s", dialAddress, err.Error())
 			}
 
-			if _, exist := connCache[dialAddress]; !exist {
-				cc, err := grpc.DialContext(ctx, dialAddress, gopts...)
-				if err != nil {
-					return fmt.Errorf("failed to connect agent stream %s, error: %s", dialAddress, err.Error())
-				}
-				connCache[dialAddress] = cc
-			}
-			cc := connCache[dialAddress]
 			client := &CenterClient{
-				CenterClient: cronpb.NewCenterClient(cc),
-				addr:         addr.Address(),
+				CenterClient: cronpb.NewCenterClient(cc.ClientConn()),
+				addr:         item.addr.Addr,
 				cancel: func() {
 					cc.Close()
 				},
@@ -313,7 +376,7 @@ func (a *app) FindAgentsV2(region string, projectID int64) ([]*CenterClient, err
 			return nil, err
 		}
 	}
-	connCache = nil
+
 	return list, nil
 }
 
@@ -323,14 +386,14 @@ func (a *app) FindAgents(region string, projectID int64) ([]*AgentClient, error)
 		return nil, err
 	}
 	var list []*AgentClient
-	for _, addr := range addrs {
+	for _, item := range addrs {
 		err := func() error {
 			ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
 			defer cancel()
 			gopts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithPerRPCCredentials(a.authenticator)}
-			dialAddress := addr.Address()
-			if addr.Attr().Region != a.cfg.Micro.Region {
-				dialAddress, gopts = BuildProxyDialerInfo(ctx, addr.Attr().Region, addr.Address(), gopts)
+			dialAddress := item.addr.Addr
+			if item.attr.Region != a.cfg.Micro.Region {
+				dialAddress, gopts = BuildProxyDialerInfo(ctx, item.attr.Region, item.addr.Addr, gopts)
 			}
 			cc, err := grpc.DialContext(ctx, dialAddress, gopts...)
 			if err != nil {
@@ -338,7 +401,7 @@ func (a *app) FindAgents(region string, projectID int64) ([]*AgentClient, error)
 			}
 			client := &AgentClient{
 				AgentClient: cronpb.NewAgentClient(cc),
-				addr:        addr.Address(),
+				addr:        item.addr.Addr,
 				cancel: func() {
 					cc.Close()
 				},
@@ -347,7 +410,7 @@ func (a *app) FindAgents(region string, projectID int64) ([]*AgentClient, error)
 			return nil
 		}()
 		if err != nil {
-			return nil, fmt.Errorf("failed to connect agent %s, error: %s", addr.Address(), err.Error())
+			return nil, fmt.Errorf("failed to connect agent %s, error: %s", item.addr.Addr, err.Error())
 		}
 	}
 
@@ -358,7 +421,6 @@ type CenterClient struct {
 	cronpb.CenterClient
 	cancel func()
 	addr   string
-	cc     *grpc.ClientConn
 }
 
 func (c *CenterClient) Close() {
@@ -368,133 +430,62 @@ func (c *CenterClient) Close() {
 }
 
 func resolveCenterService(a *app) {
-	findKey := filepath.ToSlash(filepath.Join(etcdregister.GetETCDPrefixKey(), "gophercron", "0", cronpb.Center_ServiceDesc.ServiceName)) + "/"
-	var opts []clientv3.OpOption
-	opts = append(opts, clientv3.WithPrefix())
-	if err := a.refreshCenterSrvList(); err != nil {
-		panic(err)
+	finder := etcd.NewAsyncFinder[infra.NodeMeta](infra.ResolveEtcdClient(),
+		etcd.NewEtcdTarget("gophercron", "0", cronpb.Center_ServiceDesc.ServiceName),
+		func(query url.Values, attr infra.NodeMeta, addr *resolver.Address) bool {
+			return true
+		})
+
+	a.centerAsyncFinder = finder
+}
+
+func (a *app) getCenterConnect(ctx context.Context, region, addr string) (*conncache.GRPCConn[CenterConnCacheKey, *grpc.ClientConn], error) {
+	cc, err := a.__centerConncets.GetConn(ctx, CenterConnCacheKey{
+		Endpoint: addr,
+		Region:   region,
+	})
+	if err != nil {
+		return nil, err
 	}
-	for {
-		wlog.Debug("start resolving others center service", zap.String("key", findKey))
-		updates := a.etcd.Client().Watch(a.ctx, findKey, opts...)
-		for {
-			select {
-			case <-a.ctx.Done():
-			case ev, ok := <-updates:
-				if !ok {
-					// watcher closed
-					wlog.Info("watch chan closed", zap.String("key", findKey))
-					return
-				}
-
-				// some error occurred, re watch
-				if ev.Err() != nil {
-					wlog.Error("resolving center service with error",
-						zap.Error(ev.Err()),
-						zap.Bool("canceled", ev.Canceled))
-
-					return
-				}
-
-				a.refreshCenterSrvList()
-			}
-		}
-	}
+	return cc, nil
 }
 
 func (a *app) GetCenterSrvList() ([]*CenterClient, error) {
-	list := a.__centerConncets.Values()
-	for _, v := range list {
-		if v.cc.GetState() != connectivity.Ready {
-			a.refreshCenterSrvList()
-			continue
-		}
-	}
+	addrs := a.centerAsyncFinder.GetCurrentResults()
+	// finder := etcd.NewFinder[infra.NodeMeta](infra.ResolveEtcdClient())
+	// ctx, cancel := context.WithTimeout(context.Background(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
+	// defer cancel()
+	// findKey := filepath.ToSlash(filepath.Join(etcdregister.GetETCDPrefixKey(), "gophercron", "0", cronpb.Center_ServiceDesc.ServiceName)) + "/"
+	// addrs, _, err := finder.FindAll(ctx, findKey)
+	// if err != nil {
+	// 	a.metrics.CustomInc("find_centers_error", findKey, err.Error())
+	// 	return err
+	// }
 
-	list = a.__centerConncets.Values()
-	return list, nil
-}
-
-func (a *app) refreshCenterSrvList() error {
-	if a.__centerConncets == nil {
-		a.__centerConncets = hashmap.New[string, *CenterClient]()
-	}
-	mtimer := a.metrics.CustomHistogramSet("get_center_srv_list")
-	defer mtimer.ObserveDuration()
-
-	finder := etcd.NewFinder[infra.NodeMeta](infra.ResolveEtcdClient())
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
+	ctx, cancel := context.WithTimeout(a.ctx, time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
 	defer cancel()
-	findKey := filepath.ToSlash(filepath.Join(etcdregister.GetETCDPrefixKey(), "gophercron", "0", cronpb.Center_ServiceDesc.ServiceName)) + "/"
-	addrs, _, err := finder.FindAll(ctx, findKey)
-	if err != nil {
-		a.metrics.CustomInc("find_centers_error", findKey, err.Error())
-		return err
-	}
 
-	genMetadata := func(ctx context.Context) context.Context {
-		md, exist := metadata.FromOutgoingContext(ctx)
-		if !exist {
-			md = metadata.New(map[string]string{})
-		}
-		md.Set(common.GOPHERCRON_AGENT_IP_MD_KEY, a.GetIP())
-		return metadata.NewOutgoingContext(ctx, md)
-	}
-
-	centerMap := hashmap.New[string, *CenterClient]()
+	var list []*CenterClient
 	for _, addr := range addrs {
-		var (
-			cc        *grpc.ClientConn
-			centerSrv *CenterClient
-		)
+		attr, ok := infra.GetNodeMetaAttribute(addr)
+		if !ok {
+			wlog.Error("failed to get resolve address balance attributes", zap.String("addr", addr.Addr))
+			return nil, fmt.Errorf("failed to get balance attribute, address: %s", addr.Addr)
+		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
-		defer cancel()
-		gopts := []grpc.DialOption{
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-			grpc.WithPerRPCCredentials(a.authenticator),
-			grpc.WithUnaryInterceptor(func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
-				return invoker(genMetadata(ctx), method, req, reply, cc, opts...)
-			}),
-			grpc.WithStreamInterceptor(func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
-				return streamer(genMetadata(ctx), desc, cc, method, opts...)
-			}),
-		}
-		dialAddress := addr.Address()
-		if addr.Attr().Region != a.cfg.Micro.Region {
-			dialAddress, gopts = BuildProxyDialerInfo(ctx, addr.Attr().Region, addr.Address(), gopts)
-		}
-		cacheKey := fmt.Sprintf("%s_%s", dialAddress, addr.Address())
-		if srv, exist := a.__centerConncets.Get(cacheKey); exist {
-			centerMap.Put(cacheKey, srv)
-			continue
-		}
-		cc, err = grpc.DialContext(ctx, dialAddress, gopts...)
+		cc, err := a.getCenterConnect(ctx, attr.Region, addr.Addr)
 		if err != nil {
-			return fmt.Errorf("failed to connect center %s, error: %s", addr.Address(), err.Error())
+			return nil, err
 		}
-		centerSrv = &CenterClient{
-			CenterClient: cronpb.NewCenterClient(cc),
-			addr:         addr.Address(),
+		list = append(list, &CenterClient{
+			CenterClient: cronpb.NewCenterClient(cc.ClientConn()),
+			addr:         addr.Addr,
 			cancel: func() {
-				cc.Close()
+				cc.Done()
 			},
-			cc: cc,
-		}
-		centerMap.Put(cacheKey, centerSrv)
+		})
 	}
-
-	old := a.__centerConncets
-	for _, key := range old.Keys() {
-		if _, exist := centerMap.Get(key); !exist {
-			srv, _ := old.Get(key)
-			srv.Close()
-		}
-	}
-	a.__centerConncets = centerMap
-
-	old.Clear()
-	return err
+	return list, nil
 }
 
 func (a *app) DispatchEvent(event *cronpb.SendEventRequest) error {
@@ -515,7 +506,8 @@ func (a *app) DispatchEvent(event *cronpb.SendEventRequest) error {
 	// }()
 
 	dispatchOne := func(v *CenterClient) error {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
+		defer v.Close()
+		ctx, cancel := context.WithTimeout(a.ctx, time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
 		defer cancel()
 		if _, err := v.SendEvent(ctx, event); err != nil {
 			a.metrics.CustomInc("send_event_error", v.addr, err.Error())
@@ -579,13 +571,12 @@ func (a *app) GetGrpcDirector() func(ctx context.Context, fullMethodName string)
 				return nil, nil, status.Error(codes.Unknown, "unknown full method name")
 			}
 			newCC := infra.NewClientConn()
-			watermelonCC, err := newCC(ls[1], newCC.WithSystem(projectID), newCC.WithOrg(a.cfg.Micro.OrgID), newCC.WithRegion(a.cfg.Micro.Region),
+			cc, err := newCC(ls[1], newCC.WithSystem(projectID), newCC.WithOrg(a.cfg.Micro.OrgID), newCC.WithRegion(a.cfg.Micro.Region),
 				newCC.WithServiceResolver(etcd.NewEtcdResolver(infra.ResolveEtcdClient(), infra.ProxyAllowFunc)),
 				newCC.WithGrpcDialOptions(dialOptions...))
 			if err != nil {
 				return nil, nil, err
 			}
-			cc = watermelonCC.ClientConn
 			outCtx := metadata.NewOutgoingContext(ctx, md.Copy())
 			return outCtx, cc, nil
 		}

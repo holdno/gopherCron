@@ -76,7 +76,7 @@ func GetAgentVersionFromContext(ctx context.Context) (string, bool) {
 type agentIPKey struct{}
 
 func CheckoutAgentMeta(ctx context.Context) error {
-	agentIP, exist := GetAgentIPFromContext(ctx)
+	agentIP, exist := getAgentIPFromContext(ctx)
 	if !exist {
 		agentIP = "old-version-agent"
 		// return status.Error(codes.Aborted, "header: "+common.GOPHERCRON_AGENT_IP_MD_KEY+" is not found")
@@ -94,7 +94,7 @@ func CheckoutAgentMeta(ctx context.Context) error {
 	return nil
 }
 
-func GetAgentIPFromContext(ctx context.Context) (string, bool) {
+func getAgentIPFromContext(ctx context.Context) (string, bool) {
 	md, exist := metadata.FromIncomingContext(ctx)
 	if !exist {
 		return "", exist

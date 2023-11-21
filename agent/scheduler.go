@@ -338,7 +338,7 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 	}
 
 	if taskExecuteInfo, taskExecuting = a.scheduler.CheckTaskExecuting(plan.Task.SchedulerKey()); taskExecuting {
-		errMsg := "任务执行中，重复调度，请确保任务超时时间配置合理或检查任务是否运行正常"
+		errMsg := "任务执行中，重复调度，上一周期任务仍未结束，请确保任务超时时间配置合理或检查任务是否运行正常"
 		if plan.Type == common.ActivePlan {
 			errMsg = "任务执行中，请勿重复执行或稍后再试"
 		}
@@ -359,7 +359,7 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 		// 如果不是主动调用，则不需要等待几处可能前置的错误来响应web客户端
 		errSignal.Close()
 	} else {
-		wlog.Debug("got active plan",
+		wlog.Debug("get active plan",
 			zap.String("task_id", taskExecuteInfo.Task.TaskID),
 			zap.Int64("project_id", taskExecuteInfo.Task.ProjectID),
 			zap.String("task_name", taskExecuteInfo.Task.Name))
@@ -401,18 +401,23 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 			// 远程加锁，加锁失败后如果任务还在运行中，则进行重试，如果重试失败，则强行结束任务
 			unlockFunc, err := tryLockTaskForExec(a, taskExecuteInfo, cancelReason)
 			if err != nil {
-				if grpcErr, ok := status.FromError(err); ok {
-					if grpcErr.Code() != codes.Aborted {
-						// send warning
-						a.Warning(warning.NewTaskWarningData(warning.TaskWarning{
-							AgentIP:   a.GetIP(),
-							TaskName:  taskExecuteInfo.Task.Name,
-							TaskID:    taskExecuteInfo.Task.TaskID,
-							ProjectID: taskExecuteInfo.Task.ProjectID,
-							Message:   fmt.Sprintf("任务执行加锁失败: %s", err.Error()),
-						}))
-					}
+				grpcErr, _ := status.FromError(err)
+				if grpcErr.Code() != codes.Aborted {
+					a.logger.Error("failed to get task execute lock",
+						zap.String("task_id", taskExecuteInfo.Task.TaskID),
+						zap.Int64("project_id", taskExecuteInfo.Task.ProjectID),
+						zap.String("task_name", taskExecuteInfo.Task.Name),
+						zap.Error(err))
+					// send warning
+					a.Warning(warning.NewTaskWarningData(warning.TaskWarning{
+						AgentIP:   a.GetIP(),
+						TaskName:  taskExecuteInfo.Task.Name,
+						TaskID:    taskExecuteInfo.Task.TaskID,
+						ProjectID: taskExecuteInfo.Task.ProjectID,
+						Message:   fmt.Sprintf("任务执行加锁失败: %s", err.Error()),
+					}))
 				}
+
 				errSignal.Send(err)
 				return
 			}
@@ -501,14 +506,13 @@ func tryLockTaskForExec(a *client, taskExecuteInfo *common.TaskExecutingInfo, ta
 			tryTimes++
 
 			if err != nil {
-				a.logger.Error("failed to get task execute lock",
+				a.logger.Warn("failed to get task execute lock",
 					zap.String("task_id", taskExecuteInfo.Task.TaskID),
 					zap.Int64("project_id", taskExecuteInfo.Task.ProjectID),
 					zap.String("task_name", taskExecuteInfo.Task.Name),
 					zap.Error(err))
-				if gerr, ok := status.FromError(err); (ok && gerr.Code() == codes.Aborted || gerr.Code() == codes.Unauthenticated) ||
+				if gerr, _ := status.FromError(err); gerr.Code() == codes.Aborted || gerr.Code() == codes.Unauthenticated ||
 					tryTimes == 5 {
-
 					first := false
 					once.Do(func() {
 						first = true

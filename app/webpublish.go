@@ -116,7 +116,7 @@ func (a *app) publishEventToWebClient(data PublishData) {
 	body, _ := json.Marshal(data.Data)
 
 	f.Topic = data.Topic
-	f.Type = protocol.PublishKey
+	f.Type = protocol.PublishOperation.String()
 	f.Data = body
 
 	if err := a.pusher.Publish(f); err != nil {

@@ -756,7 +756,7 @@ func (r *workflowRunner) ProcessDone(taskID string) {
 	r.processRecord.Delete(taskID)
 }
 
-func NewWorkflowRunner(app *app, cli *clientv3.Client) (*workflowRunner, error) {
+func NewWorkflowRunner(app *app) (*workflowRunner, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	runner := &workflowRunner{
 		app:                    app,

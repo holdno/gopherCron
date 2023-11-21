@@ -25,8 +25,10 @@ import (
 	"github.com/ugurcsen/gods-generic/maps/hashmap"
 
 	"github.com/gin-gonic/gin"
+	"github.com/holdno/go-instrumentation/conncache"
 	"github.com/holdno/gocommons/selection"
 	"github.com/jinzhu/gorm"
+	etcdresolver "github.com/spacegrower/watermelon/infra/resolver/etcd"
 	"github.com/spacegrower/watermelon/infra/wlog"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/client/v3/concurrency"
@@ -193,7 +195,13 @@ type app struct {
 	authenticator *Authenticator
 	rbacSrv       RBACImpl
 
-	__centerConncets *hashmap.Map[string, *CenterClient]
+	__centerConncets  conncache.ConnCache[CenterConnCacheKey, *conncache.GRPCConn[CenterConnCacheKey, *grpc.ClientConn]]
+	centerAsyncFinder etcdresolver.AsyncFinder
+}
+
+type CenterConnCacheKey struct {
+	Endpoint string
+	Region   string
 }
 
 type WebClientPusher interface {
@@ -356,7 +364,7 @@ func NewApp(configPath string) App {
 }
 
 func (a *app) Run() {
-	go resolveCenterService(a)
+	resolveCenterService(a)
 	startCleanupTask(a)
 	startWebhook(a)
 	startWorkflow(a)
@@ -391,6 +399,7 @@ func (a *app) HandleCenterEvent(event *cronpb.ServiceEvent) error {
 }
 
 func startWebhook(app *app) {
+	// 新版本webhook的触发由agent上报的中心的日志信息来触发
 	// app.election(common.BuildWebhookMasterKey(), func(s *concurrency.Session) error {
 	// 	wlog.Info("new webhook leader")
 	// 	for {
@@ -474,10 +483,9 @@ func (a *app) election(key string, successFunc func(s *concurrency.Session) erro
 
 func startWorkflow(app *app) {
 	var err error
-	if app.workflowRunner, err = NewWorkflowRunner(app, app.etcd.Client()); err != nil {
+	if app.workflowRunner, err = NewWorkflowRunner(app); err != nil {
 		panic(err)
 	}
-
 	app.election(common.BuildWorkflowMasterKey(), func(s *concurrency.Session) error {
 		defer func() {
 			app.workflowRunner.isLeader = false

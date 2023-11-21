@@ -8,7 +8,9 @@ import (
 
 	"github.com/spacegrower/watermelon/infra/definition"
 	"github.com/spacegrower/watermelon/infra/register"
+	"github.com/spacegrower/watermelon/infra/resolver/etcd"
 	"github.com/spacegrower/watermelon/infra/utils"
+	"google.golang.org/grpc/resolver"
 )
 
 // 基于 github.com/spacegrower/watermelon 实现自定义微服务框架
@@ -79,4 +81,12 @@ func (n NodeMeta) Value() string {
 
 func (n NodeMeta) RegisterKey() string {
 	return fmt.Sprintf("%s/%d/%s/node/%s:%d", n.OrgID, n.System, n.ServiceName, n.Host, n.Port)
+}
+
+func GetNodeMetaAttribute(addr resolver.Address) (NodeMeta, bool) {
+	attr, ok := etcd.GetMetaAttributes[NodeMeta](addr)
+	if !ok {
+		return NodeMeta{}, false
+	}
+	return attr, true
 }
