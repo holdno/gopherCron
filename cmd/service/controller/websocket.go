@@ -1,13 +1,10 @@
 package controller
 
 import (
-	"context"
-	"encoding/json"
 	"net/http"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/holdno/gopherCron/app"
 	"github.com/holdno/gopherCron/cmd/service/response"
@@ -19,9 +16,9 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/holdno/firetower/protocol"
 	"github.com/holdno/firetower/service/tower"
+	json "github.com/json-iterator/go"
 	"github.com/spacegrower/watermelon/infra/wlog"
 	"go.uber.org/zap"
-	"golang.org/x/time/rate"
 )
 
 var upgrader = websocket.Upgrader{
@@ -35,8 +32,8 @@ func Websocket(c *gin.Context) {
 	var err error
 	token := c.Query("token")
 	srv := app.GetApp(c)
-	res := jwt.Parse(token, []byte(srv.GetConfig().JWT.PublicKey))
-	if res.Code != 1000 {
+	userToken := jwt.Parse(token, []byte(srv.GetConfig().JWT.PublicKey))
+	if userToken.Code != 1000 {
 		response.APIError(c, errors.NewError(http.StatusForbidden, "permission denied"))
 		return
 	}
@@ -66,72 +63,64 @@ func Websocket(c *gin.Context) {
 		return
 	}
 
-	newTower.SetUserID(strconv.FormatInt(res.User, 10))
+	newTower.SetUserID(strconv.FormatInt(userToken.User, 10))
 
-	newTower.SetReadHandler(func(fire *protocol.FireInfo) bool {
+	newTower.SetReadHandler(func(fire protocol.ReadOnlyFire) bool {
 		// 当前用户是不能通过websocket发送消息的，所以固定返回false
 		return false
 	})
 
-	newTower.SetReceivedHandler(func(fi *protocol.FireInfo) bool {
+	newTower.SetReceivedHandler(func(fi protocol.ReadOnlyFire) bool {
 		return true
 	})
 
-	newTower.SetReadTimeoutHandler(func(fire *protocol.FireInfo) {
+	newTower.SetReadTimeoutHandler(func(fire protocol.ReadOnlyFire) {
 		wlog.Error("read timeout trigger", zap.String("component", "firetower"))
 	})
 
 	newTower.SetBeforeSubscribeHandler(func(fireCtx protocol.FireLife, topics []string) bool {
-		for _,v := range topics {
+		for _, v := range topics {
 			if strings.Contains(v, "project") {
-				pid := filepath.Base(v)
-				srv.CheckUserIsInProject()
+				_pid := filepath.Base(v)
+				pid, err := strconv.ParseInt(_pid, 10, 64)
+				if err != nil {
+					wlog.Error("failed to parse project id from topic", zap.String("component", "firetower"),
+						zap.String("topic", v))
+					return false
+				}
+				if _, err = srv.CheckUserIsInProject(pid, userToken.User); err != nil {
+					wlog.Error("failed to subscribe topic, user is not belong to project", zap.String("component", "firetower"),
+						zap.Int64("user", userToken.User), zap.String("topic", v))
+					return false
+				}
 			}
 		}
-		
-		// 向接入系统验证用户是否可以注册这些topic
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
-		defer cancel()
-		if err := core.NewWsSubscribeLogic(ctx, s.core).CheckSubscribePermission(app.ApplicationAppID, user, topics); err != nil {
-			wlog.Error("failed to subscribe, no permission", zap.Error(err))
-			newTower.Close()
-			return false
-		}
-
-		var topicsWithNamespace []string
-		for _, v := range topics {
-			topicsWithNamespace = append(topicsWithNamespace, types.TopicWithNamespace(v, app.ApplicationAppID))
-		}
-		newTower.Subscribe(fireCtx, topicsWithNamespace)
-		return false
+		return true
 	})
 
-	newTower.SetSubscribeHandler(func(context protocol.FireLife, topic []string) bool {
+	newTower.SetSubscribeHandler(func(context protocol.FireLife, topic []string) {
 		for _, v := range topic {
 			resp := &protocol.TopicMessage{
 				Topic: v,
-				Type:  types.WS_EVENT_SYSTEM_ONSUBSCRIBE,
+				Type:  protocol.SubscribeOperation,
 			}
 			resp.Data = json.RawMessage(`{"status":"success"}`)
 			msg, _ := json.Marshal(resp)
-			newTower.ToSelf(msg)
-			return true
+			newTower.SendToClient(msg)
+
 		}
-		return true
 	})
 
-	newTower.SetUnSubscribeHandler(func(context protocol.FireLife, topic []string) bool {
+	newTower.SetUnSubscribeHandler(func(context protocol.FireLife, topic []string) {
 		for _, v := range topic {
 			resp := &protocol.TopicMessage{
-				Topic: types.TrimTopicAppPrefix(v, app.ApplicationAppID),
-				Type:  types.WS_EVENT_SYSTEM_UNSUBSCRIBE,
+				Topic: v,
+				Type:  protocol.UnSubscribeOperation,
 			}
 			resp.Data = json.RawMessage(`{"status":"success"}`)
 			msg, _ := json.Marshal(resp)
-			newTower.ToSelf(msg)
-			return true
+			newTower.SendToClient(msg)
 		}
-		return true
 	})
 
 	newTower.Run()

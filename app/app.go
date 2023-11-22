@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/holdno/firetower/service/tower"
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/config"
 	"github.com/holdno/gopherCron/errors"
@@ -187,7 +188,10 @@ type app struct {
 	protocol.CommonInterface
 	warning.Warner
 
-	pusher          *SystemPusher
+	pusher interface {
+		Publish(t *TopicMessage) error
+		tower.PusherInfo
+	}
 	streamManager   *streamManager[*cronpb.Event]
 	streamManagerV2 *streamManager[*cronpb.ServiceEvent]
 
@@ -197,6 +201,8 @@ type app struct {
 
 	__centerConncets  conncache.ConnCache[CenterConnCacheKey, *conncache.GRPCConn[CenterConnCacheKey, *grpc.ClientConn]]
 	centerAsyncFinder etcdresolver.AsyncFinder
+
+	tower *Tower
 }
 
 type CenterConnCacheKey struct {
@@ -232,7 +238,7 @@ func NewApp(configPath string) App {
 	if cfg.LogSize == 0 {
 		cfg.LogSize = 100
 	}
-	wlog.SetGlobalLogger(wlog.NewLogger(&wlog.Config{
+	logger := wlog.NewLogger(&wlog.Config{
 		Name:  "gophercron-center",
 		Level: wlog.ParseLevel(cfg.LogLevel),
 		File:  cfg.LogFile, // print to sedout if config.LogFile is undefined
@@ -242,7 +248,8 @@ func NewApp(configPath string) App {
 			MaxBackups: cfg.LogBackups,
 			Compress:   cfg.LogCompress,
 		},
-	}))
+	})
+	wlog.SetGlobalLogger(logger)
 	app := &app{
 		Warner: warning.NewDefaultWarner(wlog.With(zap.String("component", "warner"))),
 		cfg:    cfg,
@@ -344,21 +351,26 @@ func NewApp(configPath string) App {
 			client:   &http.Client{Timeout: time.Duration(app.cfg.Deploy.Timeout) * time.Second},
 			Header:   app.cfg.Publish.Header,
 		}
-
-		app.messageChan = make(chan PublishData, 1000)
-		publishQpsInc := app.metrics.CustomIncFunc("publish_message", "", "")
-		app.Go(func() {
-			for {
-				select {
-				case res := <-app.messageChan:
-					publishQpsInc()
-					app.publishEventToWebClient(res)
-				case <-app.ctx.Done():
-					return
-				}
-			}
-		})
+	} else {
+		wlog.Info("enable firetower service", zap.String("endpoint", app.cfg.Publish.Endpoint))
+		buildTower(app, logger.Logger)
+		app.pusher = &FireTowerPusher{
+			clientID: app.localip,
+		}
 	}
+	app.messageChan = make(chan PublishData, 1000)
+	app.Go(func() {
+		publishQpsInc := app.metrics.CustomIncFunc("publish_message", "", "")
+		for {
+			select {
+			case res := <-app.messageChan:
+				publishQpsInc()
+				app.publishEventToWebClient(res)
+			case <-app.ctx.Done():
+				return
+			}
+		}
+	})
 
 	return app
 }
@@ -366,7 +378,6 @@ func NewApp(configPath string) App {
 func (a *app) Run() {
 	resolveCenterService(a)
 	startCleanupTask(a)
-	startWebhook(a)
 	startWorkflow(a)
 	startTemporaryTaskWorker(a)
 	// startCalcDataConsistency(a)
@@ -392,30 +403,14 @@ func (a *app) HandleCenterEvent(event *cronpb.ServiceEvent) error {
 		if a.workflowRunner.isLeader {
 			a.workflowRunner.reCalcScheduleTimeChan <- struct{}{}
 		}
+	case cronpb.EventType_EVENT_REALTIME_PUBLISH:
+		if a.tower != nil { // 确定本地启用了firetower
+			return a.tower.ReceiveEvent(event.GetRealtimePublish())
+		}
 	default:
 		return fmt.Errorf("unsupport event %s, version: %s", event.Type, a.GetVersion())
 	}
 	return nil
-}
-
-func startWebhook(app *app) {
-	// 新版本webhook的触发由agent上报的中心的日志信息来触发
-	// app.election(common.BuildWebhookMasterKey(), func(s *concurrency.Session) error {
-	// 	wlog.Info("new webhook leader")
-	// 	for {
-	// 		select {
-	// 		case <-app.ctx.Done():
-	// 			return app.ctx.Err()
-	// 		case <-s.Done():
-	// 			return nil
-	// 		default:
-	// 			if err := app.WebHookWorker(s.Done()); err != nil {
-	// 				wlog.Error("webhook runner return error", zap.Error(err))
-	// 				return err
-	// 			}
-	// 		}
-	// 	}
-	// })
 }
 
 func startCleanupTask(app *app) {
