@@ -35,7 +35,6 @@ import (
 	"go.etcd.io/etcd/client/v3/concurrency"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 )
 
 type App interface {
@@ -61,7 +60,7 @@ type App interface {
 	IsAdmin(uid int64) (bool, error)
 	GetWorkerList(projectID int64) ([]common.ClientInfo, error)
 	CheckProjectWorkerExist(projectID int64, host string) (bool, error)
-	ReloadWorkerConfig(host string) error
+	ReloadWorkerConfig(projectID int64, host string) error
 	GetProjectTaskCount(projectID int64) (int64, error)
 	GetTaskList(projectID int64) ([]*common.TaskListItemWithWorkflows, error)
 	GetTask(projectID int64, taskID string) (*common.TaskInfo, error)
@@ -160,6 +159,7 @@ type App interface {
 	SaveTaskLog(agentIP string, result common.TaskFinishedV2)
 
 	GetOIDCService() *OIDCService
+	FireTower() *Tower
 }
 
 func GetApp(c *gin.Context) App {
@@ -203,6 +203,10 @@ type app struct {
 	centerAsyncFinder etcdresolver.AsyncFinder
 
 	tower *Tower
+}
+
+func (a *app) FireTower() *Tower {
+	return a.tower
 }
 
 type CenterConnCacheKey struct {
@@ -342,6 +346,7 @@ func NewApp(configPath string) App {
 			})).Error("panicgroup: failed to warning panic error")
 		}
 	})
+	installConnCache(app)
 
 	if app.cfg.Publish.Enable {
 		wlog.Info("enable publish service", zap.String("endpoint", app.cfg.Publish.Endpoint))
@@ -354,9 +359,6 @@ func NewApp(configPath string) App {
 	} else {
 		wlog.Info("enable firetower service", zap.String("endpoint", app.cfg.Publish.Endpoint))
 		buildTower(app, logger.Logger)
-		app.pusher = &FireTowerPusher{
-			clientID: app.localip,
-		}
 	}
 	app.messageChan = make(chan PublishData, 1000)
 	app.Go(func() {
@@ -445,9 +447,9 @@ func (a *app) election(key string, successFunc func(s *concurrency.Session) erro
 			return err
 		}
 		defer func() {
-			if r := recover(); r != nil {
-				wlog.Error("election was recovered", zap.Any("info", r))
-			}
+			// if r := recover(); r != nil {
+			// 	wlog.Error("election was recovered", zap.Any("info", r))
+			// }
 			if s != nil {
 				s.Close()
 			}
@@ -460,7 +462,7 @@ func (a *app) election(key string, successFunc func(s *concurrency.Session) erro
 
 		return successFunc(s)
 	}
-	a.Go(func() {
+	go func() {
 		for {
 			select {
 			case <-a.ctx.Done():
@@ -472,7 +474,20 @@ func (a *app) election(key string, successFunc func(s *concurrency.Session) erro
 			}
 			time.Sleep(time.Second * 5)
 		}
-	})
+	}()
+	// a.Go(func() {
+	// 	for {
+	// 		select {
+	// 		case <-a.ctx.Done():
+	// 			return
+	// 		default:
+	// 		}
+	// 		if err := ele(); err != nil {
+	// 			wlog.Error("failed to election", zap.String("key", key), zap.Error(err))
+	// 		}
+	// 		time.Sleep(time.Second * 5)
+	// 	}
+	// })
 	return nil
 }
 
@@ -1239,24 +1254,55 @@ func (a *app) GetUserList(args GetUserListArgs) ([]*common.User, error) {
 	return list, nil
 }
 
-func (a *app) ReloadWorkerConfig(host string) error {
-	ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
-	defer cancel()
+func (a *app) ReloadWorkerConfig(projectID int64, host string) error {
 
-	cc, err := grpc.DialContext(ctx, host, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	agentAddrs, err := a.getAgentAddrs(a.GetConfig().Micro.Region, projectID)
 	if err != nil {
 		return errors.NewError(http.StatusInternalServerError, "获取agent连接失败").WithLog(err.Error())
 	}
 
-	defer cc.Close()
+	for _, item := range agentAddrs {
+		if item.addr.Addr != host {
+			continue
+		}
+		if item.attr.CenterServiceEndpoint == "" {
+			return errors.NewError(http.StatusForbidden, "agent版本较低，请升级后再试")
+		}
 
-	client := cronpb.NewAgentClient(cc)
-	if _, err = client.Command(ctx, &cronpb.CommandRequest{
-		Command: common.AGENT_COMMAND_RELOAD_CONFIG,
-	}); err != nil {
-		return errors.NewError(http.StatusInternalServerError, "命令执行失败:"+err.Error()).WithLog(err.Error())
+		dialAddress := item.attr.CenterServiceEndpoint
+		ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
+		defer cancel()
+		cc, err := a.getCenterConnect(ctx, item.attr.Region, dialAddress)
+		if err != nil {
+			return fmt.Errorf("failed to connect agent stream %s, error: %s", dialAddress, err.Error())
+		}
+		client := &CenterClient{
+			CenterClient: cronpb.NewCenterClient(cc.ClientConn()),
+			addr:         item.addr.Addr,
+			cancel: func() {
+				cc.Done()
+			},
+		}
+		defer client.Close()
+		_, err = client.SendEvent(ctx, &cronpb.SendEventRequest{
+			Region:    a.GetConfig().Micro.Region,
+			ProjectId: projectID,
+			Agent:     host,
+			Event: &cronpb.ServiceEvent{
+				Id:   utils.GetStrID(),
+				Type: cronpb.EventType_EVENT_COMMAND_REQUEST,
+				Event: &cronpb.ServiceEvent_CommandRequest{
+					CommandRequest: &cronpb.CommandRequest{
+						Command: common.AGENT_COMMAND_RELOAD_CONFIG,
+					},
+				},
+			},
+		})
+		if err != nil {
+			return errors.NewError(http.StatusInternalServerError, "命令执行失败:"+err.Error()).WithLog(err.Error())
+		}
+		break
 	}
-
 	return nil
 }
 

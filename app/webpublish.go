@@ -3,7 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,6 +14,7 @@ import (
 	"github.com/holdno/firetower/config"
 	"github.com/holdno/firetower/protocol"
 	"github.com/holdno/firetower/service/tower"
+	json "github.com/json-iterator/go"
 	"github.com/spacegrower/watermelon/infra/wlog"
 	"go.uber.org/zap"
 
@@ -69,7 +70,7 @@ func messageWorkflowTaskStatusChanged(workflowID, projectID int64, taskID, statu
 }
 
 type FireTowerPusher struct {
-	tm       tower.Manager
+	manager  tower.Manager[CloudEventWithNil]
 	clientID string
 }
 
@@ -82,14 +83,19 @@ func (s *FireTowerPusher) ClientID() string {
 }
 
 func (s *FireTowerPusher) Publish(t *TopicMessage) error {
-	fire := tower.NewFire(protocol.SourceSystem, s)
-	fire.Message = protocol.TopicMessage{
+	if s.manager == nil {
+		return errors.New("not install firetower into FireTowerPusher")
+	}
+	fire := s.manager.NewFire(protocol.SourceSystem, s)
+	fire.Message = protocol.TopicMessage[CloudEventWithNil]{
 		Topic: t.Topic,
-		Data:  t.ToCloudEventRaw(s.clientID),
-		Type:  protocol.PublishOperation,
+		Data: CloudEventWithNil{
+			Event: t.ToCloudEvent(s.clientID),
+		},
+		Type: protocol.PublishOperation,
 	}
 
-	return s.tm.Publish(fire)
+	return s.manager.Publish(fire)
 }
 
 type SystemPusher struct {
@@ -125,9 +131,32 @@ func (s *SystemPusher) Publish(t *TopicMessage) error {
 	return nil
 }
 
-type TopicMessage protocol.TopicMessage
+type TopicMessage protocol.TopicMessage[any]
 
-func (t TopicMessage) ToCloudEventRaw(clientID string) []byte {
+type CloudEventWithNil struct {
+	Event cloudevents.Event
+}
+
+func (c *CloudEventWithNil) MarshalJSON() ([]byte, error) {
+	if err := c.Event.Validate(); err != nil {
+		return []byte(""), nil
+	}
+	return c.Event.MarshalJSON()
+}
+
+func (c *CloudEventWithNil) UnmarshalJSON(data []byte) error {
+	if len(data) == 0 || string(data) == `""` {
+		return nil
+	}
+	msg := cloudevents.NewEvent()
+	if err := msg.UnmarshalJSON(data); err != nil {
+		return err
+	}
+	c.Event = msg
+	return nil
+}
+
+func (t TopicMessage) ToCloudEvent(clientID string) cloudevents.Event {
 	msg := cloudevents.NewEvent()
 	msg.SetSubject(t.Topic)
 	msg.SetSource("gophercron/" + clientID)
@@ -135,6 +164,11 @@ func (t TopicMessage) ToCloudEventRaw(clientID string) []byte {
 	msg.SetID(utils.GetStrID())
 	msg.SetType(t.Type.String())
 
+	return msg
+}
+
+func (t TopicMessage) ToCloudEventRaw(clientID string) []byte {
+	msg := t.ToCloudEvent(clientID)
 	raw, _ := json.Marshal(msg)
 	return raw
 }
@@ -144,26 +178,26 @@ func (a *app) publishEventToWebClient(data PublishData) {
 		return
 	}
 	f := &TopicMessage{}
-	body, _ := json.Marshal(data.Data)
+	// body, _ := json.Marshal(data.Data)
 
 	f.Topic = data.Topic
 	f.Type = protocol.PublishOperation
-	f.Data = body
+	f.Data = data.Data
 
 	if err := a.pusher.Publish(f); err != nil {
 		wlog.Error("failed to publish notify", zap.Error(err))
 	}
 }
 
-var _ protocol.Pusher = (*SelfPusher)(nil)
+var _ protocol.Pusher[CloudEventWithNil] = (*SelfPusher[CloudEventWithNil])(nil)
 
-type SelfPusher struct {
+type SelfPusher[T any] struct {
 	app     *app
-	channel chan *protocol.FireInfo
+	channel chan *protocol.FireInfo[CloudEventWithNil]
 	loop    sync.Once
 }
 
-func (s *SelfPusher) Publish(fire *protocol.FireInfo) error {
+func (s *SelfPusher[T]) Publish(fire *protocol.FireInfo[T]) error {
 	raw, _ := json.Marshal(fire)
 	return s.app.DispatchEvent(&cronpb.SendEventRequest{
 		Region: s.app.GetConfig().Micro.Region,
@@ -185,23 +219,35 @@ func (s *SelfPusher) Publish(fire *protocol.FireInfo) error {
 	})
 }
 
-func (s *SelfPusher) Receive() chan *protocol.FireInfo {
+func (s *SelfPusher[T]) Receive() chan *protocol.FireInfo[CloudEventWithNil] {
 	return s.channel
 }
 
 type Tower struct {
-	tower.Manager
-	msgChan chan *protocol.FireInfo
+	tower.Manager[CloudEventWithNil]
+	msgChan chan *protocol.FireInfo[CloudEventWithNil]
 }
 
 func (t *Tower) ReceiveEvent(data *cronpb.RealtimePublish) error {
 	switch data.Event.Type {
 	case protocol.PublishOperation.String():
-		f := new(protocol.FireInfo)
+		f := new(protocol.FireInfo[CloudEventWithNil])
 		if err := json.Unmarshal(data.Event.Value, f); err != nil {
 			t.Logger().Error("failed to unmarshal message", zap.Error(err), zap.ByteString("event_value", data.Event.Value))
 			return err
 		}
+
+		// event := cloudevents.NewEvent()
+		// if err := event.UnmarshalJSON(f.Message.Data); err != nil {
+		// 	t.Logger().Error("failed to unmarshal firetower message data to cloudevent", zap.Error(err), zap.ByteString("event_value", data.Event.Value))
+		// 	return err
+		// }
+
+		// decodedData, err := base64.StdEncoding.DecodeString(string(event.Data()))
+		// if err == nil {
+		// 	event.SetData(cloudevents.ApplicationJSON, decodedData)
+		// 	f.Message.Data, _ = event.MarshalJSON()
+		// }
 
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -218,9 +264,9 @@ func (t *Tower) ReceiveEvent(data *cronpb.RealtimePublish) error {
 }
 
 func buildTower(a *app, logger *zap.Logger) {
-	msgChan := make(chan *protocol.FireInfo, 10000)
+	msgChan := make(chan *protocol.FireInfo[CloudEventWithNil], 10000)
 	// 全局唯一id生成器
-	tm, err := tower.Setup(config.FireTowerConfig{
+	tm, err := tower.Setup[CloudEventWithNil](config.FireTowerConfig{
 		ReadChanLens:  5,
 		WriteChanLens: 1000,
 		Heartbeat:     60,
@@ -231,8 +277,8 @@ func buildTower(a *app, logger *zap.Logger) {
 			BuffChanCount:    1000,
 			ConsumerNum:      2,
 		},
-	}, tower.BuildWithLogger(logger),
-		tower.BuildWithPusher(&SelfPusher{
+	}, tower.BuildWithLogger[CloudEventWithNil](logger),
+		tower.BuildWithPusher[CloudEventWithNil](&SelfPusher[CloudEventWithNil]{
 			app:     a,
 			channel: msgChan,
 		}))
@@ -243,5 +289,10 @@ func buildTower(a *app, logger *zap.Logger) {
 	a.tower = &Tower{
 		Manager: tm,
 		msgChan: msgChan,
+	}
+
+	a.pusher = &FireTowerPusher{
+		clientID: a.GetIP(),
+		manager:  tm,
 	}
 }

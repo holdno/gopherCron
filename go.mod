@@ -8,7 +8,7 @@ require (
 	github.com/gin-gonic/gin v1.9.1
 	github.com/go-sql-driver/mysql v1.4.1
 	github.com/gorhill/cronexpr v0.0.0-20180427100037-88b0669f7d75
-	github.com/holdno/firetower v0.4.3-alpha.2
+	github.com/holdno/firetower v0.4.4-alpha.2
 	github.com/holdno/gocommons v1.2.6
 	github.com/holdno/rego v1.0.6
 	github.com/holdno/snowFlakeByGo v1.0.0
@@ -29,13 +29,13 @@ require (
 	github.com/gin-contrib/pprof v1.4.0
 	github.com/golang-jwt/jwt v3.2.2+incompatible
 	github.com/gorilla/websocket v1.5.0
-	github.com/holdno/go-instrumentation v0.1.1-alpha.13
+	github.com/holdno/go-instrumentation v0.1.1-rc.1
 	github.com/json-iterator/go v1.1.12
 	github.com/mikespook/gorbac v2.3.0+incompatible
 	github.com/mwitkow/grpc-proxy v0.0.0-20230212185441-f345521cb9c9
 	github.com/orcaman/concurrent-map/v2 v2.0.1
 	github.com/prometheus/client_golang v1.17.0
-	github.com/spacegrower/watermelon v0.1.2-alpha.1
+	github.com/spacegrower/watermelon v0.1.2-alpha.2
 	github.com/ugurcsen/gods-generic v0.10.2
 	go.etcd.io/etcd/api/v3 v3.5.10
 	go.etcd.io/etcd/client/v3 v3.5.9

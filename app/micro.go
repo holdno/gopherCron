@@ -329,7 +329,7 @@ func (a *app) GetAgentStream(region string, projectID int64) (*CenterClient, err
 			CenterClient: cronpb.NewCenterClient(cc.ClientConn()),
 			addr:         item.addr.Addr,
 			cancel: func() {
-				cc.Close()
+				cc.Done()
 			},
 		}
 		return client, nil
@@ -366,7 +366,7 @@ func (a *app) FindAgentsV2(region string, projectID int64) ([]*CenterClient, err
 				CenterClient: cronpb.NewCenterClient(cc.ClientConn()),
 				addr:         item.addr.Addr,
 				cancel: func() {
-					cc.Close()
+					cc.Done()
 				},
 			}
 			list = append(list, client)
@@ -452,15 +452,6 @@ func (a *app) getCenterConnect(ctx context.Context, region, addr string) (*connc
 
 func (a *app) GetCenterSrvList() ([]*CenterClient, error) {
 	addrs := a.centerAsyncFinder.GetCurrentResults()
-	// finder := etcd.NewFinder[infra.NodeMeta](infra.ResolveEtcdClient())
-	// ctx, cancel := context.WithTimeout(context.Background(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
-	// defer cancel()
-	// findKey := filepath.ToSlash(filepath.Join(etcdregister.GetETCDPrefixKey(), "gophercron", "0", cronpb.Center_ServiceDesc.ServiceName)) + "/"
-	// addrs, _, err := finder.FindAll(ctx, findKey)
-	// if err != nil {
-	// 	a.metrics.CustomInc("find_centers_error", findKey, err.Error())
-	// 	return err
-	// }
 
 	ctx, cancel := context.WithTimeout(a.ctx, time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
 	defer cancel()
@@ -498,12 +489,6 @@ func (a *app) DispatchEvent(event *cronpb.SendEventRequest) error {
 	if err != nil {
 		return err
 	}
-
-	// defer func() {
-	// 	for _, v := range centers {
-	// 		v.Close()
-	// 	}
-	// }()
 
 	dispatchOne := func(v *CenterClient) error {
 		defer v.Close()
