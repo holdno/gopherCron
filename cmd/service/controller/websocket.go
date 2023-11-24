@@ -44,47 +44,41 @@ func Websocket(tm tower.Manager[app.CloudEventWithNil]) func(c *gin.Context) {
 			return
 		}
 
-		if token == "" {
-			// 做用户身份验证
-			token := c.Request.Header.Get("Sec-WebSocket-Protocol")
-			// chatLogic := core.NewChatLogic(c.Request.Context(), s.core)
-			// 验证成功才升级连接
-			ws, _ = upgrader.Upgrade(c.Writer, c.Request, map[string][]string{
-				"Sec-WebSocket-Protocol": {token},
-			})
-		} else {
-			// chatLogic := core.NewChatLogic(c.Request.Context(), s.core)
-			// 验证成功才升级连接
-			ws, err = upgrader.Upgrade(c.Writer, c.Request, nil)
-			if err != nil {
-				wlog.Error("Websocket Upgrade err", zap.Error(err))
-				response.APIError(c, errors.NewError(http.StatusInternalServerError, "failed to upgrade http").WithLog(err.Error()))
-			}
+		ws, err = upgrader.Upgrade(c.Writer, c.Request, nil)
+		if err != nil {
+			wlog.Error("Websocket Upgrade err", zap.Error(err))
+			response.APIError(c, errors.NewError(http.StatusInternalServerError, "failed to upgrade http").WithLog(err.Error()))
+			return
 		}
 
 		id := utils.GetStrID()
-		newTower, err := tm.BuildTower(ws, id)
+		thisTower, err := tm.BuildTower(ws, id)
 		if err != nil {
 			response.APIError(c, errors.NewError(http.StatusInternalServerError, "failed to build firetower").WithLog(err.Error()))
 			return
 		}
+		thisTower.SetUserID(strconv.FormatInt(userToken.User, 10))
 
-		newTower.SetUserID(strconv.FormatInt(userToken.User, 10))
-
-		newTower.SetReadHandler(func(fire protocol.ReadOnlyFire[app.CloudEventWithNil]) bool {
+		thisTower.SetReadHandler(func(fire protocol.ReadOnlyFire[app.CloudEventWithNil]) bool {
 			// 当前用户是不能通过websocket发送消息的，所以固定返回false
 			return false
 		})
 
-		newTower.SetReceivedHandler(func(fi protocol.ReadOnlyFire[app.CloudEventWithNil]) bool {
-			return true
+		thisTower.SetReceivedHandler(func(fi protocol.ReadOnlyFire[app.CloudEventWithNil]) bool {
+			raw, err := json.Marshal(fi.GetMessage().Data.Event)
+			if err != nil {
+				wlog.Error("failed to marshal firetower received message", zap.Error(err))
+				return false
+			}
+			thisTower.SendToClient(raw)
+			return false
 		})
 
-		newTower.SetReadTimeoutHandler(func(fire protocol.ReadOnlyFire[app.CloudEventWithNil]) {
+		thisTower.SetReadTimeoutHandler(func(fire protocol.ReadOnlyFire[app.CloudEventWithNil]) {
 			wlog.Error("read timeout trigger", zap.String("component", "firetower"))
 		})
 
-		newTower.SetBeforeSubscribeHandler(func(fireCtx protocol.FireLife, topics []string) bool {
+		thisTower.SetBeforeSubscribeHandler(func(fireCtx protocol.FireLife, topics []string) bool {
 			for _, v := range topics {
 				if strings.Contains(v, "project") {
 					_pid := filepath.Base(v)
@@ -104,7 +98,7 @@ func Websocket(tm tower.Manager[app.CloudEventWithNil]) func(c *gin.Context) {
 			return true
 		})
 
-		newTower.SetSubscribeHandler(func(context protocol.FireLife, topic []string) {
+		thisTower.SetSubscribeHandler(func(context protocol.FireLife, topic []string) {
 			for _, v := range topic {
 				resp := &protocol.TopicMessage[json.RawMessage]{
 					Topic: v,
@@ -112,12 +106,11 @@ func Websocket(tm tower.Manager[app.CloudEventWithNil]) func(c *gin.Context) {
 				}
 				resp.Data = json.RawMessage(`{"status":"success"}`)
 				msg, _ := json.Marshal(resp)
-				newTower.SendToClient(msg)
-
+				thisTower.SendToClient(msg)
 			}
 		})
 
-		newTower.SetUnSubscribeHandler(func(context protocol.FireLife, topic []string) {
+		thisTower.SetUnSubscribeHandler(func(context protocol.FireLife, topic []string) {
 			for _, v := range topic {
 				resp := &protocol.TopicMessage[json.RawMessage]{
 					Topic: v,
@@ -125,11 +118,11 @@ func Websocket(tm tower.Manager[app.CloudEventWithNil]) func(c *gin.Context) {
 				}
 				resp.Data = json.RawMessage(`{"status":"success"}`)
 				msg, _ := json.Marshal(resp)
-				newTower.SendToClient(msg)
+				thisTower.SendToClient(msg)
 			}
 		})
 
-		newTower.Run()
+		thisTower.Run()
 	}
 
 }

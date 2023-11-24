@@ -35,6 +35,8 @@ import (
 	"go.etcd.io/etcd/client/v3/concurrency"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type App interface {
@@ -447,9 +449,9 @@ func (a *app) election(key string, successFunc func(s *concurrency.Session) erro
 			return err
 		}
 		defer func() {
-			// if r := recover(); r != nil {
-			// 	wlog.Error("election was recovered", zap.Any("info", r))
-			// }
+			if r := recover(); r != nil {
+				wlog.Error("election was recovered", zap.Any("info", r))
+			}
 			if s != nil {
 				s.Close()
 			}
@@ -462,7 +464,8 @@ func (a *app) election(key string, successFunc func(s *concurrency.Session) erro
 
 		return successFunc(s)
 	}
-	go func() {
+
+	a.Go(func() {
 		for {
 			select {
 			case <-a.ctx.Done():
@@ -474,20 +477,7 @@ func (a *app) election(key string, successFunc func(s *concurrency.Session) erro
 			}
 			time.Sleep(time.Second * 5)
 		}
-	}()
-	// a.Go(func() {
-	// 	for {
-	// 		select {
-	// 		case <-a.ctx.Done():
-	// 			return
-	// 		default:
-	// 		}
-	// 		if err := ele(); err != nil {
-	// 			wlog.Error("failed to election", zap.String("key", key), zap.Error(err))
-	// 		}
-	// 		time.Sleep(time.Second * 5)
-	// 	}
-	// })
+	})
 	return nil
 }
 
@@ -1299,7 +1289,9 @@ func (a *app) ReloadWorkerConfig(projectID int64, host string) error {
 			},
 		})
 		if err != nil {
-			return errors.NewError(http.StatusInternalServerError, "命令执行失败:"+err.Error()).WithLog(err.Error())
+			if grpcerr, _ := status.FromError(err); grpcerr.Code() != codes.DeadlineExceeded {
+				return errors.NewError(http.StatusInternalServerError, "命令执行失败: "+err.Error()).WithLog(err.Error())
+			}
 		}
 		break
 	}

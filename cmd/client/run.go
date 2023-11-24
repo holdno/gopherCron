@@ -52,7 +52,7 @@ func Run(opts *SetupOptions) error {
 
 func waitingShutdown(c agent.Client) {
 	stopSignalChan := make(chan os.Signal, 1)
-	signal.Notify(stopSignalChan, os.Interrupt, os.Kill, syscall.SIGTERM, syscall.SIGINT)
+	signal.Notify(stopSignalChan, os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
 
 	sig := <-stopSignalChan
 	if sig != nil {

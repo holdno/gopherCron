@@ -144,9 +144,9 @@ func (a *app) HandleWebHook(agentIP string, res *common.TaskFinishedV2) error {
 	}
 	event := cloudevents.NewEvent()
 	event.SetID(utils.GetStrID())
-	event.SetSubject("task-result")
+	event.SetSubject(common.WEBHOOK_TYPE_TASK_RESULT)
 	event.SetData(cloudevents.ApplicationJSON, body)
-	event.SetSource(fmt.Sprintf("gophercron-center-%d", a.ClusterID()))
+	event.SetSource(fmt.Sprintf("%s-%d", common.GOPHERCRON_CENTER_NAME, a.ClusterID()))
 	event.SetType(eventType)
 	event.SetTime(time.Unix(res.EndTime, 0))
 	reqData, _ := event.MarshalJSON()

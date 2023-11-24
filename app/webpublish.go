@@ -159,7 +159,7 @@ func (c *CloudEventWithNil) UnmarshalJSON(data []byte) error {
 func (t TopicMessage) ToCloudEvent(clientID string) cloudevents.Event {
 	msg := cloudevents.NewEvent()
 	msg.SetSubject(t.Topic)
-	msg.SetSource("gophercron/" + clientID)
+	msg.SetSource(fmt.Sprintf("%s/%s", common.GOPHERCRON_CENTER_NAME, clientID))
 	msg.SetData(cloudevents.ApplicationJSON, t.Data)
 	msg.SetID(utils.GetStrID())
 	msg.SetType(t.Type.String())

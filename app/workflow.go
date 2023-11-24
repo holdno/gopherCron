@@ -941,7 +941,7 @@ func (a *workflowRunner) scheduleWorkflowPlan(plan *WorkflowPlan) error {
 	}
 
 	if finished {
-		if finishedErr := plan.Finished(err); err != nil {
+		if finishedErr := plan.Finished(err); finishedErr != nil {
 			a.app.metrics.CustomInc("workflow_plan_finished", strconv.FormatInt(plan.Workflow.ID, 10), finishedErr.Error())
 			wlog.Error("failed to finished workflow plan", zap.Int64("workflow_id", plan.Workflow.ID),
 				zap.Error(finishedErr),
@@ -1166,6 +1166,10 @@ func (s *WorkflowPlan) CanSchedule(runner *workflowRunner) ([]WorkflowTaskInfo, 
 				}
 				return nil
 			})
+			if err != nil {
+				wlog.Error("failed to set workflow task status to re-run", zap.Error(err))
+				return nil, false, err
+			}
 
 		case common.TASK_STATUS_FAIL_V2:
 			// 判断是否已经重复跑3次
