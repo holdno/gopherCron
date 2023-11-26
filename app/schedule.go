@@ -64,6 +64,13 @@ func (a *workflowRunner) scheduleTask(taskInfo *common.TaskInfo) error {
 		}
 		return nil
 	})
+	if err != nil {
+		wlog.Error("failed to modify workflow task starting status", zap.Error(err),
+			zap.Int64("workflow_id", taskInfo.FlowInfo.WorkflowID),
+			zap.Int64("project_id", taskInfo.ProjectID),
+			zap.String("task_id", taskInfo.TaskID))
+		return errors.NewError(http.StatusInternalServerError, fmt.Sprintf("变更workflow运行状态失败, project_id: %d", taskInfo.ProjectID)).WithLog(err.Error())
+	}
 
 	ctx, cancel := utils.GetContextWithTimeout()
 	defer cancel()
@@ -110,6 +117,7 @@ func (a *workflowRunner) scheduleTask(taskInfo *common.TaskInfo) error {
 			}
 		}
 	} else {
+		// 兼容旧版本grpc直连
 		client, err := a.app.GetAgentClient(a.app.GetConfig().Micro.Region, taskInfo.ProjectID)
 		if err != nil {
 			return errors.NewError(http.StatusInternalServerError, fmt.Sprintf("连接agent客户端失败, project_id: %d", taskInfo.ProjectID)).WithLog(err.Error())
@@ -145,57 +153,6 @@ func (a *workflowRunner) scheduleTask(taskInfo *common.TaskInfo) error {
 		taskInfo.ProjectID,
 		taskInfo.TaskID,
 		common.TASK_STATUS_STARTING_V2))
-
-	// err = waitingAck(cli, common.BuildWorkflowAckKey(taskInfo.FlowInfo.WorkflowID, taskInfo.ProjectID, taskInfo.TaskID, taskInfo.TmpID),
-	// 	func() error {
-	// 		// 设置任务状态为启动中
-	// 		// 调度任务至agent
-	// 		_, err = concurrency.NewSTM(cli, func(s concurrency.STM) error {
-	// 			if err = setWorkflowTaskStarting(s, taskInfo); err != nil {
-	// 				return err
-	// 			}
-	// 			ctx, _ := utils.GetContextWithTimeout()
-	// 			// make lease to notify worker
-	// 			// 创建一个租约 让其稍后过期并自动删除
-	// 			leaseGrantResp, err := cli.Lease.Grant(ctx, 1)
-	// 			if err != nil {
-	// 				errObj := errors.ErrInternalError
-	// 				errObj.Log = "[putSchedule] lease grant error:" + err.Error()
-	// 				return errObj
-	// 			}
-	// 			taskInfo.CreateTime = time.Now().Unix()
-	// 			return putSchedule(s, leaseGrantResp.ID, taskInfo)
-	// 		})
-
-	// 		if err == nil {
-	// 			a.app.PublishMessage(messageWorkflowTaskStatusChanged(
-	// 				taskInfo.FlowInfo.WorkflowID,
-	// 				taskInfo.ProjectID,
-	// 				taskInfo.TaskID,
-	// 				common.TASK_STATUS_STARTING_V2))
-	// 		}
-
-	// 		return err
-	// 	},
-	// 	func(e *clientv3.Event) bool {
-	// 		return a.getAckForTaskRunning(WorkflowRunningTaskInfo{
-	// 			TaskID:     taskInfo.TaskID,
-	// 			TaskName:   taskInfo.Name,
-	// 			ProjectID:  taskInfo.ProjectID,
-	// 			WorkflowID: taskInfo.FlowInfo.WorkflowID,
-	// 			TmpID:      taskInfo.TmpID,
-	// 		}, e.Kv.Key, e.Kv.Value)
-	// 	})
-	// if err != nil {
-	// 	a.app.Log().WithFields(logrus.Fields{
-	// 		"workflow_id": taskInfo.FlowInfo.WorkflowID,
-	// 		"project_id":  taskInfo.ProjectID,
-	// 		"task_id":     taskInfo.TaskID,
-	// 		"tmp_id":      taskInfo.TmpID,
-	// 		"error":       err.Error(),
-	// 	}).Error("waiting workflow task ack error")
-	// 	return err
-	// }
 	return nil
 }
 
@@ -207,75 +164,6 @@ type WorkflowRunningTaskInfo struct {
 	ProjectID  int64
 	AgentIP    string
 }
-
-// func (a *workflowRunner) getAckForTaskRunning(taskInfo WorkflowRunningTaskInfo, k, v []byte) bool {
-// 	var ack common.AckResponse
-// 	if err := json.Unmarshal(v, &ack); err != nil {
-// 		wlog.With(zap.Any("fields", map[string]interface{}{
-// 			"workflow_id": taskInfo.WorkflowID,
-// 			"project_id":  taskInfo.ProjectID,
-// 			"task_name":   taskInfo.TaskName,
-// 			"task_id":     taskInfo.TaskID,
-// 			"tmp_id":      taskInfo.TmpID,
-// 			"error":       err.Error(),
-// 		})).Error("failed to json.Unmarshal ack response")
-// 		return false
-// 	}
-
-// 	switch ack.Version {
-// 	case common.ACK_RESPONSE_V1:
-// 		var v1 common.AckResponseV1
-// 		if err := json.Unmarshal(ack.Data, &v1); err != nil {
-// 			wlog.With(zap.Any("fields", map[string]interface{}{
-// 				"workflow_id": taskInfo.WorkflowID,
-// 				"project_id":  taskInfo.ProjectID,
-// 				"task_name":   taskInfo.TaskName,
-// 				"task_id":     taskInfo.TaskID,
-// 				"tmp_id":      taskInfo.TmpID,
-// 				"error":       err.Error(),
-// 			})).Error("failed to json.Unmarshal ack data")
-// 			return false
-// 		}
-// 	default:
-// 		wlog.With(zap.Any("fields", map[string]interface{}{
-// 			"workflow_id": taskInfo.WorkflowID,
-// 			"project_id":  taskInfo.ProjectID,
-// 			"task_name":   taskInfo.TaskName,
-// 			"task_id":     taskInfo.TaskID,
-// 			"tmp_id":      taskInfo.TmpID,
-// 			"ack_version": ack.Version,
-// 		})).Error("unknown ack response version")
-// 		return false
-// 	}
-
-// 	_, err := concurrency.NewSTM(a.etcd, func(s concurrency.STM) error {
-// 		if err := setWorkflowTaskRunning(s, taskInfo); err != nil {
-// 			return err
-// 		}
-// 		// 删除 ack key
-// 		// 2022-09-07: 获取到ack状态后不删除，用ack状态标识agent上的任务正在运行中，当做一个运行时状态，agent任务结束后会通过lease的结束自动清理该key
-// 		// s.Del(string(k))
-// 		return nil
-// 	})
-// 	if err != nil {
-// 		wlog.With(zap.Any("fields", map[string]interface{}{
-// 			"workflow_id": taskInfo.WorkflowID,
-// 			"project_id":  taskInfo.ProjectID,
-// 			"task_name":   taskInfo.TaskName,
-// 			"task_id":     taskInfo.TaskID,
-// 			"tmp_id":      taskInfo.TmpID,
-// 			"error":       err.Error(),
-// 		})).Error("failed to delete ack key")
-// 		return false
-// 	}
-
-// a.app.PublishMessage(messageWorkflowTaskStatusChanged(
-// 	taskInfo.WorkflowID,
-// 	taskInfo.ProjectID,
-// 	taskInfo.TaskID,
-// 	common.TASK_STATUS_RUNNING_V2))
-// 	return true
-// }
 
 type WorkflowTaskScheduleRecord struct {
 	TmpID     string `json:"tmp_id"`

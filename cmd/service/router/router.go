@@ -60,6 +60,7 @@ func SetupRoute(srv app.App, r *gin.Engine, conf *config.ServiceConfig) {
 	{
 		api.GET("/login_methods", user_func.GetLoginMethods)
 		api.GET("/version", system.GetVersion)
+		api.GET("/connect", controller.Websocket(srv.FireTower()))
 		user := api.Group("/user")
 		{
 			user.POST("/login", user_func.Login)

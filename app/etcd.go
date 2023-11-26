@@ -233,7 +233,7 @@ func (a *app) GetWorkerList(projectID int64) ([]common.ClientInfo, error) {
 		_ = json.Unmarshal(kv.Value, &clientinfo)
 		clientinfo.ClientIP = ip
 		if clientinfo.Version == "" {
-			clientinfo.Version = "unknow"
+			clientinfo.Version = "unknown"
 		}
 
 		clientinfo.Version += "待升级"
@@ -241,11 +241,14 @@ func (a *app) GetWorkerList(projectID int64) ([]common.ClientInfo, error) {
 		res = append(res, clientinfo)
 	}
 
-	for _, addr := range addrs {
+	for _, item := range addrs {
+		if item.attr.Tags == nil {
+			item.attr.Tags = make(map[string]string)
+		}
 		clientinfo := common.ClientInfo{
-			ClientIP: addr.Address(),
-			Version:  addr.Attr().Tags["agent-version"],
-			Region:   addr.Attr().Region,
+			ClientIP: item.addr.Addr,
+			Version:  item.attr.Tags["agent-version"],
+			Region:   item.attr.Region,
 		}
 
 		res = append(res, clientinfo)

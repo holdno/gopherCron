@@ -25,6 +25,9 @@ const (
 	GOPHERCRON_AGENT_VERSION_KEY    = "gophercron-agent-version"
 	GOPHERCRON_AGENT_AUTH_KEY       = "gophercron-agent-auth"
 	GOPHERCRON_CENTER_AUTH_KEY      = "gophercron-center-auth"
+
+	GOPHERCRON_CENTER_NAME = "gophercron-center"
+	GOPHERCRON_CLIENT_NAME = "gophercron-client"
 )
 
 type TaskWithOperator struct {

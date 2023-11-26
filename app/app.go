@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/holdno/firetower/service/tower"
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/config"
 	"github.com/holdno/gopherCron/errors"
@@ -25,14 +26,17 @@ import (
 	"github.com/ugurcsen/gods-generic/maps/hashmap"
 
 	"github.com/gin-gonic/gin"
+	"github.com/holdno/go-instrumentation/conncache"
 	"github.com/holdno/gocommons/selection"
 	"github.com/jinzhu/gorm"
+	etcdresolver "github.com/spacegrower/watermelon/infra/resolver/etcd"
 	"github.com/spacegrower/watermelon/infra/wlog"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/client/v3/concurrency"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type App interface {
@@ -58,7 +62,7 @@ type App interface {
 	IsAdmin(uid int64) (bool, error)
 	GetWorkerList(projectID int64) ([]common.ClientInfo, error)
 	CheckProjectWorkerExist(projectID int64, host string) (bool, error)
-	ReloadWorkerConfig(host string) error
+	ReloadWorkerConfig(projectID int64, host string) error
 	GetProjectTaskCount(projectID int64) (int64, error)
 	GetTaskList(projectID int64) ([]*common.TaskListItemWithWorkflows, error)
 	GetTask(projectID int64, taskID string) (*common.TaskInfo, error)
@@ -157,6 +161,7 @@ type App interface {
 	SaveTaskLog(agentIP string, result common.TaskFinishedV2)
 
 	GetOIDCService() *OIDCService
+	FireTower() *Tower
 }
 
 func GetApp(c *gin.Context) App {
@@ -185,7 +190,10 @@ type app struct {
 	protocol.CommonInterface
 	warning.Warner
 
-	pusher          *SystemPusher
+	pusher interface {
+		Publish(t *TopicMessage) error
+		tower.PusherInfo
+	}
 	streamManager   *streamManager[*cronpb.Event]
 	streamManagerV2 *streamManager[*cronpb.ServiceEvent]
 
@@ -193,7 +201,19 @@ type app struct {
 	authenticator *Authenticator
 	rbacSrv       RBACImpl
 
-	__centerConncets *hashmap.Map[string, *CenterClient]
+	__centerConncets  conncache.ConnCache[CenterConnCacheKey, *conncache.GRPCConn[CenterConnCacheKey, *grpc.ClientConn]]
+	centerAsyncFinder etcdresolver.AsyncFinder
+
+	tower *Tower
+}
+
+func (a *app) FireTower() *Tower {
+	return a.tower
+}
+
+type CenterConnCacheKey struct {
+	Endpoint string
+	Region   string
 }
 
 type WebClientPusher interface {
@@ -224,7 +244,7 @@ func NewApp(configPath string) App {
 	if cfg.LogSize == 0 {
 		cfg.LogSize = 100
 	}
-	wlog.SetGlobalLogger(wlog.NewLogger(&wlog.Config{
+	logger := wlog.NewLogger(&wlog.Config{
 		Name:  "gophercron-center",
 		Level: wlog.ParseLevel(cfg.LogLevel),
 		File:  cfg.LogFile, // print to sedout if config.LogFile is undefined
@@ -234,7 +254,8 @@ func NewApp(configPath string) App {
 			MaxBackups: cfg.LogBackups,
 			Compress:   cfg.LogCompress,
 		},
-	}))
+	})
+	wlog.SetGlobalLogger(logger)
 	app := &app{
 		Warner: warning.NewDefaultWarner(wlog.With(zap.String("component", "warner"))),
 		cfg:    cfg,
@@ -327,6 +348,7 @@ func NewApp(configPath string) App {
 			})).Error("panicgroup: failed to warning panic error")
 		}
 	})
+	installConnCache(app)
 
 	if app.cfg.Publish.Enable {
 		wlog.Info("enable publish service", zap.String("endpoint", app.cfg.Publish.Endpoint))
@@ -336,29 +358,30 @@ func NewApp(configPath string) App {
 			client:   &http.Client{Timeout: time.Duration(app.cfg.Deploy.Timeout) * time.Second},
 			Header:   app.cfg.Publish.Header,
 		}
-
-		app.messageChan = make(chan PublishData, 1000)
-		publishQpsInc := app.metrics.CustomIncFunc("publish_message", "", "")
-		app.Go(func() {
-			for {
-				select {
-				case res := <-app.messageChan:
-					publishQpsInc()
-					app.publishEventToWebClient(res)
-				case <-app.ctx.Done():
-					return
-				}
-			}
-		})
+	} else {
+		wlog.Info("enable firetower service", zap.String("endpoint", app.cfg.Publish.Endpoint))
+		buildTower(app, logger.Logger)
 	}
+	app.messageChan = make(chan PublishData, 1000)
+	app.Go(func() {
+		publishQpsInc := app.metrics.CustomIncFunc("publish_message", "", "")
+		for {
+			select {
+			case res := <-app.messageChan:
+				publishQpsInc()
+				app.publishEventToWebClient(res)
+			case <-app.ctx.Done():
+				return
+			}
+		}
+	})
 
 	return app
 }
 
 func (a *app) Run() {
-	go resolveCenterService(a)
+	resolveCenterService(a)
 	startCleanupTask(a)
-	startWebhook(a)
 	startWorkflow(a)
 	startTemporaryTaskWorker(a)
 	// startCalcDataConsistency(a)
@@ -384,29 +407,14 @@ func (a *app) HandleCenterEvent(event *cronpb.ServiceEvent) error {
 		if a.workflowRunner.isLeader {
 			a.workflowRunner.reCalcScheduleTimeChan <- struct{}{}
 		}
+	case cronpb.EventType_EVENT_REALTIME_PUBLISH:
+		if a.tower != nil { // 确定本地启用了firetower
+			return a.tower.ReceiveEvent(event.GetRealtimePublish())
+		}
 	default:
 		return fmt.Errorf("unsupport event %s, version: %s", event.Type, a.GetVersion())
 	}
 	return nil
-}
-
-func startWebhook(app *app) {
-	// app.election(common.BuildWebhookMasterKey(), func(s *concurrency.Session) error {
-	// 	wlog.Info("new webhook leader")
-	// 	for {
-	// 		select {
-	// 		case <-app.ctx.Done():
-	// 			return app.ctx.Err()
-	// 		case <-s.Done():
-	// 			return nil
-	// 		default:
-	// 			if err := app.WebHookWorker(s.Done()); err != nil {
-	// 				wlog.Error("webhook runner return error", zap.Error(err))
-	// 				return err
-	// 			}
-	// 		}
-	// 	}
-	// })
 }
 
 func startCleanupTask(app *app) {
@@ -456,6 +464,7 @@ func (a *app) election(key string, successFunc func(s *concurrency.Session) erro
 
 		return successFunc(s)
 	}
+
 	a.Go(func() {
 		for {
 			select {
@@ -474,10 +483,9 @@ func (a *app) election(key string, successFunc func(s *concurrency.Session) erro
 
 func startWorkflow(app *app) {
 	var err error
-	if app.workflowRunner, err = NewWorkflowRunner(app, app.etcd.Client()); err != nil {
+	if app.workflowRunner, err = NewWorkflowRunner(app); err != nil {
 		panic(err)
 	}
-
 	app.election(common.BuildWorkflowMasterKey(), func(s *concurrency.Session) error {
 		defer func() {
 			app.workflowRunner.isLeader = false
@@ -1236,24 +1244,57 @@ func (a *app) GetUserList(args GetUserListArgs) ([]*common.User, error) {
 	return list, nil
 }
 
-func (a *app) ReloadWorkerConfig(host string) error {
-	ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
-	defer cancel()
+func (a *app) ReloadWorkerConfig(projectID int64, host string) error {
 
-	cc, err := grpc.DialContext(ctx, host, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	agentAddrs, err := a.getAgentAddrs(a.GetConfig().Micro.Region, projectID)
 	if err != nil {
 		return errors.NewError(http.StatusInternalServerError, "获取agent连接失败").WithLog(err.Error())
 	}
 
-	defer cc.Close()
+	for _, item := range agentAddrs {
+		if item.addr.Addr != host {
+			continue
+		}
+		if item.attr.CenterServiceEndpoint == "" {
+			return errors.NewError(http.StatusForbidden, "agent版本较低，请升级后再试")
+		}
 
-	client := cronpb.NewAgentClient(cc)
-	if _, err = client.Command(ctx, &cronpb.CommandRequest{
-		Command: common.AGENT_COMMAND_RELOAD_CONFIG,
-	}); err != nil {
-		return errors.NewError(http.StatusInternalServerError, "命令执行失败:"+err.Error()).WithLog(err.Error())
+		dialAddress := item.attr.CenterServiceEndpoint
+		ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
+		defer cancel()
+		cc, err := a.getCenterConnect(ctx, item.attr.Region, dialAddress)
+		if err != nil {
+			return fmt.Errorf("failed to connect agent stream %s, error: %s", dialAddress, err.Error())
+		}
+		client := &CenterClient{
+			CenterClient: cronpb.NewCenterClient(cc.ClientConn()),
+			addr:         item.addr.Addr,
+			cancel: func() {
+				cc.Done()
+			},
+		}
+		defer client.Close()
+		_, err = client.SendEvent(ctx, &cronpb.SendEventRequest{
+			Region:    a.GetConfig().Micro.Region,
+			ProjectId: projectID,
+			Agent:     host,
+			Event: &cronpb.ServiceEvent{
+				Id:   utils.GetStrID(),
+				Type: cronpb.EventType_EVENT_COMMAND_REQUEST,
+				Event: &cronpb.ServiceEvent_CommandRequest{
+					CommandRequest: &cronpb.CommandRequest{
+						Command: common.AGENT_COMMAND_RELOAD_CONFIG,
+					},
+				},
+			},
+		})
+		if err != nil {
+			if grpcerr, _ := status.FromError(err); grpcerr.Code() != codes.DeadlineExceeded {
+				return errors.NewError(http.StatusInternalServerError, "命令执行失败: "+err.Error()).WithLog(err.Error())
+			}
+		}
+		break
 	}
-
 	return nil
 }
 

@@ -158,7 +158,8 @@ func GetWorkerListInfo(c *gin.Context) {
 }
 
 type ReloadConfigRequest struct {
-	ClientIP string `json:"client_ip" form:"client_ip" binding:"required"`
+	ProjectID int64  `json:"project_id" form:"project_id" binding:"required"`
+	ClientIP  string `json:"client_ip" form:"client_ip" binding:"required"`
 }
 
 func ReloadConfig(c *gin.Context) {
@@ -183,28 +184,9 @@ func ReloadConfig(c *gin.Context) {
 	if !isAdmin {
 		response.APIError(c, errors.ErrUnauthorized)
 		return
-		// if ok, err = srv.CheckUserIsInProject(req.ProjectID, uid); err != nil {
-		// 	response.APIError(c, err)
-		// 	return
-		// }
-
-		// if !ok {
-		// 	response.APIError(c, errors.ErrUnauthorized)
-		// 	return
-		// }
 	}
 
-	// if ok, err = srv.CheckProjectWorkerExist(req.ProjectID, req.ClientIP); err != nil {
-	// 	response.APIError(c, err)
-	// 	return
-	// }
-
-	// if !ok {
-	// 	response.APIError(c, errors.ErrUnauthorized)
-	// 	return
-	// }
-
-	if err = srv.ReloadWorkerConfig(req.ClientIP); err != nil {
+	if err = srv.ReloadWorkerConfig(req.ProjectID, req.ClientIP); err != nil {
 		response.APIError(c, err)
 		return
 	}

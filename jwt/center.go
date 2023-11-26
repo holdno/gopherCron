@@ -35,7 +35,7 @@ func (p *AlwaysPassAuthenticator) Allow(_ int64) bool {
 	return true
 }
 
-func CenterAuthMiddleware(publicKey []byte) func(ctx context.Context) error {
+func CenterAuthMiddleware(legacyMode bool, publicKey []byte) func(ctx context.Context) error {
 	return func(ctx context.Context) error {
 		md, exist := metadata.FromIncomingContext(ctx)
 		if !exist {
@@ -44,9 +44,11 @@ func CenterAuthMiddleware(publicKey []byte) func(ctx context.Context) error {
 
 		jwt := md.Get(common.GOPHERCRON_AGENT_AUTH_KEY)
 		if len(jwt) == 0 {
+			if !legacyMode {
+				return status.Error(codes.Unauthenticated, "agent auth key is undefined")
+			}
 			middleware.SetInto(ctx, agentProjectIdsKey{}, &AlwaysPassAuthenticator{})
 			return nil
-			// return status.Error(codes.Unauthenticated, "agent auth key is undefined")
 		}
 		claims, err := ParseAgentJWT(jwt[0], publicKey)
 		if err != nil {

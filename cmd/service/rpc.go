@@ -58,7 +58,7 @@ func (s *cronRpc) RemoveStream(ctx context.Context, req *cronpb.RemoveStreamRequ
 
 func (s *cronRpc) TryLock(req cronpb.Center_TryLockServer) error {
 	authenticator := jwt.GetProjectAuthenticator(req.Context())
-	agentIP, exist := middleware.GetAgentIPFromContext(req.Context())
+	agentIP, exist := middleware.GetAgentIP(req.Context())
 	if !exist {
 		return status.Error(codes.PermissionDenied, codes.PermissionDenied.String())
 	}
@@ -462,12 +462,13 @@ Here:
 					registerStreamOnce = append(registerStreamOnce, meta)
 				}
 			}
+
+			s.registerMetricsAdd(1, agentIP)
 			if err := r.Register(); err != nil {
 				wlog.Error("failed to register service", zap.Error(err), zap.String("method", "Register"))
 				s.app.Metrics().CustomInc("register_error", s.app.GetIP(), err.Error())
 				return status.Error(codes.Internal, "failed to register service")
 			}
-			s.registerMetricsAdd(1, agentIP)
 
 			for _, meta := range registerStreamOnce {
 				s.app.StreamManagerV2().SaveStream(meta, req, cancel)
@@ -499,6 +500,7 @@ Here:
 								Type:      cronpb.EventType_EVENT_REGISTER_HEARTBEAT_PING,
 								EventTime: time.Now().Unix(),
 							}); err != nil {
+								wlog.Error("failed to ")
 								cancel()
 								return
 							}

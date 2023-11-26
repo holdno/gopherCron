@@ -95,6 +95,7 @@ enum EventType {
     EVENT_SERVICE_UNSUPPORT = 15;
     EVENT_CLIENT_UNSUPPORT = 16;
     EVENT_WORKFLOW_REFRESH = 17;
+    EVENT_REALTIME_PUBLISH = 18;
 }
 
 message ServiceEvent {
@@ -109,6 +110,7 @@ message ServiceEvent {
         ProjectTaskHashRequest project_task_hash_request = 8;
         CommandRequest command_request = 9;
         EventUnsupport event_unsupport = 10;
+        RealtimePublish realtime_publish = 11;
     }
 }
 
@@ -186,6 +188,10 @@ message Result {
 }
 
 message ScheduleRequest {
+    Event event = 1;
+}
+
+message RealtimePublish {
     Event event = 1;
 }
 

@@ -85,6 +85,7 @@ type DeployConf struct {
 	ViewPath    string `toml:"view_path"`
 	Host        string `toml:"host"`
 	ProxyHost   string `toml:"proxy_host"`
+	LegacyMode  bool   `toml:"legacy_mode"`
 }
 
 // EtcdConf etcd配置

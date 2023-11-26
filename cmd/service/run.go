@@ -64,7 +64,7 @@ func apiServer(srv app.App, conf *config.ServiceConfig) {
 
 	grpcRequestCounter := srv.Metrics().NewCounter("grpc_request", "method", "source")
 	grpcRequestDuration := srv.Metrics().NewHistogram("grpc_request", "method", "source")
-	server.Use(middleware.CheckoutAgentMeta)
+	server.Use(middleware.CheckoutAgentMeta(srv.GetConfig().Deploy.LegacyMode))
 	server.Use(func(ctx context.Context) error {
 		method := middleware.GetFullMethodFrom(ctx)
 		agentIP, _ := middleware.GetAgentIP(ctx)
@@ -77,7 +77,7 @@ func apiServer(srv app.App, conf *config.ServiceConfig) {
 	server.Handler(cronpb.CenterServer.Auth)
 	agentApi := server.Group()
 	// agent 鉴权
-	agentApi.Use(jwt.CenterAuthMiddleware([]byte(srv.GetConfig().JWT.PublicKey)))
+	agentApi.Use(jwt.CenterAuthMiddleware(srv.GetConfig().Deploy.LegacyMode, []byte(srv.GetConfig().JWT.PublicKey)))
 	agentApi.Handler(cronpb.CenterServer.RegisterAgent,
 		cronpb.CenterServer.RegisterAgentV2,
 		cronpb.CenterServer.StatusReporter,
