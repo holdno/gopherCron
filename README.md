@@ -51,6 +51,12 @@
 ![image](./static/dashboard_task-detail.jpg)  
 ![image](./static/dashboard_task-log.jpg)
 
+<div style="width:100%; display: flex">
+    <image src="./static/mobile1.png" style="width: 30%; height: 55%; margin-right: 3%"/>
+    <image src="./static/mobile2.png" style="width: 30%; height: 55%; margin-right: 3%"/>
+    <image src="./static/mobile3.png" style="width: 30%; height: 55%;"/>
+</div>
+
 ### 任务日志集中上报
 
 1.10.x 版本中 client 配置增加了 report_addr 项，该配置接收一个 http 接口  
