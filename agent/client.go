@@ -115,6 +115,7 @@ func (agent *client) loadConfigAndSetupAgentFunc() func() error {
 		} else if agent.configPath == "" {
 			return fmt.Errorf("invalid config path")
 		}
+		agent.cfg = cfg
 
 		if cfg.ReportAddr != "" {
 			agent.logger.Info(fmt.Sprintf("init http task log reporter, address: %s", cfg.ReportAddr))
@@ -133,16 +134,14 @@ func (agent *client) loadConfigAndSetupAgentFunc() func() error {
 		addProjects, _ := agent.daemon.DiffAndAddProjects(cfg.Auth.Projects)
 		agent.logger.Debug("diff projects", zap.Any("projects", addProjects))
 
-		// remove all plan
+		// remove all old plan
 		agent.scheduler.RemoveAll()
-
-		agent.cfg = cfg
 		agent.authenticator = NewAuthenticator(cfg.Auth.Projects)
 
 		if agent.srvShutdownFunc != nil { // 先停掉旧配置启动的服务
 			agent.srvShutdownFunc()
 		}
-		srv := agent.SetupMicroService() // 获取新的服务
+		srv := agent.SetupMicroService() // 重新注册服务，注册后拿到新的projects对应的tasks
 		agent.srvShutdownFunc = func() { // 注册服务的停止方法
 			srv.ShutDown()
 		}
@@ -192,11 +191,12 @@ func (c *client) Cfg() *config.ClientConfig {
 func (c *client) Close() {
 	if !c.isClose {
 		c.isClose = true
+		close(c.closeChan)
 		// 中断服务，停止接收新的调度信息
 		if c.srvShutdownFunc != nil {
 			c.srvShutdownFunc()
 		}
-		// 关闭本地调度器
+		// 关闭本地调度器 并 等待执行中的任务结束
 		if c.scheduler != nil {
 			c.scheduler.Stop()
 		}
@@ -204,7 +204,7 @@ func (c *client) Close() {
 		if c.daemon != nil {
 			c.daemon.Close()
 		}
-		<-c.closeChan
+
 		wlog.Info("agent has been shut down")
 	}
 }

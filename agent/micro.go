@@ -275,11 +275,7 @@ func NewAuthenticator(projectAuths []config.ProjectAuth) *Authenticator {
 	}
 }
 
-func (a *Authenticator) GetToken(ctx context.Context, driver cronpb.CenterClient) (string, error) {
-	if !a.expTime.IsZero() && a.expTime.After(time.Now().Add(-time.Minute)) {
-		return a.token, nil
-	}
-
+func (a *Authenticator) getToken(ctx context.Context, driver cronpb.CenterClient) (string, error) {
 	if driver == nil {
 		return "", fmt.Errorf("invalid driver")
 	}
@@ -293,6 +289,19 @@ func (a *Authenticator) GetToken(ctx context.Context, driver cronpb.CenterClient
 	}
 	a.token = resp.Jwt
 	a.expTime = time.Unix(resp.ExpireTime, 0)
-
 	return a.token, nil
+}
+
+func (a *Authenticator) GetToken(ctx context.Context, driver cronpb.CenterClient) (string, error) {
+	if !a.expTime.IsZero() && a.expTime.After(time.Now().Add(-time.Minute)) {
+		return a.token, nil
+	}
+
+	return a.getToken(ctx, driver)
+}
+
+func (a *Authenticator) RefreshNow(ctx context.Context, driver cronpb.CenterClient) (string, error) {
+	a.token = ""
+	a.expTime = time.Time{}
+	return a.getToken(ctx, driver)
 }

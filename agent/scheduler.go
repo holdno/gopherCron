@@ -65,12 +65,15 @@ func initScheduler(agent *client) *TaskScheduler {
 }
 
 func (ts *TaskScheduler) Stop() {
+	// 调度器关闭，最多等待10分钟来结束当前运行中的任务
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute*10)
+	defer cancel()
 	wlog.Info("starting to shut down the scheduler")
 	for {
 		count := ts.TaskExecutingCount()
-		if count == 0 {
-			ts.PushTaskResult(nil)
-			wlog.Info("the scheduler has been shut down")
+		if count == 0 || ctx.Err() != nil {
+			ts.PushTaskResult(nil) // 全部任务执行完成后发送空结果，通知调度器退出
+			wlog.Info("the scheduler has been shut down", zap.Bool("timeout", ctx.Err() != nil))
 			return
 		}
 		wlog.Info(fmt.Sprintf("scheduler shutting down, waiting for %d tasks to finish", count))
@@ -202,6 +205,10 @@ func (ts *TaskScheduler) RemoveAll() {
 }
 
 func (a *client) Loop() {
+	if a.isClose {
+		time.Sleep(time.Second)
+		return
+	}
 	var (
 		taskEvent     *common.TaskEvent
 		scheduleAfter time.Duration
@@ -213,7 +220,8 @@ func (a *client) Loop() {
 
 	// 调度定时器
 	scheduleTimer = time.NewTimer(scheduleAfter)
-
+	defer scheduleTimer.Stop()
+	defer wlog.Warn("scheduler is shutdown now")
 	for {
 		select {
 		case taskEvent = <-a.scheduler.TaskEventChan:
@@ -221,8 +229,6 @@ func (a *client) Loop() {
 			a.handleTaskEvent(taskEvent)
 		case executeResult = <-a.scheduler.TaskExecuteResultChan:
 			if executeResult == nil {
-				// close signal
-				close(a.closeChan)
 				return
 			}
 			a.handleTaskResult(executeResult)
@@ -230,7 +236,6 @@ func (a *client) Loop() {
 		}
 
 		if a.isClose {
-			scheduleTimer.Stop()
 			return
 		}
 		// 每次触发事件后 重新计算下次调度任务时间

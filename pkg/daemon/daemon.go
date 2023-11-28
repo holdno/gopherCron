@@ -127,6 +127,8 @@ func (d *ProjectDaemon) RemoveProject(id int64) {
 	}
 
 	pd.isRemove = true
+	d.logger.Debug("start remove project, waiting for running task finish, max 10m", zap.Int64("project_id", id))
+
 	close(pd.removeChan)
 	d.m.Delete(id)
 
