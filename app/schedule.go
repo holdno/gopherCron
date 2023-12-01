@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/holdno/gocommons/selection"
@@ -674,12 +675,16 @@ func (a *app) CheckTaskIsRunning(projectID int64, taskID string) ([]common.TaskR
 		return nil, nil
 	}
 	var result []common.TaskRunningInfo
-
+	kv := resp.Kvs[0]
+	var runningInfo common.TaskRunningInfo
+	if err = json.Unmarshal(kv.Value, &runningInfo); err != nil {
+		return nil, err
+	}
 	checkFuncV2 := func(stream *CenterClient) (bool, error) {
 		ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
 		defer cancel()
 
-		_, err := stream.SendEvent(ctx, &cronpb.SendEventRequest{
+		resp, err := stream.SendEvent(ctx, &cronpb.SendEventRequest{
 			Region:    a.cfg.Micro.Region,
 			ProjectId: projectID,
 			Agent:     stream.addr,
@@ -699,7 +704,13 @@ func (a *app) CheckTaskIsRunning(projectID int64, taskID string) ([]common.TaskR
 			return false, err
 		}
 
-		return true, nil
+		if resp.GetCheckRunningReply() == nil {
+			wlog.Error("get unexcept event response", zap.String("request", cronpb.EventType_EVENT_CHECK_RUNNING_REQUEST.String()),
+				zap.String("response", resp.Type.String()), zap.String("raw", resp.String()))
+			return false, nil
+		}
+
+		return resp.GetCheckRunningReply().Result, nil
 	}
 
 	checkFunc := func(agent *AgentClient) (bool, error) {
@@ -715,11 +726,6 @@ func (a *app) CheckTaskIsRunning(projectID int64, taskID string) ([]common.TaskR
 		return resp.Result, nil
 	}
 
-	kv := resp.Kvs[0]
-	var runningInfo common.TaskRunningInfo
-	if err = json.Unmarshal(kv.Value, &runningInfo); err != nil {
-		return nil, err
-	}
 	streams, err := a.FindAgentsV2(a.cfg.Micro.Region, projectID)
 	if err != nil {
 		return nil, err
@@ -731,12 +737,16 @@ func (a *app) CheckTaskIsRunning(projectID int64, taskID string) ([]common.TaskR
 			}
 		}()
 		for _, stream := range streams {
-			exist, err := checkFuncV2(stream)
-			if err != nil {
-				return nil, err
-			}
-			if exist {
-				result = append(result, runningInfo)
+			// stream.addr 携带port
+			if strings.Contains(stream.addr, runningInfo.AgentIP) {
+				exist, err := checkFuncV2(stream)
+				if err != nil {
+					return nil, err
+				}
+				if exist {
+					result = append(result, runningInfo)
+				}
+				break
 			}
 		}
 	} else {
@@ -751,12 +761,15 @@ func (a *app) CheckTaskIsRunning(projectID int64, taskID string) ([]common.TaskR
 			}
 		}()
 		for _, agent := range agentList {
-			exist, err := checkFunc(agent)
-			if err != nil {
-				return nil, err
-			}
-			if exist {
-				result = append(result, runningInfo)
+			if strings.Contains(agent.addr, runningInfo.AgentIP) {
+				exist, err := checkFunc(agent)
+				if err != nil {
+					return nil, err
+				}
+				if exist {
+					result = append(result, runningInfo)
+				}
+				break
 			}
 		}
 	}
