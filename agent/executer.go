@@ -95,7 +95,7 @@ func execute(ctx context.Context, shell, command string, logger wlog.Logger) (*s
 
 	wait := handleRealTimeResult(ctx, output, logger, stdoutPipe, stderrPipe)
 
-	if err := cmd.Wait(); err != nil {
+	if err = cmd.Wait(); err != nil {
 		ctxErr := ctx.Err()
 		var errMsg string
 		if cmd.ProcessState.ExitCode() == -1 {
