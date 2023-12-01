@@ -213,11 +213,9 @@ func (a *client) Loop() {
 		taskEvent     *common.TaskEvent
 		scheduleAfter time.Duration
 		scheduleTimer *time.Timer
-		executeResult *common.TaskExecuteResult
 	)
 
 	scheduleAfter = a.TrySchedule()
-
 	// 调度定时器
 	scheduleTimer = time.NewTimer(scheduleAfter)
 	defer scheduleTimer.Stop()
@@ -227,7 +225,7 @@ func (a *client) Loop() {
 		case taskEvent = <-a.scheduler.TaskEventChan:
 			// 对内存中的任务进行增删改查
 			a.handleTaskEvent(taskEvent)
-		case executeResult = <-a.scheduler.TaskExecuteResultChan:
+		case executeResult := <-a.scheduler.TaskExecuteResultChan:
 			if executeResult == nil {
 				return
 			}
@@ -238,6 +236,7 @@ func (a *client) Loop() {
 		if a.isClose {
 			return
 		}
+
 		// 每次触发事件后 重新计算下次调度任务时间
 		scheduleAfter = a.TrySchedule()
 		scheduleTimer.Reset(scheduleAfter)
@@ -617,7 +616,7 @@ func reportTaskResult(a *client, taskExecuteInfo *common.TaskExecutingInfo, plan
 
 // 处理任务结果
 func (a *client) handleTaskResult(result *common.TaskExecuteResult) {
-	err := utils.RetryFunc(3, func() error {
+	err := retry.Do(func() error {
 		if result.Err != "" {
 			return a.Warning(warning.NewTaskWarningData(warning.TaskWarning{
 				AgentIP:   a.GetIP(),
@@ -628,7 +627,7 @@ func (a *client) handleTaskResult(result *common.TaskExecuteResult) {
 			}))
 		}
 		return nil
-	})
+	}, retry.LastErrorOnly(true), retry.Attempts(3))
 
 	if err != nil {
 		a.logger.Error("task warning report error", zap.Error(err))

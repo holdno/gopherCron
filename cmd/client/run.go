@@ -10,6 +10,8 @@ import (
 	"github.com/holdno/gopherCron/config"
 	"github.com/holdno/gopherCron/pkg/warning"
 	"github.com/holdno/gopherCron/utils"
+	"github.com/spacegrower/watermelon/infra/wlog"
+	"go.uber.org/zap"
 )
 
 // 配置文件初始化
@@ -30,6 +32,7 @@ func Run(opts *SetupOptions) error {
 					Type:     warning.SERVICE_TYPE_AGENT,
 					Message:  fmt.Sprintf("agent %s got panic, %v", client.GetIP(), r),
 				}))
+				wlog.Error("client loop panic", zap.Any("panic", r))
 			}
 		}()
 		client.Loop()

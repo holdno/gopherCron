@@ -120,7 +120,8 @@ func execute(ctx context.Context, shell, command string, logger wlog.Logger) (*s
 // ExecuteTask 执行任务
 func (a *client) ExecuteTask(info *common.TaskExecutingInfo) *common.TaskExecuteResult {
 	result := &common.TaskExecuteResult{
-		StartTime: time.Now(),
+		StartTime:   time.Now(),
+		ExecuteInfo: info,
 	}
 	if info.CancelCtx.Err() != nil {
 		result.Err = info.CancelCtx.Err().Error()

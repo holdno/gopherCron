@@ -63,7 +63,7 @@ func (r *HttpReporter) Warning(data WarningData) error {
 				resp.StatusCode, string(body))
 		}
 		return nil
-	}, retry.Attempts(3), retry.MaxDelay(time.Second*3))
+	}, retry.Attempts(3), retry.MaxDelay(time.Second*3), retry.LastErrorOnly(true))
 
 	return err
 }
