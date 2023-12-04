@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -36,7 +37,7 @@ func handleRealTimeResult(ctx context.Context, output *strings.Builder, logOutpu
 				}
 			}
 
-			if s.Err() != nil && !errors.Is(s.Err(), io.EOF) {
+			if s.Err() != nil && !errors.Is(s.Err(), io.EOF) && !errors.Is(s.Err(), os.ErrClosed) {
 				logOutput.Error("real-time scanner finished with error", zap.Error(s.Err()))
 			}
 		})
