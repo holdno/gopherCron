@@ -42,6 +42,24 @@ type NodeMeta struct {
 	register.NodeMeta
 }
 
+func (n NodeMeta) Equal(o any) bool {
+	ov, ok := o.(NodeMeta)
+	if !ok {
+		return false
+	}
+
+	return n.Host == ov.Host &&
+		n.OrgID == ov.OrgID &&
+		n.Port == ov.Port &&
+		n.Region == ov.Region &&
+		n.System == ov.System &&
+		n.Weight == ov.Weight &&
+		n.RegisterTime == ov.RegisterTime &&
+		n.CenterServiceEndpoint == ov.CenterServiceEndpoint &&
+		n.CenterServiceRegion == ov.CenterServiceRegion &&
+		n.ServiceName == ov.ServiceName
+}
+
 func (n NodeMeta) Weigth() int32 {
 	return n.Weight
 }

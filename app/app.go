@@ -1262,7 +1262,7 @@ func (a *app) ReloadWorkerConfig(projectID int64, host string) error {
 		dialAddress := item.attr.CenterServiceEndpoint
 		ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
 		defer cancel()
-		cc, err := a.getCenterConnect(ctx, item.attr.Region, dialAddress)
+		cc, err := a.getCenterConnect(ctx, item.attr.CenterServiceRegion, dialAddress)
 		if err != nil {
 			return fmt.Errorf("failed to connect agent stream %s, error: %s", dialAddress, err.Error())
 		}

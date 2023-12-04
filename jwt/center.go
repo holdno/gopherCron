@@ -71,7 +71,7 @@ func CenterAuthMiddleware(legacyMode bool, publicKey []byte) func(ctx context.Co
 func GetProjectAuthenticator(ctx context.Context) interface{ Allow(int64) bool } {
 	author := middleware.GetFrom(ctx, agentProjectIdsKey{})
 	if author != nil {
-		return author.(*ProjectAuthenticator)
+		return author.(interface{ Allow(int64) bool })
 	}
 	return nil
 }
