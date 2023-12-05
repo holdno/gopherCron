@@ -8,6 +8,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/avast/retry-go/v4"
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/config"
 	"github.com/holdno/gopherCron/jwt"
@@ -95,21 +96,27 @@ func (a *client) SetupMicroService() *winfra.Srv[infra.NodeMetaRemote] {
 func (a *client) MustSetupRemoteRegisterV2() wregister.ServiceRegister[infra.NodeMetaRemote] {
 	genMetadata := func(ctx context.Context, cc *grpc.ClientConn, reqMethod string) context.Context {
 		md := metadata.NewOutgoingContext(ctx, metadata.New(map[string]string{
-			common.GOPHERCRON_AGENT_IP_MD_KEY:   a.localip,
+			common.GOPHERCRON_AGENT_IP_MD_KEY:   a.GetIP(),
 			common.GOPHERCRON_AGENT_VERSION_KEY: protocol.GetVersion(),
 		}))
 		if reqMethod != cronpb.Center_Auth_FullMethodName {
-			token, err := a.authenticator.GetToken(ctx, a.centerSrv)
-			if err != nil {
-				a.metrics.SystemErrInc("agent_authenticator_error")
-				wlog.Error("failed to sign token", zap.Error(err))
-			}
+			var token string
+			retry.Do(func() error {
+				var err error
+				token, err = a.authenticator.GetToken(ctx, a.centerSrv)
+				if err != nil {
+					a.metrics.SystemErrInc("agent_authenticator_error")
+					wlog.Error("failed to sign token", zap.Error(err))
+				}
+				return err
+			}, retry.Attempts(3), retry.Delay(time.Second), retry.LastErrorOnly(true))
+
 			md = metadata.AppendToOutgoingContext(md, common.GOPHERCRON_AGENT_AUTH_KEY, token)
 		}
 		return md
 	}
 
-	r, err := register.NewRemoteRegisterV2(a.localip,
+	r, err := register.NewRemoteRegisterV2(a.GetIP(),
 		func() (*register.CenterClient, error) { // 建立到center服务的连接
 			if a.centerSrv.Cc != nil { // 每次建立前都尝试关闭一次旧连接，确保不会泄露
 				if a.centerSrv.Cc.GetState() == connectivity.Ready { // 兜底防止错误调用

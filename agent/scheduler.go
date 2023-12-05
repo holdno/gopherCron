@@ -476,6 +476,23 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 	return errSignal.WaitOne()
 }
 
+// getSchedulerLatency 避免分布式集群上锁偏斜 (每台机器的时钟可能不是特别的准确 导致某一台机器总能抢到锁)
+// v2.4.5版本开始结合节点权重做一些策略，权重更大的节点，等待时间可能更小，从而做到权重大的节点调度机会更高
+// v2.4.5节点的权重配置，取值范围在0-100之间，超出则取边界值
+func getSchedulerLatency(w int32, runningCount int32) time.Duration {
+	if w > 100 {
+		w = 100
+	} else if w < 0 {
+		w = 0
+	}
+
+	set := runningCount * 20
+	if set > 200 {
+		set = 200
+	}
+	return time.Duration(rand.Int31n(200+(100-w)*2))*time.Millisecond + time.Duration(set)*time.Millisecond
+}
+
 func tryLockTaskForExec(a *client, taskExecuteInfo *common.TaskExecutingInfo, taskResultWriter interface{ WriteString(s string) }) error {
 	// 远程加锁，加锁失败后如果任务还在运行中，则进行重试，如果重试失败，则强行结束任务
 	var (
@@ -489,14 +506,13 @@ func tryLockTaskForExec(a *client, taskExecuteInfo *common.TaskExecutingInfo, ta
 			taskExecuteInfo.CancelFunc()
 		}()
 		// 避免分布式集群上锁偏斜 (每台机器的时钟可能不是特别的准确 导致某一台机器总能抢到锁)
-		time.Sleep(time.Duration(rand.Intn(300)) * time.Millisecond)
+		time.Sleep(getSchedulerLatency(a.cfg.Micro.Weigth, int32(a.scheduler.TaskExecutingCount())))
 		for {
 			if taskExecuteInfo.CancelCtx.Err() != nil {
 				return
 			}
 			realtimeError := make(chan error)
 			err := tryLockUntilCtxIsDone(a.GetCenterSrv(), taskExecuteInfo, realtimeError)
-			tryTimes++
 
 			if err != nil {
 				a.logger.Warn("failed to get task execute lock",
@@ -505,7 +521,7 @@ func tryLockTaskForExec(a *client, taskExecuteInfo *common.TaskExecutingInfo, ta
 					zap.String("task_name", taskExecuteInfo.Task.Name),
 					zap.Error(err))
 				if gerr, _ := status.FromError(err); gerr.Code() == codes.Aborted || gerr.Code() == codes.Unauthenticated ||
-					tryTimes == 5 {
+					tryTimes == 3 {
 					first := false
 					once.Do(func() {
 						first = true
@@ -519,6 +535,7 @@ func tryLockTaskForExec(a *client, taskExecuteInfo *common.TaskExecutingInfo, ta
 					return
 				}
 				time.Sleep(time.Second * time.Duration(tryTimes))
+				tryTimes++
 				continue
 			}
 
@@ -629,8 +646,6 @@ func (ts *TaskScheduler) PushEvent(event *common.TaskEvent) {
 	ts.TaskEventChan <- event
 }
 
-var index = 1
-
 func tryLockUntilCtxIsDone(cli cronpb.CenterClient, execInfo *common.TaskExecutingInfo, disconnectChan chan error) error {
 	locker, err := cli.TryLock(execInfo.CancelCtx)
 	if err != nil {
@@ -651,14 +666,6 @@ func tryLockUntilCtxIsDone(cli cronpb.CenterClient, execInfo *common.TaskExecuti
 
 	if _, err = locker.Recv(); err != nil {
 		return err
-	}
-
-	index++
-	if index == 3 {
-		go func() {
-			time.Sleep(time.Second)
-			locker.CloseSend()
-		}()
 	}
 
 	go func() {
