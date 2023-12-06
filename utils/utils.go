@@ -181,13 +181,21 @@ RETRY:
 	return nil
 }
 
-func DebugMode() bool {
-	return os.Getenv("GOPHERENV") == "debug"
-}
+var DebugMode = sync.OnceValue[bool](func() bool {
+	newEnv := os.Getenv("GOPHERCRON_ENV")
+	if newEnv == "" {
+		return os.Getenv("GOPHERENV") == "debug"
+	}
+	return newEnv == "debug"
+})
 
-func ReleaseMode() bool {
-	return os.Getenv("GOPHERENV") == "release"
-}
+var ReleaseMode = sync.OnceValue[bool](func() bool {
+	newEnv := os.Getenv("GOPHERCRON_ENV")
+	if newEnv == "" {
+		return os.Getenv("GOPHERENV") == "release"
+	}
+	return newEnv == "release"
+})
 
 func PrintError(err error) string {
 	if err == nil || IsNil(err) {
