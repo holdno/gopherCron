@@ -335,7 +335,18 @@ Here:
 			for _, info := range multiService.Agents {
 				for _, v := range info.Systems {
 					// Dispatch 依赖 gRPC stream, 所以需要先 SaveStream 再 DispatchAgentJob
-					if err := s.app.DispatchAgentJob(v); err != nil {
+					if err := s.app.DispatchAgentJob(v, func(taskRaw []byte) error {
+						if err := req.Send(&cronpb.Event{
+							Version:   common.VERSION_TYPE_V1,
+							Type:      common.REMOTE_EVENT_PUT,
+							Value:     taskRaw,
+							EventTime: time.Now().Unix(),
+						}); err != nil {
+							wlog.Info("failed to dispatch agent job v1", zap.String("host", fmt.Sprintf("%s:%d", info.Host, info.Port)), zap.Error(err))
+							return err
+						}
+						return nil
+					}); err != nil {
 						return err
 					}
 				}
@@ -370,149 +381,218 @@ Here:
 	return nil
 }
 
-func (s *cronRpc) RegisterAgentV2(req cronpb.Center_RegisterAgentV2Server) error {
-	author := jwt.GetProjectAuthenticator(req.Context())
+// watchAgentResponse watch agent register request or event handle response
+func watchAgentResponse(ctx context.Context, receive func() (*cronpb.ClientEvent, error), callback func(*cronpb.ClientEvent)) <-chan *cronpb.RegisterInfo {
 	newRegisterInfo := make(chan *cronpb.RegisterInfo)
 	go safe.Run(func() {
+		defer close(newRegisterInfo)
 		for {
 			select {
-			case <-req.Context().Done():
+			case <-ctx.Done():
 				return
 			default:
-				info, err := req.Recv()
+				info, err := receive()
 				if err != nil {
-					close(newRegisterInfo)
 					return
 				}
 
 				if info.Type == cronpb.EventType_EVENT_REGISTER_REQUEST {
 					newRegisterInfo <- info.GetRegisterInfo()
 				} else {
-					s.app.StreamManagerV2().RecvStreamResponse(info)
+					callback(info)
 				}
 			}
 		}
 	})
+	return newRegisterInfo
+}
 
-	agentIP, _ := middleware.GetAgentIP(req.Context())
+// buildAgentRegister 构建agent的注册器与反注册器
+func (s *cronRpc) buildAgentRegister(ctx context.Context) (registerFunc func(req *cronpb.RegisterInfo, next func([]infra.NodeMeta) error) error,
+	deRegisterFunc func(next func([]infra.NodeMeta))) {
+	author := jwt.GetProjectAuthenticator(ctx)
+	agentIP, _ := middleware.GetAgentIP(ctx)
 	mustGetHostIP := func() string {
 		ip, _ := wutils.GetHostIP()
 		return ip
 	}
 	currentServiceAddr := strings.ReplaceAll(s.getCurrentRegisterAddrs()[0].String(), "[::]", mustGetHostIP())
 
-	ctx, cancel := context.WithCancel(req.Context())
-	defer cancel()
-	r := infra.MustSetupEtcdRegister()
-	var registerStream []infra.NodeMeta
-	defer func() {
+	r := infra.MustSetupEtcdRegister() // 获取注册中心
+	var totalRegisteredStreams []infra.NodeMeta
+
+	deRegisterFunc = func(next func([]infra.NodeMeta)) {
 		s.registerMetricsAdd(-1, agentIP)
 		r.DeRegister()
-		for _, meta := range registerStream {
-			s.app.StreamManagerV2().RemoveStream(meta)
-		}
-	}()
-
-	heartbeatOnce := sync.Once{}
-Here:
-	for {
-		select {
-		case multiService := <-newRegisterInfo:
-			if multiService == nil {
-				break Here
-			}
-
-			var registerStreamOnce []infra.NodeMeta
-
-			for _, info := range multiService.Agents {
-				var methods []register.GrpcMethodInfo
-				for _, v := range info.Methods {
-					methods = append(methods, register.GrpcMethodInfo{
-						Name:           v.Name,
-						IsClientStream: v.IsClientStream,
-						IsServerStream: v.IsServerStream,
-					})
-				}
-
-				for _, v := range info.Systems {
-					if author != nil && !author.Allow(v) {
-						return status.Error(codes.Unauthenticated, fmt.Sprintf("registry: project id %d is unauthenticated, register failure", v))
-					}
-					meta := infra.NodeMeta{
-						NodeMeta: register.NodeMeta{
-							ServiceName: info.ServiceName,
-							GrpcMethods: methods,
-							Host:        info.Host,
-							Port:        int(info.Port),
-							Runtime:     info.Runtime,
-							Version:     info.Version,
-						},
-						CenterServiceEndpoint: currentServiceAddr,
-						CenterServiceRegion:   s.app.GetConfig().Micro.Region,
-						OrgID:                 info.OrgID,
-						Region:                info.Region,
-						Weight:                info.Weight,
-						System:                v,
-						Tags:                  info.Tags,
-						RegisterTime:          time.Now().UnixNano(),
-					}
-					if err := r.Append(meta); err != nil {
-						return err
-					}
-					registerStreamOnce = append(registerStreamOnce, meta)
-				}
-			}
-
-			s.registerMetricsAdd(1, agentIP)
-			if err := r.Register(); err != nil {
-				wlog.Error("failed to register service", zap.Error(err), zap.String("method", "Register"))
-				s.app.Metrics().CustomInc("register_error", s.app.GetIP(), err.Error())
-				return status.Error(codes.Internal, "failed to register service")
-			}
-
-			for _, meta := range registerStreamOnce {
-				s.app.StreamManagerV2().SaveStream(meta, req, cancel)
-			}
-
-			registerStream = append(registerStream, registerStreamOnce...)
-
-			for _, info := range multiService.Agents {
-				for _, v := range info.Systems {
-					// Dispatch 依赖 gRPC stream, 所以需要先 SaveStream 再 DispatchAgentJob
-					if err := s.app.DispatchAgentJob(v); err != nil {
-						return err
-					}
-				}
-			}
-
-			heartbeatOnce.Do(func() { // 一个stream仅需要建立一个长连接
-				go func() {
-					ticker := time.NewTicker(time.Second * 10)
-					defer ticker.Stop()
-					for {
-						select {
-						case <-ctx.Done():
-							return
-						case <-ticker.C:
-							s.eventsMetricsInc()
-							if err := req.Send(&cronpb.ServiceEvent{
-								Id:        utils.GetStrID(),
-								Type:      cronpb.EventType_EVENT_REGISTER_HEARTBEAT_PING,
-								EventTime: time.Now().Unix(),
-							}); err != nil {
-								wlog.Error("failed to ")
-								cancel()
-								return
-							}
-						}
-					}
-				}()
-			})
-
-		case <-ctx.Done():
-			break Here
-		}
+		next(totalRegisteredStreams)
 	}
 
-	return nil
+	registerFunc = func(multiService *cronpb.RegisterInfo, next func([]infra.NodeMeta) error) error {
+		s.registerMetricsAdd(1, agentIP)
+		var registerStreamOnce []infra.NodeMeta
+		for _, info := range multiService.Agents {
+			var methods []register.GrpcMethodInfo
+			for _, v := range info.Methods {
+				methods = append(methods, register.GrpcMethodInfo{
+					Name:           v.Name,
+					IsClientStream: v.IsClientStream,
+					IsServerStream: v.IsServerStream,
+				})
+			}
+
+			for _, v := range info.Systems { // 对应 projectid
+				if author != nil && !author.Allow(v) {
+					return status.Error(codes.Unauthenticated, fmt.Sprintf("registry: project id %d is unauthenticated, register failure", v))
+				}
+				meta := infra.NodeMeta{
+					NodeMeta: register.NodeMeta{
+						ServiceName: info.ServiceName,
+						GrpcMethods: methods,
+						Host:        info.Host,
+						Port:        int(info.Port),
+						Runtime:     info.Runtime,
+						Version:     info.Version,
+					},
+					CenterServiceEndpoint: currentServiceAddr,
+					CenterServiceRegion:   s.app.GetConfig().Micro.Region,
+					OrgID:                 info.OrgID,
+					Region:                info.Region,
+					Weight:                info.Weight,
+					System:                v,
+					Tags:                  info.Tags,
+					RegisterTime:          time.Now().UnixNano(),
+				}
+				if err := r.Append(meta); err != nil {
+					return err
+				}
+				registerStreamOnce = append(registerStreamOnce, meta)
+			}
+		}
+
+		if err := r.Register(); err != nil {
+			wlog.Error("failed to register service", zap.Error(err), zap.String("method", "Register"))
+			s.app.Metrics().CustomInc("register_error", s.app.GetIP(), err.Error())
+			return status.Error(codes.Internal, "failed to register service")
+		}
+
+		totalRegisteredStreams = append(totalRegisteredStreams, registerStreamOnce...)
+		return next(registerStreamOnce)
+	}
+
+	return registerFunc, deRegisterFunc
+}
+
+type dispatcher func(meta infra.NodeMeta) app.JobDispatcher
+
+func buildDispatchJobsV2Handler(sendEvent func(ctx context.Context, e *cronpb.ServiceEvent) error) dispatcher {
+	return func(meta infra.NodeMeta) app.JobDispatcher {
+		return func(taskRaw []byte) error {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
+			defer cancel()
+			if err := sendEvent(ctx, &cronpb.ServiceEvent{
+				Id:        utils.GetStrID(),
+				Type:      cronpb.EventType_EVENT_REGISTER_REPLY,
+				EventTime: time.Now().Unix(),
+				Event: &cronpb.ServiceEvent_RegisterReply{
+					RegisterReply: &cronpb.Event{
+						Version:   common.VERSION_TYPE_V1,
+						Type:      common.REMOTE_EVENT_PUT,
+						Value:     taskRaw,
+						EventTime: time.Now().Unix(),
+					},
+				},
+			}); err != nil {
+				wlog.Info("failed to dispatch agent job v2", zap.String("host", fmt.Sprintf("%s:%d", meta.Host, meta.Port)), zap.Error(err))
+				return err
+			}
+			return nil
+		}
+	}
+}
+
+func (s *cronRpc) getHeartbeatKeeper(ctx context.Context, req interface {
+	Send(*cronpb.ServiceEvent) error
+}, onError func()) func() {
+	var do sync.Once
+	return func() {
+		do.Do(func() {
+			go func() {
+				ticker := time.NewTicker(time.Second * 10)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					case <-ticker.C:
+						s.eventsMetricsInc()
+						if err := req.Send(&cronpb.ServiceEvent{
+							Id:        utils.GetStrID(),
+							Type:      cronpb.EventType_EVENT_REGISTER_HEARTBEAT_PING,
+							EventTime: time.Now().Unix(),
+						}); err != nil {
+							wlog.Error("failed to send heartbeat request", zap.Error(err))
+							onError()
+							return
+						}
+					}
+				}
+			}()
+		})
+	}
+}
+
+func (s *cronRpc) RegisterAgentV2(req cronpb.Center_RegisterAgentV2Server) error {
+	// 实现center与agent间的通信，复用stream模拟unary调用
+	newRegisterInfoChannel := watchAgentResponse(req.Context(), req.Recv, s.app.StreamManagerV2().RecvStreamResponse)
+	// 获取注册与反注册逻辑方法
+	register, deRegister := s.buildAgentRegister(req.Context())
+	// 链接关闭后调用反注册
+	defer deRegister(func(allRegisteredMetas []infra.NodeMeta) {
+		// 反注册后，需要将stream从内存中剔除
+		for _, meta := range allRegisteredMetas {
+			s.app.StreamManagerV2().RemoveStream(meta)
+		}
+	})
+
+	// 注册成功后像agent下发任务的处理方法
+	dispatchHandler := buildDispatchJobsV2Handler(func(ctx context.Context, e *cronpb.ServiceEvent) error {
+		_, err := s.app.StreamManagerV2().SendEventWaitResponse(ctx, req, e)
+		return err
+	})
+
+	ctx, cancel := context.WithCancel(req.Context())
+	defer cancel()
+	heartbeatAsync := s.getHeartbeatKeeper(ctx, req, func() {
+		// heartbeat error 关闭连接
+		cancel()
+	})
+
+	for {
+		select {
+		case multiService := <-newRegisterInfoChannel:
+			if multiService == nil {
+				return nil
+			}
+			// 将agent信息进行注册
+			err := register(multiService, func(nm []infra.NodeMeta) error {
+				// 完成注册后将stream缓存至内存中，方便后续中心与agent通信时使用
+				for _, meta := range nm {
+					s.app.StreamManagerV2().SaveStream(meta, req, cancel)
+					// 下发对应项目的任务列表
+					if err := s.app.DispatchAgentJob(meta.System, dispatchHandler(meta)); err != nil {
+						return err
+					}
+				}
+				return nil
+			})
+			if err != nil {
+				return err
+			}
+
+			heartbeatAsync()
+
+		case <-ctx.Done():
+			return nil
+		}
+	}
 }

@@ -164,23 +164,29 @@ func (s *remoteRegistryV2) register() error {
 		close = cli.CloseSend
 	}
 
-	errHandler := func(err error) error {
-		s.log.Error("recv with error", zap.Error(err))
+	errHandler := func(err error) {
+		s.log.Error("agent handle event with error", zap.Error(err))
 		time.Sleep(time.Second)
 		if gerr, ok := status.FromError(err); ok && gerr.Code() == codes.Canceled {
 			s.log.Warn("retry to reconnect", zap.String("status", gerr.Code().String()))
 			if err = s.reConnect(); err != nil {
 				s.log.Error("failed to reconnect registry", zap.Error(err))
-				return err
 			}
 		}
 		s.reRegister()
-		return nil
 	}
 
 	go safe.Run(func() {
+		var (
+			err   error
+			resp  *cronpb.ServiceEvent
+			reply *cronpb.ClientEvent
+		)
 		defer func() {
 			close()
+			if err != nil {
+				errHandler(err)
+			}
 			cancel()
 		}()
 		for {
@@ -189,26 +195,21 @@ func (s *remoteRegistryV2) register() error {
 				s.log.Warn("register receiver is down, context done")
 				return
 			default:
-				resp, err := receive()
-				if err != nil {
-					if err = errHandler(err); err != nil {
-						continue
-					}
+				if resp, err = receive(); err != nil {
 					return
 				}
 
 				s.log.Debug("receive event", zap.String("event", resp.Type.String()), zap.Any("value", resp.GetEvent()))
 
-				reply, err := s.eventHandler(ctx, resp)
-				if err != nil {
-					if err = errHandler(err); err != nil {
-						continue
-					}
+				if reply, err = s.eventHandler(ctx, resp); err != nil {
+					return
 				}
 
 				if reply != nil {
 					if err = send(reply); err != nil {
-						s.log.Error("failed reply center request", zap.Error(err), zap.String("event", resp.Type.String()), zap.String("value", resp.String()))
+						s.log.Error("failed reply center request", zap.Error(err), zap.String("event", resp.Type.String()),
+							zap.String("value", resp.String()))
+						return
 					}
 				}
 			}
