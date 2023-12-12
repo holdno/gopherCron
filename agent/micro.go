@@ -300,7 +300,7 @@ func (a *Authenticator) getToken(ctx context.Context, driver cronpb.CenterClient
 }
 
 func (a *Authenticator) GetToken(ctx context.Context, driver cronpb.CenterClient) (string, error) {
-	if !a.expTime.IsZero() && a.expTime.After(time.Now().Add(-time.Minute)) {
+	if !a.expTime.IsZero() && a.expTime.After(time.Now().Add(time.Minute)) {
 		return a.token, nil
 	}
 
