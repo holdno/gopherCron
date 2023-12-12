@@ -147,7 +147,7 @@ type App interface {
 	// registry
 	StreamManager() *streamManager[*cronpb.Event]
 	StreamManagerV2() *streamManager[*cronpb.ServiceEvent]
-	DispatchAgentJob(projectID int64) error
+	DispatchAgentJob(projectID int64, dispatcher JobDispatcher) error
 	RemoveClientRegister(client string) error
 	HandleCenterEvent(event *cronpb.ServiceEvent) error
 

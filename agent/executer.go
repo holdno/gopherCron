@@ -6,7 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/spacegrower/watermelon/infra/wlog"
@@ -14,58 +17,57 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/holdno/gopherCron/common"
-	"github.com/holdno/gopherCron/utils"
 )
 
 // 处理任务stdio到本地日志和远端日志(strings.Builder)
-func handleRealTimeResult(ctx context.Context, output *strings.Builder, logOutput wlog.Logger, stdoutPipe, stderrPipe io.Reader) *utils.WaitGroupWithTimeout {
-	ctx, cancel := context.WithCancel(ctx)
-	wait := utils.NewTimeoutWaitGroup(ctx, cancel)
-	newScanner := func(ctx context.Context, r io.Reader) chan string {
-		wait.Add(1)
+func handleRealTimeResult(ctx context.Context, output *strings.Builder, logOutput wlog.Logger, stdoutPipe, stderrPipe io.Reader) *sync.WaitGroup {
+	wait := &sync.WaitGroup{}
+	offCounter := &atomic.Bool{}
+	newScanner := func(ctx context.Context, r io.Reader, msgChan chan string, logger func(msg string, fields ...zap.Field)) {
 		s := bufio.NewScanner(r)
-		msgChan := make(chan string, 10)
 		go safe.Run(func() {
-			defer close(msgChan)
-			defer wait.Done()
+			defer func() {
+				if !offCounter.CompareAndSwap(false, true) {
+					close(msgChan)
+				}
+			}()
 			for s.Scan() {
+				line := s.Text()
+				logger(line)
 				select {
 				case <-ctx.Done():
 					return
-				case msgChan <- s.Text():
+				case msgChan <- line:
 				}
 			}
 
-			if s.Err() != nil && !errors.Is(s.Err(), io.EOF) {
+			if s.Err() != nil && !errors.Is(s.Err(), io.EOF) && !errors.Is(s.Err(), os.ErrClosed) {
 				logOutput.Error("real-time scanner finished with error", zap.Error(s.Err()))
 			}
+			return
 		})
-		return msgChan
 	}
 
-	stdout := newScanner(ctx, stdoutPipe)
-	stderr := newScanner(ctx, stderrPipe)
+	msgChan := make(chan string, 10)
+	newScanner(ctx, stdoutPipe, msgChan, logOutput.With(zap.String("source", "stdout")).Info)
+	newScanner(ctx, stderrPipe, msgChan, logOutput.With(zap.String("source", "stderr")).Error)
+	wait.Add(1)
 	go safe.Run(func() {
 		var (
-			line      string
-			ok        bool
-			logStdout = logOutput.With(zap.String("source", "stdout"))
-			logStderr = logOutput.With(zap.String("source", "stderr"))
-			writeLog  func(msg string, fields ...zap.Field)
+			line string
+			ok   bool
 		)
+		defer wait.Done()
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case line, ok = <-stdout:
-				writeLog = logStdout.Info
-			case line, ok = <-stderr:
-				writeLog = logStderr.Error
-			}
-			if ok {
+			case line, ok = <-msgChan:
+				if !ok {
+					return
+				}
 				output.WriteString(line)
 				output.WriteString("\n")
-				writeLog(line)
 			}
 		}
 	})
@@ -88,14 +90,17 @@ func execute(ctx context.Context, shell, command string, logger wlog.Logger) (*s
 	//	goto FinishWithError
 	//}
 
+	wait := handleRealTimeResult(ctx, output, logger, stdoutPipe, stderrPipe)
+
 	// 执行命令
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
 
-	wait := handleRealTimeResult(ctx, output, logger, stdoutPipe, stderrPipe)
+	// cmd.Wait 会释放掉io，所以需要先等io相关动作结束后 再调用 cmd.Wait
+	wait.Wait() // wait io coping
 
-	if err = cmd.Wait(); err != nil {
+	if err = cmd.Wait(); err != nil { // cmd.Wait will release io
 		ctxErr := ctx.Err()
 		var errMsg string
 		if cmd.ProcessState.ExitCode() == -1 {
@@ -112,8 +117,6 @@ func execute(ctx context.Context, shell, command string, logger wlog.Logger) (*s
 
 		err = fmt.Errorf("%s, exit code: %d", errMsg, cmd.ProcessState.ExitCode())
 	}
-
-	wait.Wait(time.Second * 5)
 	return output, err
 }
 

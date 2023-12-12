@@ -143,9 +143,17 @@ func (a *app) RemoveClientRegister(client string) error {
 	return nil
 }
 
-func (a *app) DispatchAgentJob(projectID int64) error {
+type JobDispatcher func(taskRaw []byte) error
+
+func (a *app) DispatchAgentJob(projectID int64, dispatcher JobDispatcher) error {
 	mtimer := a.metrics.CustomHistogramSet("dispatch_agent_jobs")
 	defer mtimer.ObserveDuration()
+
+	if dispatcher == nil {
+		wlog.Error("failed to get grpc streams", zap.Int64("project_id", projectID))
+		return fmt.Errorf("failed to dispatch agent jobs, empty streams")
+	}
+
 	preKey := common.BuildKey(projectID, "")
 	var (
 		err     error
@@ -168,72 +176,22 @@ func (a *app) DispatchAgentJob(projectID int64) error {
 		return err
 	}
 
-	var (
-		streamsV1 []*Stream[*cronpb.Event]
-		streamsV2 []*Stream[*cronpb.ServiceEvent]
-	)
-	streams := a.StreamManager().GetStreams(projectID, cronpb.Agent_ServiceDesc.ServiceName)
-	if streams != nil {
-		for _, v := range streams {
-			streamsV1 = append(streamsV1, v)
-		}
-	} else {
-		streams := a.StreamManagerV2().GetStreams(projectID, cronpb.Agent_ServiceDesc.ServiceName)
-		if streams == nil {
-			return fmt.Errorf("failed to get grpc streams")
-		}
-		for _, v := range streams {
-			streamsV2 = append(streamsV2, v)
-		}
-	}
-
-	wlog.Info("dispatch agent job", zap.Int64("project_id", projectID), zap.Int("streams", len(streamsV1)+len(streamsV2)), zap.Int("tasks", len(getResp.Kvs)))
+	var tasks [][]byte
 	for _, kvPair := range getResp.Kvs {
-		// if task, err := common.Unmarshal(kvPair.Value); err == nil {
-		// 	continue
-		// }
-		// taskEvent = common.BuildTaskEvent(common.TASK_EVENT_SAVE, task)
-		// 将所有任务加入调度队列
-		// a.scheduler.PushEvent(taskEvent)
 		if common.IsStatusKey(string(kvPair.Key)) || common.IsAckKey(string(kvPair.Key)) {
 			continue
 		}
-		for _, v := range streamsV1 {
-			if err = v.stream.Send(&cronpb.Event{
-				Version:   common.VERSION_TYPE_V1,
-				Type:      common.REMOTE_EVENT_PUT,
-				Value:     kvPair.Value,
-				EventTime: time.Now().Unix(),
-			}); err != nil {
-				wlog.Info("failed to dispatch agent job", zap.String("host", fmt.Sprintf("%s:%d", v.Host, v.Port)), zap.Error(err))
-				return err
-			}
-		}
-		for _, v := range streamsV2 {
-			var err error
-			func() {
-				ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
-				defer cancel()
-				_, err = a.StreamManagerV2().SendEventWaitResponse(ctx, v, &cronpb.ServiceEvent{
-					Id:        utils.GetStrID(),
-					Type:      cronpb.EventType_EVENT_REGISTER_REPLY,
-					EventTime: time.Now().Unix(),
-					Event: &cronpb.ServiceEvent_RegisterReply{
-						RegisterReply: &cronpb.Event{
-							Version:   common.VERSION_TYPE_V1,
-							Type:      common.REMOTE_EVENT_PUT,
-							Value:     kvPair.Value,
-							EventTime: time.Now().Unix(),
-						},
-					},
-				})
-			}()
-			if err != nil {
-				wlog.Info("failed to dispatch agent job", zap.String("host", fmt.Sprintf("%s:%d", v.Host, v.Port)), zap.Error(err))
-				return err
-			}
+		tasks = append(tasks, kvPair.Value)
+	}
+
+	wlog.Info("dispatch agent job", zap.Int64("project_id", projectID), zap.Int("tasks", len(tasks)))
+
+	for _, taskRaw := range tasks {
+		if err := dispatcher(taskRaw); err != nil {
+			return err
 		}
 	}
+
 	return nil
 }
 

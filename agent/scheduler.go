@@ -403,7 +403,7 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 
 		if plan.Task.Noseize != common.TASK_EXECUTE_NOSEIZE {
 			// 远程加锁，加锁失败后如果任务还在运行中，则进行重试，如果重试失败，则强行结束任务
-			unlockFunc, err := tryLockTaskForExec(a, taskExecuteInfo, cancelReason)
+			err := tryLockTaskForExec(a, taskExecuteInfo, cancelReason)
 			if err != nil {
 				grpcErr, _ := status.FromError(err)
 				if grpcErr.Code() != codes.Aborted {
@@ -425,17 +425,6 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 				errSignal.Send(err)
 				return
 			}
-
-			defer func() {
-				if unlockFunc != nil {
-					// 任务执行后锁最少保持5s
-					// 防止分布式部署下多台机器共同执行
-					if time.Since(taskExecuteInfo.RealTime).Seconds() < 5 {
-						time.Sleep(5*time.Second - time.Duration(time.Now().Sub(taskExecuteInfo.RealTime).Milliseconds()))
-					}
-					unlockFunc()
-				}
-			}()
 		}
 
 		a.scheduler.SetExecutingTask(plan.Task.SchedulerKey(), taskExecuteInfo)
@@ -487,7 +476,24 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 	return errSignal.WaitOne()
 }
 
-func tryLockTaskForExec(a *client, taskExecuteInfo *common.TaskExecutingInfo, taskResultWriter interface{ WriteString(s string) }) (unLockFunc func(), err error) {
+// getSchedulerLatency 避免分布式集群上锁偏斜 (每台机器的时钟可能不是特别的准确 导致某一台机器总能抢到锁)
+// v2.4.5版本开始结合节点权重做一些策略，权重更大的节点，等待时间可能更小，从而做到权重大的节点调度机会更高
+// v2.4.5节点的权重配置，取值范围在0-100之间，超出则取边界值
+func getSchedulerLatency(w int32, runningCount int32) time.Duration {
+	if w > 100 {
+		w = 100
+	} else if w < 0 {
+		w = 0
+	}
+
+	set := runningCount * 20
+	if set > 200 {
+		set = 200
+	}
+	return time.Duration(rand.Int31n(200+(100-w)*2))*time.Millisecond + time.Duration(set)*time.Millisecond
+}
+
+func tryLockTaskForExec(a *client, taskExecuteInfo *common.TaskExecutingInfo, taskResultWriter interface{ WriteString(s string) }) error {
 	// 远程加锁，加锁失败后如果任务还在运行中，则进行重试，如果重试失败，则强行结束任务
 	var (
 		once       sync.Once
@@ -495,19 +501,18 @@ func tryLockTaskForExec(a *client, taskExecuteInfo *common.TaskExecutingInfo, ta
 	)
 
 	go safe.Run(func() {
-		tryTimes := 0 // 初始化重试次数
-		realtimeError := make(chan error)
+		tryTimes := 0  // 初始化重试次数
 		defer func() { // 锁维持结束或失败意味着任务运行结束或者也不能再继续运行了
 			taskExecuteInfo.CancelFunc()
 		}()
 		// 避免分布式集群上锁偏斜 (每台机器的时钟可能不是特别的准确 导致某一台机器总能抢到锁)
-		time.Sleep(time.Duration(rand.Intn(300)) * time.Millisecond)
+		time.Sleep(getSchedulerLatency(a.cfg.Micro.Weigth, int32(a.scheduler.TaskExecutingCount())))
 		for {
 			if taskExecuteInfo.CancelCtx.Err() != nil {
 				return
 			}
-			unLockFunc, err = tryLock(a.GetCenterSrv(), taskExecuteInfo, realtimeError)
-			tryTimes++
+			realtimeError := make(chan error)
+			err := tryLockUntilCtxIsDone(a.GetCenterSrv(), taskExecuteInfo, realtimeError)
 
 			if err != nil {
 				a.logger.Warn("failed to get task execute lock",
@@ -516,7 +521,7 @@ func tryLockTaskForExec(a *client, taskExecuteInfo *common.TaskExecutingInfo, ta
 					zap.String("task_name", taskExecuteInfo.Task.Name),
 					zap.Error(err))
 				if gerr, _ := status.FromError(err); gerr.Code() == codes.Aborted || gerr.Code() == codes.Unauthenticated ||
-					tryTimes == 5 {
+					tryTimes == 3 {
 					first := false
 					once.Do(func() {
 						first = true
@@ -530,6 +535,7 @@ func tryLockTaskForExec(a *client, taskExecuteInfo *common.TaskExecutingInfo, ta
 					return
 				}
 				time.Sleep(time.Second * time.Duration(tryTimes))
+				tryTimes++
 				continue
 			}
 
@@ -543,21 +549,22 @@ func tryLockTaskForExec(a *client, taskExecuteInfo *common.TaskExecutingInfo, ta
 			case <-taskExecuteInfo.CancelCtx.Done():
 				return
 			case err := <-realtimeError:
-				a.logger.Error("failed to keep task lock", zap.Error(err),
-					zap.String("task_id", taskExecuteInfo.Task.TaskID),
-					zap.Int64("project_id", taskExecuteInfo.Task.ProjectID),
-					zap.String("task_name", taskExecuteInfo.Task.Name))
+				if err != nil {
+					a.logger.Error("failed to keep task lock", zap.Error(err),
+						zap.String("task_id", taskExecuteInfo.Task.TaskID),
+						zap.Int64("project_id", taskExecuteInfo.Task.ProjectID),
+						zap.String("task_name", taskExecuteInfo.Task.Name))
 
-				if gerr, ok := status.FromError(err); ok && gerr.Code() == codes.Canceled {
-					// 到中心的连接被关闭了，说明agent注册出现了问题，需要等待注册逻辑中重新实现建联
-					time.Sleep(time.Second)
+					if gerr, ok := status.FromError(err); ok && gerr.Code() == codes.Canceled {
+						// 到中心的连接被关闭了，说明agent注册出现了问题，需要等待注册逻辑中重新实现建联
+						time.Sleep(time.Second)
+					}
 				}
 			}
 		}
 	})
 
-	err = <-resultChan
-	return
+	return <-resultChan
 }
 
 // 将任务结果上报到中心服务
@@ -639,10 +646,10 @@ func (ts *TaskScheduler) PushEvent(event *common.TaskEvent) {
 	ts.TaskEventChan <- event
 }
 
-func tryLock(cli cronpb.CenterClient, execInfo *common.TaskExecutingInfo, disconnectChan chan error) (func(), error) {
+func tryLockUntilCtxIsDone(cli cronpb.CenterClient, execInfo *common.TaskExecutingInfo, disconnectChan chan error) error {
 	locker, err := cli.TryLock(execInfo.CancelCtx)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	if err = locker.Send(&cronpb.TryLockRequest{
@@ -651,20 +658,30 @@ func tryLock(cli cronpb.CenterClient, execInfo *common.TaskExecutingInfo, discon
 	}); err != nil {
 		if errors.Is(err, io.EOF) {
 			if _, err = locker.Recv(); err != nil {
-				return nil, err
+				return err
 			}
 		}
-		return nil, err
+		return err
 	}
 
 	if _, err = locker.Recv(); err != nil {
-		return nil, err
+		return err
 	}
 
 	go func() {
+		defer close(disconnectChan)
 		for {
 			select {
 			case <-execInfo.CancelCtx.Done():
+				safe.Run(func() {
+					// 任务执行后锁最少保持5s
+					// 防止分布式部署下多台机器共同执行
+					if time.Since(execInfo.RealTime).Seconds() < 5 {
+						time.Sleep(5*time.Second - time.Duration(time.Now().Sub(execInfo.RealTime).Nanoseconds()))
+					}
+					locker.CloseSend()
+					wlog.Debug("unlock task", zap.String("task_id", execInfo.Task.TaskID), zap.Int64("project_id", execInfo.Task.ProjectID))
+				})
 				return
 			default:
 				if _, err = locker.Recv(); err != nil {
@@ -675,7 +692,5 @@ func tryLock(cli cronpb.CenterClient, execInfo *common.TaskExecutingInfo, discon
 		}
 	}()
 
-	return func() {
-		locker.CloseSend()
-	}, nil
+	return nil
 }

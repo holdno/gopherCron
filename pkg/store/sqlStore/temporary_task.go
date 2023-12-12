@@ -37,11 +37,11 @@ func (s *temporaryTaskStore) Create(data common.TemporaryTask) error {
 	return nil
 }
 
-func (s *temporaryTaskStore) UpdateTaskScheduleStatus(tx *gorm.DB, projectID int64, taskID string, scheduleStatus int32) error {
+func (s *temporaryTaskStore) UpdateTaskScheduleStatus(tx *gorm.DB, projectID int64, taskTmpID string, scheduleStatus int32) error {
 	if tx == nil {
 		tx = s.GetMaster()
 	}
-	return tx.Table(s.GetTable()).Where("project_id = ? AND task_id = ?", projectID, taskID).
+	return tx.Table(s.GetTable()).Where("project_id = ? AND tmp_id = ?", projectID, taskTmpID).
 		Update("schedule_status", scheduleStatus).Error
 }
 

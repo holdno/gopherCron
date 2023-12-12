@@ -74,36 +74,6 @@ func (c *streamManager[T]) generateServiceKey(info infra.NodeMeta) string {
 	return fmt.Sprintf("%s_%d_%s_%s_%d_%d", info.Region, info.System, info.ServiceName, info.Host, info.Port, info.RegisterTime)
 }
 
-func (c *streamManager[T]) SaveStreamV2(info infra.NodeMeta, stream interface {
-	Send(T) error
-}, cancelFunc func()) {
-	c.streamStoreLock.Lock()
-	defer c.streamStoreLock.Unlock()
-	k := c.generateKey(info.System, info.ServiceName)
-	srvList, exist := c.aliveSrv[k]
-	if !exist {
-		srvList = make(map[string]*Stream[T])
-		c.aliveSrv[k] = srvList
-	}
-
-	kk := c.generateServiceKey(info)
-	srvList[kk] = &Stream[T]{
-		cancelFunc:  cancelFunc,
-		stream:      stream,
-		CreateTime:  time.Unix(0, info.RegisterTime),
-		Host:        info.Host,
-		Port:        int32(info.Port),
-		ServiceName: info.ServiceName,
-		Region:      info.Region,
-		System:      info.System,
-	}
-
-	c.hostIndex[fmt.Sprintf("%s:%d", info.Host, info.Port)] = streamHostIndex{
-		one: k,
-		two: kk,
-	}
-}
-
 func (c *streamManager[T]) SaveStream(info infra.NodeMeta, stream interface {
 	Send(T) error
 }, cancelFunc func()) {
@@ -149,6 +119,8 @@ func (c *streamManager[T]) RemoveStream(info infra.NodeMeta) {
 }
 
 func (c *streamManager[T]) GetStreamsByHost(host string) *Stream[T] {
+	c.streamStoreLock.RLock()
+	defer c.streamStoreLock.RUnlock()
 	if index, exist := c.hostIndex[host]; exist {
 		if levelOne, exist := c.aliveSrv[index.one]; exist {
 			return levelOne[index.two]
@@ -327,7 +299,9 @@ func (s *streamManager[T]) RecvStreamResponse(event *cronpb.ClientEvent) {
 	}
 }
 
-func (s *streamManager[T]) SendEventWaitResponse(ctx context.Context, stream *Stream[*cronpb.ServiceEvent], event *cronpb.ServiceEvent) (*cronpb.ClientEvent, error) {
+func (s *streamManager[T]) SendEventWaitResponse(ctx context.Context, stream interface {
+	Send(*cronpb.ServiceEvent) error
+}, event *cronpb.ServiceEvent) (*cronpb.ClientEvent, error) {
 	if !s.isV2 {
 		return nil, nil
 	}

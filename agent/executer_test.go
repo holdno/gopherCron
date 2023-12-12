@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -47,6 +48,18 @@ func TestApp_ExecuteTask(t *testing.T) {
 
 	if std != nil {
 		fmt.Println("got stdout/error", std.String())
+	}
+}
+
+func TestOffCounter(t *testing.T) {
+	offCounter := &atomic.Bool{}
+
+	if !offCounter.CompareAndSwap(false, true) {
+		t.Fatal("")
+	}
+
+	if offCounter.CompareAndSwap(false, true) {
+		t.Fatal("")
 	}
 }
 

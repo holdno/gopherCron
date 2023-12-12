@@ -91,7 +91,9 @@ func (n NodeMeta) Value() string {
 		return int32(res), nil
 	})
 
-	n.RegisterTime = time.Now().Unix()
+	if n.RegisterTime == 0 {
+		n.RegisterTime = time.Now().Unix()
+	}
 
 	raw, _ := json.Marshal(n)
 	return string(raw)
