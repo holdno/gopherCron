@@ -167,14 +167,14 @@ func (a *app) TemporaryTaskSchedule(tmpTask common.TemporaryTask) error {
 			a.Warning(warning.NewSystemWarningData(warning.SystemWarning{
 				Endpoint: a.GetIP(),
 				Type:     warning.SERVICE_TYPE_CENTER,
-				Message:  fmt.Sprintf("center-service: %s, task-id: %s, 临时任务调度/执行失败, %s, DB Rollback", a.GetIP(), task.TaskID, err.Error()),
+				Message:  fmt.Sprintf("center-service: %s, task-id: %s, tmp-id: %s, 临时任务调度/执行失败, %s, DB Rollback", a.GetIP(), task.TaskID, task.TmpID, err.Error()),
 			}))
 			tx.Rollback()
 		} else {
 			tx.Commit()
 		}
 	}()
-	err = a.store.TemporaryTask().UpdateTaskScheduleStatus(tx, tmpTask.ProjectID, tmpTask.TaskID, common.TEMPORARY_TASK_SCHEDULE_STATUS_SCHEDULED)
+	err = a.store.TemporaryTask().UpdateTaskScheduleStatus(tx, tmpTask.ProjectID, tmpTask.TmpID, common.TEMPORARY_TASK_SCHEDULE_STATUS_SCHEDULED)
 	if err != nil {
 		return errors.NewError(http.StatusInternalServerError, "更新临时任务调度状态失败").WithLog(err.Error())
 	}
