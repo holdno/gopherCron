@@ -77,7 +77,7 @@ func (a *workflowRunner) scheduleTask(taskInfo *common.TaskInfo) error {
 	defer cancel()
 	value, _ := json.Marshal(taskInfo)
 
-	stream, err := a.app.GetAgentStream(a.app.GetConfig().Micro.Region, taskInfo.ProjectID)
+	stream, err := a.app.GetAgentStreamRand(a.app.GetConfig().Micro.Region, taskInfo.ProjectID)
 	if err != nil {
 		return errors.NewError(http.StatusInternalServerError, fmt.Sprintf("连接agent stream失败, project_id: %d", taskInfo.ProjectID)).WithLog(err.Error())
 	}
@@ -518,7 +518,7 @@ func clearWorkflowKeys(kv clientv3.KV, workflowID int64) error {
 }
 
 // TemporarySchedulerTask 临时调度任务
-func (a *app) TemporarySchedulerTask(user *common.User, task *common.TaskInfo) error {
+func (a *app) TemporarySchedulerTask(user *common.User, host string, task *common.TaskInfo) error {
 	var (
 		err error
 	)
@@ -547,10 +547,16 @@ func (a *app) TemporarySchedulerTask(user *common.User, task *common.TaskInfo) e
 		UserName: user.Name,
 	})
 
-	stream, err := a.GetAgentStream(a.GetConfig().Micro.Region, task.ProjectID)
-	if err != nil {
-		return err
+	var stream *CenterClient
+	if host == "" {
+		stream, err = a.GetAgentStreamRand(a.GetConfig().Micro.Region, task.ProjectID)
+		if err != nil {
+			return err
+		}
+	} else {
+		// todo
 	}
+
 	if stream != nil {
 		defer stream.Close()
 		_, err := stream.SendEvent(ctx, &cronpb.SendEventRequest{

@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"path/filepath"
@@ -210,7 +211,6 @@ func (a *AgentClient) Close() {
 
 func (a *app) GetAgentClient(region string, projectID int64) (*AgentClient, error) {
 	// client 的连接对象由调用时提供初始化
-
 	newConn := infra.NewClientConn()
 	cc, err := newConn(cronpb.Agent_ServiceDesc.ServiceName,
 		newConn.WithRegion(region),
@@ -238,7 +238,7 @@ type FinderResult struct {
 	attr infra.NodeMeta
 }
 
-func (a *app) getAgentAddrs(region string, projectID int64) ([]FinderResult, error) {
+func (a *app) getAgentAddrs(region string, projectID int64) ([]*FinderResult, error) {
 	mtimer := a.metrics.CustomHistogramSet("get_agents_list")
 	defer mtimer.ObserveDuration()
 	finder := etcd.NewFinder[infra.NodeMeta](infra.ResolveEtcdClient())
@@ -250,13 +250,13 @@ func (a *app) getAgentAddrs(region string, projectID int64) ([]FinderResult, err
 		return nil, err
 	}
 
-	var list []FinderResult
+	var list []*FinderResult
 	for _, v := range addrs {
 		attr, ok := infra.GetNodeMetaAttribute(v)
 		if !ok {
 			wlog.Error("failed to get agent node attribute", zap.String("address", v.Addr))
 		}
-		list = append(list, FinderResult{
+		list = append(list, &FinderResult{
 			addr: v,
 			attr: attr,
 		})
@@ -264,37 +264,72 @@ func (a *app) getAgentAddrs(region string, projectID int64) ([]FinderResult, err
 	return list, nil
 }
 
-func (a *app) GetAgentStream(region string, projectID int64) (*CenterClient, error) {
+// ChooseNode 根据权重随机选择一个节点
+func ChooseNode(nodes []*FinderResult) *FinderResult {
+	var totalWeight int
+	for _, node := range nodes {
+		totalWeight += int(node.attr.Weight)
+	}
+
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	randWeight := r.Intn(totalWeight)
+
+	var weightSum int
+	for _, node := range nodes {
+		weightSum += int(node.attr.Weight)
+		if randWeight < weightSum {
+			return node
+		}
+	}
+
+	// 默认返回第一个节点
+	return nodes[0]
+}
+
+func (a *app) GetAgentStreamRand(region string, projectID int64) (*CenterClient, error) {
 	// client 的连接对象由调用时提供初始化
 	addrs, err := a.getAgentAddrs(region, projectID)
 	if err != nil {
 		return nil, err
 	}
 
+	var filtered []*FinderResult
 	for _, item := range addrs {
 		if item.attr.CenterServiceEndpoint == "" {
 			continue
 		}
-
-		dialAddress := item.attr.CenterServiceEndpoint
-		ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
-		defer cancel()
-		cc, err := a.getCenterConnect(ctx, item.attr.CenterServiceRegion, dialAddress)
-		if err != nil {
-			return nil, fmt.Errorf("failed to connect agent stream %s, error: %s", dialAddress, err.Error())
-		}
-		client := &CenterClient{
-			CenterClient: cronpb.NewCenterClient(cc.ClientConn()),
-			addr:         item.addr.Addr,
-			cancel: func() {
-				cc.Done()
-			},
-		}
-		return client, nil
-
+		filtered = append(filtered, item)
 	}
 
-	return nil, nil
+	item := ChooseNode(filtered)
+	ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
+	defer cancel()
+	client, err := a.genCenterStream(ctx, item.addr.Addr, item.attr)
+	if err != nil {
+		return nil, err
+	}
+	return client, nil
+}
+
+// genCenterStream 根据agent的meta信息生成基于中心服务的stream连接
+func (a *app) genCenterStream(ctx context.Context, agentAddr string, meta infra.NodeMeta) (*CenterClient, error) {
+	if meta.CenterServiceEndpoint == "" {
+		return nil, fmt.Errorf("center service endpoint is empty")
+	}
+	dialAddress := meta.CenterServiceEndpoint
+	cc, err := a.getCenterConnect(ctx, meta.CenterServiceRegion, dialAddress)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect agent stream %s, error: %s", dialAddress, err.Error())
+	}
+
+	client := &CenterClient{
+		CenterClient: cronpb.NewCenterClient(cc.ClientConn()),
+		addr:         agentAddr,
+		cancel: func() {
+			cc.Done()
+		},
+	}
+	return client, nil
 }
 
 func (a *app) FindAgentsV2(region string, projectID int64) ([]*CenterClient, error) {
@@ -307,32 +342,16 @@ func (a *app) FindAgentsV2(region string, projectID int64) ([]*CenterClient, err
 	)
 
 	for _, item := range addrs {
-		err := func() error {
-			if item.attr.CenterServiceEndpoint == "" {
-				return nil
-			}
-			dialAddress := item.attr.CenterServiceEndpoint
-			ctx, cancel := context.WithTimeout(a.ctx, time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
-			defer cancel()
-
-			cc, err := a.getCenterConnect(ctx, item.attr.CenterServiceRegion, dialAddress)
-			if err != nil {
-				return fmt.Errorf("failed to connect agent stream %s, error: %s", dialAddress, err.Error())
-			}
-
-			client := &CenterClient{
-				CenterClient: cronpb.NewCenterClient(cc.ClientConn()),
-				addr:         item.addr.Addr,
-				cancel: func() {
-					cc.Done()
-				},
-			}
-			list = append(list, client)
-			return nil
-		}()
+		if item.attr.CenterServiceEndpoint == "" {
+			continue
+		}
+		ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
+		defer cancel()
+		client, err := a.genCenterStream(ctx, item.addr.Addr, item.attr)
 		if err != nil {
 			return nil, err
 		}
+		list = append(list, client)
 	}
 
 	return list, nil
