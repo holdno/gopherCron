@@ -15,35 +15,35 @@ func TestChooseNode(t *testing.T) {
 			Addr: "1",
 		},
 		attr: infra.NodeMeta{
-			Weight: 10,
+			NodeWeight: 10,
 		},
 	}, &FinderResult{
 		addr: resolver.Address{
 			Addr: "2",
 		},
 		attr: infra.NodeMeta{
-			Weight: 20,
+			NodeWeight: 20,
 		},
 	}, &FinderResult{
 		addr: resolver.Address{
 			Addr: "3",
 		},
 		attr: infra.NodeMeta{
-			Weight: 30,
+			NodeWeight: 30,
 		},
 	}, &FinderResult{
 		addr: resolver.Address{
 			Addr: "4",
 		},
 		attr: infra.NodeMeta{
-			Weight: 40,
+			NodeWeight: 40,
 		},
 	}, &FinderResult{
 		addr: resolver.Address{
 			Addr: "5",
 		},
 		attr: infra.NodeMeta{
-			Weight: 50,
+			NodeWeight: 50,
 		},
 	})
 

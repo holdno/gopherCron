@@ -9,19 +9,19 @@ import (
 	"sync"
 	"time"
 
-	"github.com/holdno/gopherCron/pkg/cronpb"
-	"github.com/holdno/gopherCron/pkg/infra"
-	u "github.com/holdno/gopherCron/utils"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
-
 	"github.com/spacegrower/watermelon/infra/definition"
 	"github.com/spacegrower/watermelon/infra/register"
 	"github.com/spacegrower/watermelon/infra/utils"
 	"github.com/spacegrower/watermelon/infra/wlog"
 	"github.com/spacegrower/watermelon/pkg/safe"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	"github.com/holdno/gopherCron/pkg/cronpb"
+	"github.com/holdno/gopherCron/pkg/infra"
+	u "github.com/holdno/gopherCron/utils"
 )
 
 type remoteRegistry struct {
@@ -42,7 +42,6 @@ type remoteRegistry struct {
 type CenterClient struct {
 	cronpb.CenterClient
 	Cc *grpc.ClientConn
-	
 }
 
 func NewRemoteRegister(localIP string, connect func() (CenterClient, error), eventHandler func(*cronpb.Event)) (register.ServiceRegister[infra.NodeMetaRemote], error) {

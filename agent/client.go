@@ -111,7 +111,7 @@ func (agent *client) loadConfigAndSetupAgentFunc() func() error {
 					agent.logger.Panic("failed to get local ip", zap.Error(err))
 				}
 			}
-			agent.metrics = NewMonitor(agent.localip)
+			agent.metrics = NewMonitor(agent.localip, cfg.Prometheus.PushGateway, cfg.Prometheus.JobName)
 		} else if agent.configPath == "" {
 			return fmt.Errorf("invalid config path")
 		}

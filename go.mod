@@ -35,7 +35,7 @@ require (
 	github.com/mwitkow/grpc-proxy v0.0.0-20230212185441-f345521cb9c9
 	github.com/orcaman/concurrent-map/v2 v2.0.1
 	github.com/prometheus/client_golang v1.17.0
-	github.com/spacegrower/watermelon v0.1.2-alpha.2
+	github.com/spacegrower/watermelon v0.1.2
 	github.com/ugurcsen/gods-generic v0.10.2
 	go.etcd.io/etcd/api/v3 v3.5.10
 	go.etcd.io/etcd/client/v3 v3.5.9

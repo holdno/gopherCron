@@ -16,8 +16,14 @@ type ClientConfig struct {
 	Address         string `toml:"address"`
 	RegisterAddress string `toml:"register_address"`
 
-	Auth  AgentAuth `toml:"auth"`
-	Micro Micro     `toml:"micro"`
+	Prometheus Prometheus `toml:"prometheus"`
+	Auth       AgentAuth  `toml:"auth"`
+	Micro      Micro      `toml:"micro"`
+}
+
+type Prometheus struct {
+	PushGateway string `toml:"push_gateway"`
+	JobName     string `toml:"job_name"`
 }
 
 type AgentAuth struct {
@@ -44,7 +50,8 @@ type ServiceConfig struct {
 	LogAge      int    `toml:"log_age"`
 	LogCompress bool   `toml:"log_compress"`
 
-	ReportAddr string `toml:"report_addr"`
+	ReportAddr string     `toml:"report_addr"`
+	Prometheus Prometheus `toml:"prometheus"`
 
 	Publish Publish     `toml:"publish"`
 	Deploy  *DeployConf `toml:"deploy"` // host配置
@@ -74,7 +81,7 @@ type Micro struct {
 	Endpoint    string            `toml:"endpoint"`
 	OrgID       string            `toml:"org_id"`
 	Region      string            `toml:"region"`
-	Weigth      int32             `toml:"weigth"`
+	Weight      int32             `toml:"weight"`
 	RegionProxy map[string]string `toml:"region_proxy"`
 }
 

@@ -150,6 +150,7 @@ type App interface {
 	DispatchAgentJob(projectID int64, dispatcher JobDispatcher) error
 	RemoveClientRegister(client string) error
 	HandleCenterEvent(event *cronpb.ServiceEvent) error
+	UpdateAgentRegisterWeight(projectID int64, host string, weight int32) error
 
 	// proxy
 	GetGrpcDirector() func(ctx context.Context, fullMethodName string) (context.Context, *grpc.ClientConn, error)
@@ -279,7 +280,7 @@ func NewApp(configPath string) App {
 		wlog.Error("!!! --- failed to get local ip --- !!!")
 	}
 
-	app.metrics = metrics.NewMetrics("center", app.GetIP())
+	app.metrics = metrics.NewMetrics("center", app.GetIP(), app.cfg.Prometheus.PushGateway, app.cfg.Prometheus.JobName)
 
 	if cfg.OIDC.ClientID != "" {
 		if app.oidcSrv, err = NewOIDCService(app, cfg.OIDC); err != nil {

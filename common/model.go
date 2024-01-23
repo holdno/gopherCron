@@ -8,6 +8,7 @@ type ClientInfo struct {
 	ClientIP string `json:"client_ip"`
 	Version  string `json:"version"`
 	Region   string `json:"region"`
+	Weight   int32  `json:"weight"`
 }
 
 type User struct {

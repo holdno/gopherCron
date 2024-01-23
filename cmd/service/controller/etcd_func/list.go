@@ -50,6 +50,38 @@ func GetTaskList(c *gin.Context) {
 	})
 }
 
+type SetClientWeightRequest struct {
+	ProjectID int64  `json:"project_id" form:"project_id" binding:"required"`
+	ClientIP  string `json:"client_ip" form:"client_ip" binding:"required"`
+	Weight    int32  `json:"weight" form:"weight"`
+}
+
+func SetClientWeight(c *gin.Context) {
+	var (
+		err error
+		req SetClientWeightRequest
+		srv = app.GetApp(c)
+		uid = utils.GetUserID(c)
+	)
+
+	if err = utils.BindArgsWithGin(c, &req); err != nil {
+		response.APIError(c, errors.ErrInvalidArgument)
+		return
+	}
+
+	if err = srv.CheckPermissions(req.ProjectID, uid, app.PermissionEdit); err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	if err = srv.UpdateAgentRegisterWeight(req.ProjectID, req.ClientIP, req.Weight); err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	response.APISuccess(c, nil)
+}
+
 // GetWorkerListRequest 获取节点的请求参数
 type GetClientListRequest struct {
 	ProjectID int64 `json:"project_id" form:"project_id" binding:"required"`

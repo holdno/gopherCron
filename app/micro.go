@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"net/http"
@@ -11,20 +12,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/holdno/gopherCron/common"
-	"github.com/holdno/gopherCron/errors"
-	"github.com/holdno/gopherCron/jwt"
-	"github.com/holdno/gopherCron/pkg/cronpb"
-	"github.com/holdno/gopherCron/pkg/infra"
-	"github.com/holdno/gopherCron/pkg/warning"
-	"github.com/holdno/gopherCron/utils"
-
 	"github.com/holdno/go-instrumentation/conncache"
 	etcdregister "github.com/spacegrower/watermelon/infra/register/etcd"
 	"github.com/spacegrower/watermelon/infra/resolver/etcd"
 	"github.com/spacegrower/watermelon/infra/wlog"
 	"github.com/spacegrower/watermelon/pkg/safe"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/client/v3/concurrency"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -32,6 +26,14 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/resolver"
 	"google.golang.org/grpc/status"
+
+	"github.com/holdno/gopherCron/common"
+	"github.com/holdno/gopherCron/errors"
+	"github.com/holdno/gopherCron/jwt"
+	"github.com/holdno/gopherCron/pkg/cronpb"
+	"github.com/holdno/gopherCron/pkg/infra"
+	"github.com/holdno/gopherCron/pkg/warning"
+	"github.com/holdno/gopherCron/utils"
 )
 
 type ConnCacheKey struct {
@@ -238,13 +240,94 @@ type FinderResult struct {
 	attr infra.NodeMeta
 }
 
+func (a *app) GetAgentRegisterMeta(region string, projectID int64, host string) (*FinderResult, error) {
+	results, err := a.getAgentAddrs(region, projectID)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, v := range results {
+		if v.attr.Host == host {
+			return v, nil
+		}
+	}
+
+	return nil, fmt.Errorf("client %s is not found", host)
+}
+
+func (a *app) UpdateAgentRegisterWeight(projectID int64, host string, weight int32) error {
+	meta, err := a.GetAgentRegisterMeta(a.GetConfig().Micro.Region, projectID, host)
+	if err != nil {
+		return err
+	}
+
+	meta.attr.NodeWeight = weight
+
+	raw, err := json.Marshal(meta.attr)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
+	defer cancel()
+
+	_, err = concurrency.NewSTM(a.etcd.Client(), func(stm concurrency.STM) error {
+		stm.Put(genFullAgentRegisterKey(projectID, meta.addr.Addr), string(raw))
+		// 下发权重变更到对应的host
+		meta, err := a.GetAgentRegisterMeta(a.GetConfig().Micro.Region, projectID, host)
+		if err != nil {
+			return err
+		}
+
+		stream, err := a.genCenterStream(ctx, meta.addr.Addr, meta.attr)
+		if err != nil {
+			return err
+		}
+
+		resp, err := stream.SendEvent(ctx, &cronpb.SendEventRequest{
+			Region: a.GetConfig().Micro.Region,
+			Event: &cronpb.ServiceEvent{
+				Id:        utils.GetStrID(),
+				Type:      cronpb.EventType_EVENT_MODIFY_NODE_META,
+				EventTime: time.Now().Unix(),
+				Event: &cronpb.ServiceEvent_ModifyNodeMeta{
+					ModifyNodeMeta: &cronpb.ModifyNodeRegisterMeta{
+						Weight: weight,
+					},
+				},
+			},
+		})
+		if err != nil {
+			return err
+		}
+
+		if resp.Error != nil {
+			return fmt.Errorf("agent response error: %s", resp.Error.Error)
+		}
+		return nil
+	})
+	if err != nil {
+		wlog.Error("failed to set agent node weight", zap.Error(err))
+		return errors.NewError(http.StatusInternalServerError, "failed to set agent node weight").WithLog(err.Error())
+	}
+	return nil
+}
+
+func genAgentRegisterPrefix(projectID int64) string {
+	return filepath.ToSlash(filepath.Join(etcdregister.GetETCDPrefixKey(), "gophercron", strconv.FormatInt(projectID, 10), cronpb.Agent_ServiceDesc.ServiceName)) + "/"
+}
+
+func genFullAgentRegisterKey(projectID int64, hostAndPort string) string {
+	return filepath.ToSlash(filepath.Join(genAgentRegisterPrefix(projectID), "node", hostAndPort))
+}
+
 func (a *app) getAgentAddrs(region string, projectID int64) ([]*FinderResult, error) {
 	mtimer := a.metrics.CustomHistogramSet("get_agents_list")
 	defer mtimer.ObserveDuration()
 	finder := etcd.NewFinder[infra.NodeMeta](infra.ResolveEtcdClient())
 	ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
 	defer cancel()
-	addrs, _, err := finder.FindAll(ctx, filepath.ToSlash(filepath.Join(etcdregister.GetETCDPrefixKey(), "gophercron", strconv.FormatInt(projectID, 10), cronpb.Agent_ServiceDesc.ServiceName))+"/")
+	addrs, _, err := finder.FindAll(ctx, genAgentRegisterPrefix(projectID))
 	if err != nil {
 		a.metrics.CustomInc("find_agents_error", fmt.Sprintf("%s_%d", region, projectID), err.Error())
 		return nil, err
@@ -255,6 +338,7 @@ func (a *app) getAgentAddrs(region string, projectID int64) ([]*FinderResult, er
 		attr, ok := infra.GetNodeMetaAttribute(v)
 		if !ok {
 			wlog.Error("failed to get agent node attribute", zap.String("address", v.Addr))
+			continue
 		}
 		list = append(list, &FinderResult{
 			addr: v,
@@ -268,7 +352,7 @@ func (a *app) getAgentAddrs(region string, projectID int64) ([]*FinderResult, er
 func ChooseNode(nodes []*FinderResult) *FinderResult {
 	var totalWeight int
 	for _, node := range nodes {
-		totalWeight += int(node.attr.Weight)
+		totalWeight += int(node.attr.Weight())
 	}
 
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
@@ -276,7 +360,7 @@ func ChooseNode(nodes []*FinderResult) *FinderResult {
 
 	var weightSum int
 	for _, node := range nodes {
-		weightSum += int(node.attr.Weight)
+		weightSum += int(node.attr.Weight())
 		if randWeight < weightSum {
 			return node
 		}
@@ -332,6 +416,7 @@ func (a *app) genCenterStream(ctx context.Context, agentAddr string, meta infra.
 	return client, nil
 }
 
+// FindAgentsV2 实际拿到的是中心的地址，每个agent有跟某个中心建立长链接
 func (a *app) FindAgentsV2(region string, projectID int64) ([]*CenterClient, error) {
 	addrs, err := a.getAgentAddrs(region, projectID)
 	if err != nil {

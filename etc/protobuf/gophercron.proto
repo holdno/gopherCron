@@ -96,6 +96,7 @@ enum EventType {
     EVENT_CLIENT_UNSUPPORT = 16;
     EVENT_WORKFLOW_REFRESH = 17;
     EVENT_REALTIME_PUBLISH = 18;
+    EVENT_MODIFY_NODE_META = 19;
 }
 
 message ServiceEvent {
@@ -111,6 +112,7 @@ message ServiceEvent {
         CommandRequest command_request = 9;
         EventUnsupport event_unsupport = 10;
         RealtimePublish realtime_publish = 11;
+        ModifyNodeRegisterMeta modify_node_meta = 12;
     }
 }
 
@@ -126,6 +128,7 @@ message ClientEvent {
         ProjectTaskHashReply project_task_hash_reply = 8;
         Result command_reply = 9;
         EventUnsupport event_unsupport = 10;
+        Result modify_node_meta = 11;
     }
     Error error = 100;
 }
@@ -198,4 +201,8 @@ message RealtimePublish {
 message ScheduleReply {
     int64 project_id = 2;
     Event event = 1;
+}
+
+message ModifyNodeRegisterMeta {
+    int32 weight = 1;
 }
