@@ -350,6 +350,9 @@ func (a *app) getAgentAddrs(region string, projectID int64) ([]*FinderResult, er
 
 // ChooseNode 根据权重随机选择一个节点
 func ChooseNode(nodes []*FinderResult) *FinderResult {
+	if len(nodes) == 0 {
+		return nil
+	}
 	var totalWeight int
 	for _, node := range nodes {
 		totalWeight += int(node.attr.Weight())
@@ -386,6 +389,10 @@ func (a *app) GetAgentStreamRand(region string, projectID int64) (*CenterClient,
 	}
 
 	item := ChooseNode(filtered)
+	if item == nil {
+		return nil, nil
+	}
+	
 	ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
 	defer cancel()
 	client, err := a.genCenterStream(ctx, item.addr.Addr, item.attr)
