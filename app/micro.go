@@ -255,6 +255,21 @@ func (a *app) GetAgentRegisterMeta(region string, projectID int64, host string) 
 	return nil, fmt.Errorf("client %s is not found", host)
 }
 
+func (a *app) GetAgentStream(ctx context.Context, projectID int64, host string) (*CenterClient, error) {
+	// 下发权重变更到对应的host
+	meta, err := a.GetAgentRegisterMeta(a.GetConfig().Micro.Region, projectID, host)
+	if err != nil {
+		return nil, err
+	}
+
+	stream, err := a.genCenterStream(ctx, meta.addr.Addr, meta.attr)
+	if err != nil {
+		return nil, err
+	}
+
+	return stream, nil
+}
+
 func (a *app) UpdateAgentRegisterWeight(projectID int64, host string, weight int32) error {
 	meta, err := a.GetAgentRegisterMeta(a.GetConfig().Micro.Region, projectID, host)
 	if err != nil {
@@ -373,7 +388,7 @@ func ChooseNode(nodes []*FinderResult) *FinderResult {
 	return nodes[0]
 }
 
-func (a *app) GetAgentStreamRand(region string, projectID int64) (*CenterClient, error) {
+func (a *app) GetAgentStreamRand(ctx context.Context, region string, projectID int64) (*CenterClient, error) {
 	// client 的连接对象由调用时提供初始化
 	addrs, err := a.getAgentAddrs(region, projectID)
 	if err != nil {
@@ -392,9 +407,7 @@ func (a *app) GetAgentStreamRand(region string, projectID int64) (*CenterClient,
 	if item == nil {
 		return nil, nil
 	}
-	
-	ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
-	defer cancel()
+
 	client, err := a.genCenterStream(ctx, item.addr.Addr, item.attr)
 	if err != nil {
 		return nil, err

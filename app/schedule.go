@@ -77,7 +77,7 @@ func (a *workflowRunner) scheduleTask(taskInfo *common.TaskInfo) error {
 	defer cancel()
 	value, _ := json.Marshal(taskInfo)
 
-	stream, err := a.app.GetAgentStreamRand(a.app.GetConfig().Micro.Region, taskInfo.ProjectID)
+	stream, err := a.app.GetAgentStreamRand(ctx, a.app.GetConfig().Micro.Region, taskInfo.ProjectID)
 	if err != nil {
 		return errors.NewError(http.StatusInternalServerError, fmt.Sprintf("连接agent stream失败, project_id: %d", taskInfo.ProjectID)).WithLog(err.Error())
 	}
@@ -549,12 +549,15 @@ func (a *app) TemporarySchedulerTask(user *common.User, host string, task *commo
 
 	var stream *CenterClient
 	if host == "" {
-		stream, err = a.GetAgentStreamRand(a.GetConfig().Micro.Region, task.ProjectID)
+		stream, err = a.GetAgentStreamRand(ctx, a.GetConfig().Micro.Region, task.ProjectID)
 		if err != nil {
 			return err
 		}
 	} else {
-		// todo
+		stream, err = a.GetAgentStream(ctx, task.ProjectID, host)
+		if err != nil {
+			return err
+		}
 	}
 
 	if stream != nil {
