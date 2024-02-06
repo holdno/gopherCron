@@ -300,7 +300,9 @@ func (a *app) UpdateAgentRegisterWeight(projectID int64, host string, weight int
 		}
 
 		resp, err := stream.SendEvent(ctx, &cronpb.SendEventRequest{
-			Region: a.GetConfig().Micro.Region,
+			Region:    a.GetConfig().Micro.Region,
+			ProjectId: projectID,
+			Agent:     meta.addr.Addr,
 			Event: &cronpb.ServiceEvent{
 				Id:        utils.GetStrID(),
 				Type:      cronpb.EventType_EVENT_MODIFY_NODE_META,

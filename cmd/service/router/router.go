@@ -115,7 +115,7 @@ func SetupRoute(srv app.App, r *gin.Engine, conf *config.ServiceConfig) {
 		{
 			client.Use(middleware.TokenVerify([]byte(conf.JWT.PublicKey)))
 			client.POST("/weight", etcd_func.SetClientWeight)
-			cron.GET("/list", etcd_func.GetClientList)
+			client.GET("/list", etcd_func.GetClientList)
 		}
 
 		temporaryTask := api.Group("/temporary_task")
