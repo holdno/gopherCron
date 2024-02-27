@@ -115,7 +115,8 @@ func SetupRoute(srv app.App, r *gin.Engine, conf *config.ServiceConfig) {
 		{
 			client.Use(middleware.TokenVerify([]byte(conf.JWT.PublicKey)))
 			client.POST("/weight", etcd_func.SetClientWeight)
-			client.GET("/list", etcd_func.GetClientList)
+			client.GET("/list", etcd_func.GetWorkerListInfo)
+			client.POST("/reload/config", etcd_func.ReloadConfig)
 		}
 
 		temporaryTask := api.Group("/temporary_task")
@@ -152,13 +153,6 @@ func SetupRoute(srv app.App, r *gin.Engine, conf *config.ServiceConfig) {
 				log.GET("/list", controller.GetWorkflowLogList)
 				log.POST("/clear", controller.ClearWorkflowLog)
 			}
-		}
-
-		worker := api.Group("/client")
-		{
-			worker.Use(middleware.TokenVerify([]byte(conf.JWT.PublicKey)))
-			worker.GET("/list", etcd_func.GetWorkerListInfo)
-			worker.POST("/reload/config", etcd_func.ReloadConfig)
 		}
 
 		registry := api.Group("/registry")
