@@ -556,6 +556,23 @@ func (a *app) TemporarySchedulerTask(user *common.User, host string, task *commo
 	} else {
 		stream, err = a.GetAgentStream(ctx, task.ProjectID, host)
 		if err != nil {
+			errResult := common.TaskFinishedV2{
+				TaskID:    task.TaskID,
+				TaskName:  task.Name,
+				Command:   task.Command,
+				ProjectID: task.ProjectID,
+				Status:    common.TASK_STATUS_FAIL_V2,
+				StartTime: task.CreateTime,
+				EndTime:   time.Now().Unix(),
+				TmpID:     task.TmpID,
+				Error:     err.Error(),
+				Operator:  user.Name,
+			}
+			a.SaveTaskLog(a.GetIP(), errResult)
+			if setFinishedErr := a.HandlerTaskFinished(a.GetIP(), &errResult); setFinishedErr != nil {
+				wlog.Error("failed to set tmp-task finished status", zap.Error(setFinishedErr), zap.String("task_id", errResult.TaskID),
+					zap.Int64("project_id", errResult.ProjectID), zap.String("tmp_id", errResult.TmpID))
+			}
 			return err
 		}
 	}

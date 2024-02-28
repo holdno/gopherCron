@@ -538,8 +538,9 @@ func startTemporaryTaskWorker(app *app) {
 
 			for _, v := range list {
 				if err = app.TemporaryTaskSchedule(*v); err != nil {
-					wlog.Error("temporary task worker: failed to schedule task", zap.Error(err))
-					return err
+					wlog.Error("temporary task worker: failed to schedule task", zap.Error(err), zap.String("task_id", v.TaskID),
+						zap.String("tmp_id", v.TmpID), zap.Int64("project_id", v.ProjectID), zap.String("target_host", v.Host))
+					app.metrics.CustomInc("temporary_schedule_fail", app.localip, fmt.Sprintf("%d-%s", v.ProjectID, v.TaskID))
 				}
 			}
 		}

@@ -17,6 +17,7 @@ type CreateTemporaryTaskReq struct {
 	Timeout      int    `json:"timeout" form:"timeout" binding:"required"`
 	Remark       string `json:"remark" form:"remark" binding:"required"`
 	Noseize      int    `json:"noseize" form:"noseize"`
+	Host         string `json:"host" form:"host"`
 }
 
 func CreateTemporaryTask(c *gin.Context) {
@@ -42,6 +43,7 @@ func CreateTemporaryTask(c *gin.Context) {
 		Noseize:        req.Noseize,
 		Remark:         req.Remark,
 		Timeout:        req.Timeout,
+		Host:           req.Host,
 	}); err != nil {
 		response.APIError(c, err)
 		return
