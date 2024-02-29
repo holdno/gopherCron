@@ -10,7 +10,6 @@ import (
 	"github.com/holdno/gocommons/selection"
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/errors"
-	"github.com/holdno/gopherCron/pkg/warning"
 	"github.com/holdno/gopherCron/utils"
 	"github.com/spacegrower/watermelon/infra/wlog"
 	"go.uber.org/zap"
@@ -36,6 +35,19 @@ func (a *app) GetNeedToScheduleTemporaryTask(t time.Time) ([]*common.TemporaryTa
 	selector := selection.NewSelector(
 		selection.NewRequirement("schedule_time", selection.LessThanEqual, truncateTime.Add(time.Minute).Unix()),
 		selection.NewRequirement("schedule_time", selection.GreaterThan, truncateTime.Add(-time.Minute).Unix()),
+		selection.NewRequirement("schedule_status", selection.Equals, common.TEMPORARY_TASK_SCHEDULE_STATUS_WAITING),
+	)
+	list, err := a.store.TemporaryTask().GetList(selector)
+	if err != nil && err != gorm.ErrRecordNotFound {
+		return nil, errors.NewError(http.StatusInternalServerError, "获取临时调度任务列表失败").WithLog(err.Error())
+	}
+	return list, nil
+}
+
+func (a *app) GetExpireTemporaryTasks(t time.Time) ([]*common.TemporaryTask, error) {
+	truncateTime := t.Truncate(time.Minute)
+	selector := selection.NewSelector(
+		selection.NewRequirement("schedule_time", selection.LessThanEqual, truncateTime.Unix()),
 		selection.NewRequirement("schedule_status", selection.Equals, common.TEMPORARY_TASK_SCHEDULE_STATUS_WAITING),
 	)
 	list, err := a.store.TemporaryTask().GetList(selector)
@@ -158,23 +170,7 @@ func (a *app) TemporaryTaskSchedule(tmpTask common.TemporaryTask) error {
 	task.Noseize = tmpTask.Noseize
 	task.Name = tmpTask.Remark // 用于告警 / 日志
 
-	tx := a.store.BeginTx()
-	defer func() {
-		if r := recover(); r != nil || err != nil {
-			if err == nil {
-				err = fmt.Errorf("panic: %s", r)
-			}
-			a.Warning(warning.NewSystemWarningData(warning.SystemWarning{
-				Endpoint: a.GetIP(),
-				Type:     warning.SERVICE_TYPE_CENTER,
-				Message:  fmt.Sprintf("center-service: %s, task-id: %s, tmp-id: %s, 临时任务调度/执行失败, %s, DB Rollback", a.GetIP(), task.TaskID, task.TmpID, err.Error()),
-			}))
-			tx.Rollback()
-		} else {
-			tx.Commit()
-		}
-	}()
-	err = a.store.TemporaryTask().UpdateTaskScheduleStatus(tx, tmpTask.ProjectID, tmpTask.TmpID, common.TEMPORARY_TASK_SCHEDULE_STATUS_SCHEDULED)
+	err = a.store.TemporaryTask().UpdateTaskScheduleStatus(nil, tmpTask.ProjectID, tmpTask.TmpID, common.TEMPORARY_TASK_SCHEDULE_STATUS_SCHEDULED)
 	if err != nil {
 		return errors.NewError(http.StatusInternalServerError, "更新临时任务调度状态失败").WithLog(err.Error())
 	}
@@ -183,6 +179,14 @@ func (a *app) TemporaryTaskSchedule(tmpTask common.TemporaryTask) error {
 		return err
 	}
 	return nil
+}
+
+func (a *app) serverSideFinishedTemporaryTask(errResult common.TaskFinishedV2) {
+	a.SaveTaskLog(a.GetIP(), errResult)
+	if setFinishedErr := a.HandlerTaskFinished(a.GetIP(), &errResult); setFinishedErr != nil {
+		wlog.Error("failed to set tmp-task finished status", zap.Error(setFinishedErr), zap.String("task_id", errResult.TaskID),
+			zap.Int64("project_id", errResult.ProjectID), zap.String("tmp_id", errResult.TmpID))
+	}
 }
 
 func (a *app) AutoCleanScheduledTemporaryTask() {

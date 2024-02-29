@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/avast/retry-go/v4"
 	"github.com/holdno/gocommons/selection"
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/errors"
@@ -17,8 +18,6 @@ import (
 	"github.com/spacegrower/watermelon/infra/wlog"
 	"github.com/spacegrower/watermelon/pkg/safe"
 	"go.uber.org/zap"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/client/v3/concurrency"
@@ -520,8 +519,11 @@ func clearWorkflowKeys(kv clientv3.KV, workflowID int64) error {
 // TemporarySchedulerTask 临时调度任务
 func (a *app) TemporarySchedulerTask(user *common.User, host string, task *common.TaskInfo) error {
 	var (
-		err error
+		err        error
+		resultChan = make(chan common.TaskFinishedV2, 1)
 	)
+
+	defer close(resultChan)
 
 	// reset task create time as schedule time
 	task.CreateTime = time.Now().Unix()
@@ -547,34 +549,37 @@ func (a *app) TemporarySchedulerTask(user *common.User, host string, task *commo
 		UserName: user.Name,
 	})
 
+	buildScheduleErrorResult := func(err error) common.TaskFinishedV2 {
+		return common.TaskFinishedV2{
+			TaskID:    task.TaskID,
+			TaskName:  task.Name,
+			Command:   task.Command,
+			ProjectID: task.ProjectID,
+			Status:    common.TASK_STATUS_FAIL_V2,
+			StartTime: task.CreateTime,
+			EndTime:   time.Now().Unix(),
+			TmpID:     task.TmpID,
+			Error:     err.Error(),
+			Operator:  user.Name,
+		}
+	}
+
 	var stream *CenterClient
-	if host == "" {
-		stream, err = a.GetAgentStreamRand(ctx, a.GetConfig().Micro.Region, task.ProjectID)
-		if err != nil {
+	err = retry.Do(func() error {
+		if host == "" {
+			stream, err = a.GetAgentStreamRand(ctx, a.GetConfig().Micro.Region, task.ProjectID)
+			return err
+		} else {
+			stream, err = a.GetAgentStream(ctx, task.ProjectID, host)
 			return err
 		}
-	} else {
-		stream, err = a.GetAgentStream(ctx, task.ProjectID, host)
-		if err != nil {
-			errResult := common.TaskFinishedV2{
-				TaskID:    task.TaskID,
-				TaskName:  task.Name,
-				Command:   task.Command,
-				ProjectID: task.ProjectID,
-				Status:    common.TASK_STATUS_FAIL_V2,
-				StartTime: task.CreateTime,
-				EndTime:   time.Now().Unix(),
-				TmpID:     task.TmpID,
-				Error:     err.Error(),
-				Operator:  user.Name,
-			}
-			a.SaveTaskLog(a.GetIP(), errResult)
-			if setFinishedErr := a.HandlerTaskFinished(a.GetIP(), &errResult); setFinishedErr != nil {
-				wlog.Error("failed to set tmp-task finished status", zap.Error(setFinishedErr), zap.String("task_id", errResult.TaskID),
-					zap.Int64("project_id", errResult.ProjectID), zap.String("tmp_id", errResult.TmpID))
-			}
-			return err
+	}, retry.Attempts(3))
+	if err != nil || (host != "" && stream == nil) {
+		if err == nil {
+			err = fmt.Errorf("host %s is unavailable when the temporary task is scheduled", host)
 		}
+		resultChan <- buildScheduleErrorResult(err)
+		goto scheduleError
 	}
 
 	if stream != nil {
@@ -600,15 +605,8 @@ func (a *app) TemporarySchedulerTask(user *common.User, host string, task *commo
 			},
 		})
 		if err != nil {
-			grpcErr, _ := status.FromError(err)
-			switch grpcErr.Code() {
-			case codes.AlreadyExists:
-				return errors.NewError(http.StatusInternalServerError,
-					"stream 调度任务失败, 任务运行中...").WithLog(err.Error())
-			default:
-				return errors.NewError(http.StatusInternalServerError,
-					fmt.Sprintf("stream 调度任务失败, project_id: %d, task_id: %s", task.ProjectID, task.TaskID)).WithLog(err.Error())
-			}
+			resultChan <- buildScheduleErrorResult(err)
+			goto scheduleError
 		}
 	} else {
 		client, err := a.GetAgentClient(a.GetConfig().Micro.Region, task.ProjectID)
@@ -626,19 +624,17 @@ func (a *app) TemporarySchedulerTask(user *common.User, host string, task *commo
 			},
 		})
 		if err != nil {
-			grpcErr, _ := status.FromError(err)
-			switch grpcErr.Code() {
-			case codes.AlreadyExists:
-				return errors.NewError(http.StatusInternalServerError,
-					"调度任务失败, 任务运行中...").WithLog(err.Error())
-			default:
-				return errors.NewError(http.StatusInternalServerError,
-					fmt.Sprintf("调度任务失败, project_id: %d, task_id: %s", task.ProjectID, task.TaskID)).WithLog(err.Error())
-			}
+			resultChan <- buildScheduleErrorResult(err)
+			goto scheduleError
 		}
 	}
 
 	return nil
+
+scheduleError:
+	errResult := <-resultChan
+	a.serverSideFinishedTemporaryTask(errResult)
+	return fmt.Errorf("failed to schedule tmp-task, %s", errResult.Error)
 }
 
 func (a *app) SetTaskRunning(agentIP string, execInfo *common.TaskExecutingInfo) error {

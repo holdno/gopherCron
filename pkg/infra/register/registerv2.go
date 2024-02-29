@@ -8,15 +8,15 @@ import (
 	"sync"
 	"time"
 
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/connectivity"
-	"google.golang.org/grpc/status"
 	"github.com/spacegrower/watermelon/infra/definition"
 	"github.com/spacegrower/watermelon/infra/register"
 	"github.com/spacegrower/watermelon/infra/utils"
 	"github.com/spacegrower/watermelon/infra/wlog"
 	"github.com/spacegrower/watermelon/pkg/safe"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/connectivity"
+	"google.golang.org/grpc/status"
 
 	"github.com/holdno/gopherCron/pkg/cronpb"
 	"github.com/holdno/gopherCron/pkg/infra"
@@ -85,7 +85,7 @@ func (s *remoteRegistryV2) Append(meta infra.NodeMetaRemote) error {
 }
 
 func (s *remoteRegistryV2) Register() error {
-	s.log.Debug("start register")
+	s.log.Debug("start registerV2")
 
 	if err := s.register(); err != nil {
 		if errors.Is(err, io.EOF) {

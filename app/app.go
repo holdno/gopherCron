@@ -2,12 +2,14 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/avast/retry-go/v4"
 	"github.com/holdno/firetower/service/tower"
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/config"
@@ -542,6 +544,40 @@ func startTemporaryTaskWorker(app *app) {
 						zap.String("tmp_id", v.TmpID), zap.Int64("project_id", v.ProjectID), zap.String("target_host", v.Host))
 					app.metrics.CustomInc("temporary_schedule_fail", app.localip, fmt.Sprintf("%d-%s", v.ProjectID, v.TaskID))
 				}
+			}
+
+			// 清理过期未被调度的数据，正常情况下不存在该类数据，异常情况下可能产生相应的脏数据
+			list, err = app.GetExpireTemporaryTasks(time.Now().Add(-time.Minute))
+			if err != nil {
+				wlog.Error("failed to get expire temporary tasks", zap.Error(err))
+			}
+
+			for _, v := range list {
+				userInfo, err := app.GetUserInfo(v.UserID)
+				if err != nil && err != sql.ErrNoRows {
+					wlog.Error("failed to get tmp task creator", zap.Error(err), zap.Int64("user_id", v.ID),
+						zap.Int64("project_id", v.ProjectID), zap.String("tmp_task_id", v.TmpID))
+				}
+				if userInfo == nil {
+					userInfo = &common.User{}
+				}
+				// todo tx
+				retry.Do(func() error {
+					return app.store.TemporaryTask().UpdateTaskScheduleStatus(nil, v.ProjectID, v.TmpID, common.TEMPORARY_TASK_SCHEDULE_STATUS_SCHEDULED)
+				}, retry.Attempts(3), retry.MaxDelay(time.Second))
+
+				app.serverSideFinishedTemporaryTask(common.TaskFinishedV2{
+					TaskID:    v.TaskID,
+					TaskName:  v.Remark,
+					Command:   v.Command,
+					ProjectID: v.ProjectID,
+					Status:    common.TASK_STATUS_FAIL_V2,
+					StartTime: v.CreateTime,
+					EndTime:   time.Now().Unix(),
+					TmpID:     v.TmpID,
+					Error:     "not yet scheduled",
+					Operator:  userInfo.Name,
+				})
 			}
 		}
 	})
