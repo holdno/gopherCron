@@ -2,13 +2,30 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/holdno/go-instrumentation/conncache"
+	etcdregister "github.com/spacegrower/watermelon/infra/register/etcd"
+	"github.com/spacegrower/watermelon/infra/resolver/etcd"
+	"github.com/spacegrower/watermelon/infra/wlog"
+	"github.com/spacegrower/watermelon/pkg/safe"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/client/v3/concurrency"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/resolver"
+	"google.golang.org/grpc/status"
 
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/errors"
@@ -17,20 +34,6 @@ import (
 	"github.com/holdno/gopherCron/pkg/infra"
 	"github.com/holdno/gopherCron/pkg/warning"
 	"github.com/holdno/gopherCron/utils"
-
-	"github.com/holdno/go-instrumentation/conncache"
-	etcdregister "github.com/spacegrower/watermelon/infra/register/etcd"
-	"github.com/spacegrower/watermelon/infra/resolver/etcd"
-	"github.com/spacegrower/watermelon/infra/wlog"
-	"github.com/spacegrower/watermelon/pkg/safe"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/resolver"
-	"google.golang.org/grpc/status"
 )
 
 type ConnCacheKey struct {
@@ -210,7 +213,6 @@ func (a *AgentClient) Close() {
 
 func (a *app) GetAgentClient(region string, projectID int64) (*AgentClient, error) {
 	// client 的连接对象由调用时提供初始化
-
 	newConn := infra.NewClientConn()
 	cc, err := newConn(cronpb.Agent_ServiceDesc.ServiceName,
 		newConn.WithRegion(region),
@@ -238,25 +240,124 @@ type FinderResult struct {
 	attr infra.NodeMeta
 }
 
-func (a *app) getAgentAddrs(region string, projectID int64) ([]FinderResult, error) {
+func (a *app) GetAgentRegisterMeta(region string, projectID int64, host string) (*FinderResult, error) {
+	results, err := a.getAgentAddrs(region, projectID)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, v := range results {
+		if v.attr.Host == host {
+			return v, nil
+		}
+	}
+
+	return nil, fmt.Errorf("client %s is not found", host)
+}
+
+func (a *app) GetAgentStream(ctx context.Context, projectID int64, host string) (*CenterClient, error) {
+	// 下发权重变更到对应的host
+	meta, err := a.GetAgentRegisterMeta(a.GetConfig().Micro.Region, projectID, host)
+	if err != nil {
+		return nil, err
+	}
+
+	stream, err := a.genCenterStream(ctx, meta.addr.Addr, meta.attr)
+	if err != nil {
+		return nil, err
+	}
+
+	return stream, nil
+}
+
+func (a *app) UpdateAgentRegisterWeight(projectID int64, host string, weight int32) error {
+	meta, err := a.GetAgentRegisterMeta(a.GetConfig().Micro.Region, projectID, host)
+	if err != nil {
+		return err
+	}
+
+	meta.attr.NodeWeight = weight
+
+	raw, err := json.Marshal(meta.attr)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
+	defer cancel()
+
+	_, err = concurrency.NewSTM(a.etcd.Client(), func(stm concurrency.STM) error {
+		stm.Put(genFullAgentRegisterKey(projectID, meta.addr.Addr), string(raw))
+		// 下发权重变更到对应的host
+		meta, err := a.GetAgentRegisterMeta(a.GetConfig().Micro.Region, projectID, host)
+		if err != nil {
+			return err
+		}
+
+		stream, err := a.genCenterStream(ctx, meta.addr.Addr, meta.attr)
+		if err != nil {
+			return err
+		}
+
+		resp, err := stream.SendEvent(ctx, &cronpb.SendEventRequest{
+			Region:    a.GetConfig().Micro.Region,
+			ProjectId: projectID,
+			Agent:     meta.addr.Addr,
+			Event: &cronpb.ServiceEvent{
+				Id:        utils.GetStrID(),
+				Type:      cronpb.EventType_EVENT_MODIFY_NODE_META,
+				EventTime: time.Now().Unix(),
+				Event: &cronpb.ServiceEvent_ModifyNodeMeta{
+					ModifyNodeMeta: &cronpb.ModifyNodeRegisterMeta{
+						Weight: weight,
+					},
+				},
+			},
+		})
+		if err != nil {
+			return err
+		}
+
+		if resp.Error != nil {
+			return fmt.Errorf("agent response error: %s", resp.Error.Error)
+		}
+		return nil
+	})
+	if err != nil {
+		wlog.Error("failed to set agent node weight", zap.Error(err))
+		return errors.NewError(http.StatusInternalServerError, "failed to set agent node weight").WithLog(err.Error())
+	}
+	return nil
+}
+
+func genAgentRegisterPrefix(projectID int64) string {
+	return filepath.ToSlash(filepath.Join(etcdregister.GetETCDPrefixKey(), "gophercron", strconv.FormatInt(projectID, 10), cronpb.Agent_ServiceDesc.ServiceName)) + "/"
+}
+
+func genFullAgentRegisterKey(projectID int64, hostAndPort string) string {
+	return filepath.ToSlash(filepath.Join(genAgentRegisterPrefix(projectID), "node", hostAndPort))
+}
+
+func (a *app) getAgentAddrs(region string, projectID int64) ([]*FinderResult, error) {
 	mtimer := a.metrics.CustomHistogramSet("get_agents_list")
 	defer mtimer.ObserveDuration()
 	finder := etcd.NewFinder[infra.NodeMeta](infra.ResolveEtcdClient())
 	ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
 	defer cancel()
-	addrs, _, err := finder.FindAll(ctx, filepath.ToSlash(filepath.Join(etcdregister.GetETCDPrefixKey(), "gophercron", strconv.FormatInt(projectID, 10), cronpb.Agent_ServiceDesc.ServiceName))+"/")
+	addrs, _, err := finder.FindAll(ctx, genAgentRegisterPrefix(projectID))
 	if err != nil {
 		a.metrics.CustomInc("find_agents_error", fmt.Sprintf("%s_%d", region, projectID), err.Error())
 		return nil, err
 	}
 
-	var list []FinderResult
+	var list []*FinderResult
 	for _, v := range addrs {
 		attr, ok := infra.GetNodeMetaAttribute(v)
 		if !ok {
 			wlog.Error("failed to get agent node attribute", zap.String("address", v.Addr))
+			continue
 		}
-		list = append(list, FinderResult{
+		list = append(list, &FinderResult{
 			addr: v,
 			attr: attr,
 		})
@@ -264,39 +365,80 @@ func (a *app) getAgentAddrs(region string, projectID int64) ([]FinderResult, err
 	return list, nil
 }
 
-func (a *app) GetAgentStream(region string, projectID int64) (*CenterClient, error) {
+// ChooseNode 根据权重随机选择一个节点
+func ChooseNode(nodes []*FinderResult) *FinderResult {
+	if len(nodes) == 0 {
+		return nil
+	}
+	var totalWeight int
+	for _, node := range nodes {
+		totalWeight += int(node.attr.Weight())
+	}
+
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	randWeight := r.Intn(totalWeight)
+
+	var weightSum int
+	for _, node := range nodes {
+		weightSum += int(node.attr.Weight())
+		if randWeight < weightSum {
+			return node
+		}
+	}
+
+	// 默认返回第一个节点
+	return nodes[0]
+}
+
+func (a *app) GetAgentStreamRand(ctx context.Context, region string, projectID int64) (*CenterClient, error) {
 	// client 的连接对象由调用时提供初始化
 	addrs, err := a.getAgentAddrs(region, projectID)
 	if err != nil {
 		return nil, err
 	}
 
+	var filtered []*FinderResult
 	for _, item := range addrs {
 		if item.attr.CenterServiceEndpoint == "" {
 			continue
 		}
-
-		dialAddress := item.attr.CenterServiceEndpoint
-		ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
-		defer cancel()
-		cc, err := a.getCenterConnect(ctx, item.attr.CenterServiceRegion, dialAddress)
-		if err != nil {
-			return nil, fmt.Errorf("failed to connect agent stream %s, error: %s", dialAddress, err.Error())
-		}
-		client := &CenterClient{
-			CenterClient: cronpb.NewCenterClient(cc.ClientConn()),
-			addr:         item.addr.Addr,
-			cancel: func() {
-				cc.Done()
-			},
-		}
-		return client, nil
-
+		filtered = append(filtered, item)
 	}
 
-	return nil, nil
+	item := ChooseNode(filtered)
+	if item == nil {
+		return nil, nil
+	}
+
+	client, err := a.genCenterStream(ctx, item.addr.Addr, item.attr)
+	if err != nil {
+		return nil, err
+	}
+	return client, nil
 }
 
+// genCenterStream 根据agent的meta信息生成基于中心服务的stream连接
+func (a *app) genCenterStream(ctx context.Context, agentAddr string, meta infra.NodeMeta) (*CenterClient, error) {
+	if meta.CenterServiceEndpoint == "" {
+		return nil, fmt.Errorf("center service endpoint is empty")
+	}
+	dialAddress := meta.CenterServiceEndpoint
+	cc, err := a.getCenterConnect(ctx, meta.CenterServiceRegion, dialAddress)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect agent stream %s, error: %s", dialAddress, err.Error())
+	}
+
+	client := &CenterClient{
+		CenterClient: cronpb.NewCenterClient(cc.ClientConn()),
+		addr:         agentAddr,
+		cancel: func() {
+			cc.Done()
+		},
+	}
+	return client, nil
+}
+
+// FindAgentsV2 实际拿到的是中心的地址，每个agent有跟某个中心建立长链接
 func (a *app) FindAgentsV2(region string, projectID int64) ([]*CenterClient, error) {
 	addrs, err := a.getAgentAddrs(region, projectID)
 	if err != nil {
@@ -307,32 +449,16 @@ func (a *app) FindAgentsV2(region string, projectID int64) ([]*CenterClient, err
 	)
 
 	for _, item := range addrs {
-		err := func() error {
-			if item.attr.CenterServiceEndpoint == "" {
-				return nil
-			}
-			dialAddress := item.attr.CenterServiceEndpoint
-			ctx, cancel := context.WithTimeout(a.ctx, time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
-			defer cancel()
-
-			cc, err := a.getCenterConnect(ctx, item.attr.CenterServiceRegion, dialAddress)
-			if err != nil {
-				return fmt.Errorf("failed to connect agent stream %s, error: %s", dialAddress, err.Error())
-			}
-
-			client := &CenterClient{
-				CenterClient: cronpb.NewCenterClient(cc.ClientConn()),
-				addr:         item.addr.Addr,
-				cancel: func() {
-					cc.Done()
-				},
-			}
-			list = append(list, client)
-			return nil
-		}()
+		if item.attr.CenterServiceEndpoint == "" {
+			continue
+		}
+		ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
+		defer cancel()
+		client, err := a.genCenterStream(ctx, item.addr.Addr, item.attr)
 		if err != nil {
 			return nil, err
 		}
+		list = append(list, client)
 	}
 
 	return list, nil

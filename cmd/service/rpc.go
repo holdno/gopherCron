@@ -307,7 +307,7 @@ Here:
 						},
 						OrgID:        info.OrgID,
 						Region:       info.Region,
-						Weight:       info.Weight,
+						NodeWeight:   info.Weight,
 						System:       v,
 						Tags:         info.Tags,
 						RegisterTime: time.Now().UnixNano(),
@@ -427,8 +427,13 @@ func (s *cronRpc) buildAgentRegister(ctx context.Context) (registerFunc func(req
 		next(totalRegisteredStreams)
 	}
 
+	once := sync.Once{}
 	registerFunc = func(multiService *cronpb.RegisterInfo, next func([]infra.NodeMeta) error) error {
-		s.registerMetricsAdd(1, agentIP)
+		once.Do(func() {
+			// 同一个链接，只有第一次注册才记录metrics，多次触发可能是更新注册信息
+			s.registerMetricsAdd(1, agentIP)
+		})
+
 		var registerStreamOnce []infra.NodeMeta
 		for _, info := range multiService.Agents {
 			var methods []register.GrpcMethodInfo
@@ -457,7 +462,7 @@ func (s *cronRpc) buildAgentRegister(ctx context.Context) (registerFunc func(req
 					CenterServiceRegion:   s.app.GetConfig().Micro.Region,
 					OrgID:                 info.OrgID,
 					Region:                info.Region,
-					Weight:                info.Weight,
+					NodeWeight:            info.Weight,
 					System:                v,
 					Tags:                  info.Tags,
 					RegisterTime:          time.Now().UnixNano(),

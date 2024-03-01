@@ -12,10 +12,11 @@ import (
 )
 
 var (
-	GOPHERCRON_METRICS_NAMESPACE = "gophercron"
+	GOPHERCRON_METRICS_NAMESPACE             = "gophercron"
+	GOPHERCRON_METRICS_DEFAULT_PUSH_JOB_NAME = "gophercron_pusher"
 )
 
-func NewMetrics(serviceName, instance string) *Metrics {
+func NewMetrics(serviceName, instance, pushGatewayEndpoint, pushGatewayJobName string) *Metrics {
 	m := &Metrics{
 		serviceName: serviceName,
 		ns:          GOPHERCRON_METRICS_NAMESPACE,
@@ -24,6 +25,13 @@ func NewMetrics(serviceName, instance string) *Metrics {
 		gauge:       make(map[string]*prometheus.GaugeVec),
 		histogram:   make(map[string]*prometheus.HistogramVec),
 		registry:    prometheus.NewRegistry(),
+	}
+
+	if pushGatewayEndpoint != "" {
+		if pushGatewayJobName == "" {
+			pushGatewayJobName = GOPHERCRON_METRICS_DEFAULT_PUSH_JOB_NAME
+		}
+		m.pusher = push.New(pushGatewayEndpoint, pushGatewayJobName)
 	}
 
 	RegisterGoMetrics(m.registry)

@@ -5,9 +5,10 @@ import (
 	"path/filepath"
 	"strconv"
 
-	"github.com/holdno/gopherCron/common"
 	"github.com/spacegrower/watermelon/infra"
 	"google.golang.org/grpc/metadata"
+
+	"github.com/holdno/gopherCron/common"
 )
 
 var _ infra.ClientServiceNameGenerator = (*ResolveMeta)(nil)

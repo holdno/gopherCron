@@ -8,6 +8,7 @@ type ClientInfo struct {
 	ClientIP string `json:"client_ip"`
 	Version  string `json:"version"`
 	Region   string `json:"region"`
+	Weight   int32  `json:"weight"`
 }
 
 type User struct {
@@ -169,5 +170,6 @@ type TemporaryTask struct {
 	TmpID          string `json:"tmp_id" gorm:"column:tmp_id;type:varchar(50);not null;comment:'临时任务id'"` // 每次任务执行的唯一标识
 	Timeout        int    `json:"timeout" gorm:"column:timeout;type:int(11);not null;comment:'超时时间'"`     // 每次任务执行的唯一标识 // 任务超时时间 单位 秒(s)
 	Remark         string `json:"remark" gorm:"column:remark;type:varchar(255);not null;comment:'任务备注'"`
+	Host           string `json:"host" gorm:"column:host;type:varchar(255);not null;comment:'指定agent进行调度'"`
 	CreateTime     int64  `json:"create_time" gorm:"column:create_time;type:int(11);not null;comment:'创建时间'"`
 }

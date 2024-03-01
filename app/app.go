@@ -2,12 +2,14 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/avast/retry-go/v4"
 	"github.com/holdno/firetower/service/tower"
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/config"
@@ -66,7 +68,7 @@ type App interface {
 	GetProjectTaskCount(projectID int64) (int64, error)
 	GetTaskList(projectID int64) ([]*common.TaskListItemWithWorkflows, error)
 	GetTask(projectID int64, taskID string) (*common.TaskInfo, error)
-	TemporarySchedulerTask(user *common.User, task *common.TaskInfo) error
+	TemporarySchedulerTask(user *common.User, host string, task *common.TaskInfo) error
 	GetTaskLogList(pid int64, tid string, page, pagesize int) ([]*common.TaskLog, error)
 	GetTaskLogDetail(pid int64, tid, tmpID string) (*common.TaskLog, error)
 	GetLogTotalByDate(projects []int64, timestamp int64, errType int) (int, error)
@@ -150,6 +152,7 @@ type App interface {
 	DispatchAgentJob(projectID int64, dispatcher JobDispatcher) error
 	RemoveClientRegister(client string) error
 	HandleCenterEvent(event *cronpb.ServiceEvent) error
+	UpdateAgentRegisterWeight(projectID int64, host string, weight int32) error
 
 	// proxy
 	GetGrpcDirector() func(ctx context.Context, fullMethodName string) (context.Context, *grpc.ClientConn, error)
@@ -279,7 +282,7 @@ func NewApp(configPath string) App {
 		wlog.Error("!!! --- failed to get local ip --- !!!")
 	}
 
-	app.metrics = metrics.NewMetrics("center", app.GetIP())
+	app.metrics = metrics.NewMetrics("center", app.GetIP(), app.cfg.Prometheus.PushGateway, app.cfg.Prometheus.JobName)
 
 	if cfg.OIDC.ClientID != "" {
 		if app.oidcSrv, err = NewOIDCService(app, cfg.OIDC); err != nil {
@@ -537,9 +540,44 @@ func startTemporaryTaskWorker(app *app) {
 
 			for _, v := range list {
 				if err = app.TemporaryTaskSchedule(*v); err != nil {
-					wlog.Error("temporary task worker: failed to schedule task", zap.Error(err))
-					return err
+					wlog.Error("temporary task worker: failed to schedule task", zap.Error(err), zap.String("task_id", v.TaskID),
+						zap.String("tmp_id", v.TmpID), zap.Int64("project_id", v.ProjectID), zap.String("target_host", v.Host))
+					app.metrics.CustomInc("temporary_schedule_fail", app.localip, fmt.Sprintf("%d-%s", v.ProjectID, v.TaskID))
 				}
+			}
+
+			// 清理过期未被调度的数据，正常情况下不存在该类数据，异常情况下可能产生相应的脏数据
+			list, err = app.GetExpireTemporaryTasks(time.Now().Add(-time.Minute))
+			if err != nil {
+				wlog.Error("failed to get expire temporary tasks", zap.Error(err))
+			}
+
+			for _, v := range list {
+				userInfo, err := app.GetUserInfo(v.UserID)
+				if err != nil && err != sql.ErrNoRows {
+					wlog.Error("failed to get tmp task creator", zap.Error(err), zap.Int64("user_id", v.ID),
+						zap.Int64("project_id", v.ProjectID), zap.String("tmp_task_id", v.TmpID))
+				}
+				if userInfo == nil {
+					userInfo = &common.User{}
+				}
+				// todo tx
+				retry.Do(func() error {
+					return app.store.TemporaryTask().UpdateTaskScheduleStatus(nil, v.ProjectID, v.TmpID, common.TEMPORARY_TASK_SCHEDULE_STATUS_SCHEDULED)
+				}, retry.Attempts(3), retry.MaxDelay(time.Second))
+
+				app.serverSideFinishedTemporaryTask(common.TaskFinishedV2{
+					TaskID:    v.TaskID,
+					TaskName:  v.Remark,
+					Command:   v.Command,
+					ProjectID: v.ProjectID,
+					Status:    common.TASK_STATUS_FAIL_V2,
+					StartTime: v.CreateTime,
+					EndTime:   time.Now().Unix(),
+					TmpID:     v.TmpID,
+					Error:     "not yet scheduled",
+					Operator:  userInfo.Name,
+				})
 			}
 		}
 	})

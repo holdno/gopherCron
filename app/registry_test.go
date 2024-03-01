@@ -35,7 +35,7 @@ func TestStream(t *testing.T) {
 		CenterServiceRegion:   "center",
 		OrgID:                 "gophercron",
 		Region:                "center",
-		Weight:                100,
+		NodeWeight:            100,
 		System:                3,
 		Tags:                  nil,
 		RegisterTime:          time.Now().UnixNano(),

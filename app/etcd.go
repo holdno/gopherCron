@@ -249,6 +249,7 @@ func (a *app) GetWorkerList(projectID int64) ([]common.ClientInfo, error) {
 			ClientIP: item.addr.Addr,
 			Version:  item.attr.Tags["agent-version"],
 			Region:   item.attr.Region,
+			Weight:   item.attr.NodeWeight,
 		}
 
 		res = append(res, clientinfo)

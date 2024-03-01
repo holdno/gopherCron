@@ -309,7 +309,9 @@ func (a *client) TrySchedule() time.Duration {
 		if plan.NextTime.Before(now) || plan.NextTime.Equal(now) {
 			// 尝试执行任务
 			// 因为可能上一次任务还没执行结束
-			a.TryStartTask(plan)
+			if a.cfg.Micro.Weight > 0 { // 权重大于0才会调度任务
+				a.TryStartTask(plan)
+			}
 			plan.NextTime = plan.Expr.Next(now) // 更新下一次执行时间
 		}
 
@@ -506,7 +508,7 @@ func tryLockTaskForExec(a *client, taskExecuteInfo *common.TaskExecutingInfo, ta
 			taskExecuteInfo.CancelFunc()
 		}()
 		// 避免分布式集群上锁偏斜 (每台机器的时钟可能不是特别的准确 导致某一台机器总能抢到锁)
-		time.Sleep(getSchedulerLatency(a.cfg.Micro.Weigth, int32(a.scheduler.TaskExecutingCount())))
+		time.Sleep(getSchedulerLatency(a.cfg.Micro.Weight, int32(a.scheduler.TaskExecutingCount())))
 		for {
 			if taskExecuteInfo.CancelCtx.Err() != nil {
 				return

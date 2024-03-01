@@ -18,7 +18,7 @@ type NodeMetaRemote struct {
 	OrgID        string            `json:"org_id"`
 	Systems      []int64           `json:"systems"`
 	Region       string            `json:"region"`
-	Weight       int32             `json:"weigth"`
+	Weight       int32             `json:"weight"`
 	RegisterTime int64             `json:"register_time"`
 	Tags         map[string]string `json:"tags"`
 	register.NodeMeta
@@ -34,7 +34,7 @@ type NodeMeta struct {
 	OrgID                 string            `json:"org_id"`
 	Region                string            `json:"region"`
 	System                int64             `json:"system"`
-	Weight                int32             `json:"weigth"`
+	NodeWeight            int32             `json:"weight"`
 	RegisterTime          int64             `json:"register_time"`
 	Tags                  map[string]string `json:"tags"`
 	CenterServiceEndpoint string            `json:"cse"`
@@ -53,15 +53,15 @@ func (n NodeMeta) Equal(o any) bool {
 		n.Port == ov.Port &&
 		n.Region == ov.Region &&
 		n.System == ov.System &&
-		n.Weight == ov.Weight &&
+		n.NodeWeight == ov.NodeWeight &&
 		n.RegisterTime == ov.RegisterTime &&
 		n.CenterServiceEndpoint == ov.CenterServiceEndpoint &&
 		n.CenterServiceRegion == ov.CenterServiceRegion &&
 		n.ServiceName == ov.ServiceName
 }
 
-func (n NodeMeta) Weigth() int32 {
-	return n.Weight
+func (n NodeMeta) Weight() int32 {
+	return n.NodeWeight
 }
 
 func (n NodeMeta) Service() string {
@@ -83,7 +83,7 @@ func (n NodeMeta) WithMeta(meta register.NodeMeta) NodeMeta {
 
 func (n NodeMeta) Value() string {
 	// customize your register value logic
-	n.Weight = utils.GetEnvWithDefault(definition.NodeWeightENVKey, n.Weight, func(val string) (int32, error) {
+	n.NodeWeight = utils.GetEnvWithDefault(definition.NodeWeightENVKey, n.NodeWeight, func(val string) (int32, error) {
 		res, err := strconv.Atoi(val)
 		if err != nil {
 			return 0, err

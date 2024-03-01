@@ -49,7 +49,7 @@ func TmpExecute(c *gin.Context) {
 	}
 	taskID := fmt.Sprintf("tmp_%s", utils.GetStrID())
 	// 调用etcd的put方法以触发watcher从而调度该任务
-	if err = srv.TemporarySchedulerTask(user, &common.TaskInfo{
+	if err = srv.TemporarySchedulerTask(user, "", &common.TaskInfo{
 		TaskID:    taskID,
 		ProjectID: req.ProjectID,
 		Name:      req.Name,
@@ -68,6 +68,7 @@ func TmpExecute(c *gin.Context) {
 type ExecuteTaskRequest struct {
 	ProjectID int64  `form:"project_id" json:"project_id" binding:"required"`
 	TaskID    string `form:"task_id" json:"task_id" binding:"required"`
+	Host      string `form:"host" json:"host"`
 }
 
 // ExecuteTask 立即执行某个任务
@@ -113,7 +114,7 @@ func ExecuteTask(c *gin.Context) {
 		return
 	}
 
-	if err = srv.TemporarySchedulerTask(user, task); err != nil {
+	if err = srv.TemporarySchedulerTask(user, req.Host, task); err != nil {
 		response.APIError(c, err)
 		return
 	}

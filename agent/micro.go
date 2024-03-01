@@ -8,7 +8,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/avast/retry-go/v4"
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/config"
 	"github.com/holdno/gopherCron/jwt"
@@ -18,6 +17,7 @@ import (
 	"github.com/holdno/gopherCron/protocol"
 	"github.com/holdno/gopherCron/utils"
 
+	"github.com/avast/retry-go/v4"
 	"github.com/gin-contrib/pprof"
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus"
@@ -75,7 +75,7 @@ func (a *client) SetupMicroService() *winfra.Srv[infra.NodeMetaRemote] {
 	}, newsrv.WithOrg(cfg.Micro.OrgID),
 		newsrv.WithRegion(cfg.Micro.Region),
 		newsrv.WithSystems(pids),
-		newsrv.WithWeight(cfg.Micro.Weigth),
+		newsrv.WithWeight(cfg.Micro.Weight),
 		newsrv.WithHttpServer(&http.Server{
 			Handler: httpEngine,
 		}),
@@ -118,6 +118,7 @@ func (a *client) MustSetupRemoteRegisterV2() wregister.ServiceRegister[infra.Nod
 
 	r, err := register.NewRemoteRegisterV2(a.GetIP(),
 		func() (*register.CenterClient, error) { // 建立到center服务的连接
+			a.metrics.RegisterCountInc()
 			if a.centerSrv.Cc != nil { // 每次建立前都尝试关闭一次旧连接，确保不会泄露
 				if a.centerSrv.Cc.GetState() == connectivity.Ready { // 兜底防止错误调用
 					return &a.centerSrv, nil

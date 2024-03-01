@@ -26,7 +26,7 @@ func RunTest() {
 	wlog.SetGlobalLogger(wlog.NewLogger(&wlog.Config{Level: wlog.DebugLevel}))
 	prefix := "/gophercron"
 	client, err := clientv3.New(clientv3.Config{
-		Endpoints: []string{"digital-etcd01.bs58i.baishancdnx.com:2379", "digital-etcd02.bs58i.baishancdnx.com:2379", "digital-etcd03.bs58i.baishancdnx.com:2379"},
+		Endpoints: []string{""},
 		Username:  "gophercron",
 		Password:  "gophercron",
 	})
