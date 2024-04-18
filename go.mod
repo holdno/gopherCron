@@ -24,7 +24,7 @@ require (
 
 require (
 	github.com/avast/retry-go/v4 v4.5.0
-	github.com/cloudevents/sdk-go/v2 v2.13.0
+	github.com/cloudevents/sdk-go/v2 v2.15.2
 	github.com/coreos/go-oidc/v3 v3.6.0
 	github.com/gin-contrib/pprof v1.4.0
 	github.com/golang-jwt/jwt v3.2.2+incompatible
