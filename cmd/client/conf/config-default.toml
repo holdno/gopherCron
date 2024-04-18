@@ -13,14 +13,6 @@ endpoint = "localhost:6306" # 中心服务的地址，域名也请带上端口�
 
 
 [auth]
-public_key = """
------BEGIN PUBLIC KEY-----
-MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDM82u8+ChkRwdpNxbzJypio0xb
-+jdwWLd5DRcKL0cU8FlCD6fJH+YuMTMSf9RJaqQSIq0pKhyfHPHWnTSwLqudkzmG
-tfKsupw9rpPkF25b9UOHL3h0KPdXaQgj866Dzc483JPcquRlJsrEOhfpY1vCt6Wq
-0//vM79JBFBVoJ31mwIDAQAB
------END PUBLIC KEY-----
-"""
 
 [[auth.projects]]
 pid = 0 # project id
