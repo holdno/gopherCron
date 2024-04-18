@@ -41,7 +41,7 @@ require (
 	go.etcd.io/etcd/client/v3 v3.5.9
 	golang.org/x/oauth2 v0.11.0
 	google.golang.org/grpc v1.59.0
-	google.golang.org/protobuf v1.31.0
+	google.golang.org/protobuf v1.33.0
 )
 
 require (
