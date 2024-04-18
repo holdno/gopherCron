@@ -2,6 +2,7 @@ package etcd_func
 
 import (
 	"fmt"
+	"net/http"
 
 	"github.com/holdno/gopherCron/app"
 	"github.com/holdno/gopherCron/cmd/service/response"
@@ -69,6 +70,10 @@ func SetClientWeight(c *gin.Context) {
 		return
 	}
 
+	if req.Weight > 100 || req.Weight < 0 {
+		response.APIError(c, errors.NewError(http.StatusBadRequest, "权重需要设置在0-100之间"))
+	}
+
 	if err = srv.CheckPermissions(req.ProjectID, uid, app.PermissionEdit); err != nil {
 		response.APIError(c, err)
 		return
@@ -119,6 +124,40 @@ func GetClientList(c *gin.Context) {
 
 	response.APISuccess(c, &gin.H{
 		"list": utils.TernaryOperation(list != nil, list, []struct{}{}),
+	})
+}
+
+type GetClientListWithMetaResponse struct {
+	List []common.ClientInfo `json:"list"`
+}
+
+// GetWorkerList 获取节点
+func GetClientListWithMeta(c *gin.Context) {
+	var (
+		err error
+		req GetClientListRequest
+		res []common.ClientInfo
+		srv = app.GetApp(c)
+		uid = utils.GetUserID(c)
+	)
+
+	if err = utils.BindArgsWithGin(c, &req); err != nil {
+		response.APIError(c, errors.ErrInvalidArgument)
+		return
+	}
+
+	if err = srv.CheckPermissions(req.ProjectID, uid, app.PermissionView); err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	if res, err = srv.GetWorkerList(req.ProjectID); err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	response.APISuccess(c, GetClientListWithMetaResponse{
+		List: res,
 	})
 }
 

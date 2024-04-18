@@ -1,6 +1,9 @@
 package etcd_func
 
 import (
+	"fmt"
+	"net/http"
+	"strings"
 	"time"
 
 	"github.com/holdno/gopherCron/app"
@@ -43,6 +46,10 @@ func SaveTask(c *gin.Context) {
 		return
 	}
 
+	req.Name = strings.TrimSpace(req.Name)
+	req.Cron = strings.TrimSpace(req.Cron)
+	req.Command = strings.TrimSpace(req.Command)
+
 	// 验证 cron表达式
 	exp, err := cronexpr.Parse(req.Cron)
 	if err != nil {
@@ -56,9 +63,24 @@ func SaveTask(c *gin.Context) {
 		return
 	}
 
-	if err = srv.CheckPermissions(req.ProjectID, uid, app.PermissionView); err != nil {
+	if err = srv.CheckPermissions(req.ProjectID, uid, app.PermissionEdit); err != nil {
 		response.APIError(c, err)
 		return
+	}
+
+	tasksUnderProject, err := srv.GetTaskList(req.ProjectID)
+	if err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	for _, v := range tasksUnderProject {
+		v.Name = strings.TrimSpace(v.Name)
+		v.Command = strings.TrimSpace(v.Command)
+		if v.Name == req.Name || v.Command == req.Command {
+			response.APIError(c, errors.NewError(http.StatusBadRequest, fmt.Sprintf("目标项目下，存在相同任务名称或命令(task_id: %s)，请检查后再试", v.TaskID)))
+			return
+		}
 	}
 
 	if oldTaskInfo, err = srv.SaveTask(&common.TaskInfo{
