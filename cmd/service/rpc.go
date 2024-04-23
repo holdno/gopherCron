@@ -267,7 +267,6 @@ func (s *cronRpc) RegisterAgent(req cronpb.Center_RegisterAgentServer) error {
 	var registerStream []infra.NodeMeta
 	defer func() {
 		s.registerMetricsAdd(-1, agentIP)
-		r.DeRegister()
 		for _, meta := range registerStream {
 			s.app.StreamManager().RemoveStream(meta)
 		}
@@ -312,12 +311,12 @@ Here:
 						Tags:         info.Tags,
 						RegisterTime: time.Now().UnixNano(),
 					}
-					if err := r.Append(meta); err != nil {
-						return err
-					}
+
 					registerStreamOnce = append(registerStreamOnce, meta)
 				}
 			}
+
+			r.SetMetas(registerStreamOnce)
 
 			s.registerMetricsAdd(1, agentIP)
 			if err := r.Register(); err != nil {
@@ -421,10 +420,19 @@ func (s *cronRpc) buildAgentRegister(ctx context.Context) (registerFunc func(req
 	r := infra.MustSetupEtcdRegister() // 获取注册中心
 	var totalRegisteredStreams []infra.NodeMeta
 
+	deRegisterOnce := sync.Once{}
 	deRegisterFunc = func(next func([]infra.NodeMeta)) {
-		s.registerMetricsAdd(-1, agentIP)
-		r.DeRegister()
-		next(totalRegisteredStreams)
+		deRegisterOnce.Do(func() {
+			r.Close()
+			s.registerMetricsAdd(-1, agentIP)
+			next(totalRegisteredStreams)
+		})
+	}
+
+	innerDeRegisterFunc := func(beforeMetas []infra.NodeMeta) {
+		for _, v := range beforeMetas {
+			s.app.StreamManagerV2().RemoveStream(v)
+		}
 	}
 
 	once := sync.Once{}
@@ -467,12 +475,11 @@ func (s *cronRpc) buildAgentRegister(ctx context.Context) (registerFunc func(req
 					Tags:                  info.Tags,
 					RegisterTime:          time.Now().UnixNano(),
 				}
-				if err := r.Append(meta); err != nil {
-					return err
-				}
 				registerStreamOnce = append(registerStreamOnce, meta)
 			}
 		}
+
+		r.SetMetas(registerStreamOnce)
 
 		if err := r.Register(); err != nil {
 			wlog.Error("failed to register service", zap.Error(err), zap.String("method", "Register"))
@@ -480,7 +487,11 @@ func (s *cronRpc) buildAgentRegister(ctx context.Context) (registerFunc func(req
 			return status.Error(codes.Internal, "failed to register service")
 		}
 
-		totalRegisteredStreams = append(totalRegisteredStreams, registerStreamOnce...)
+		if len(totalRegisteredStreams) != 0 {
+			innerDeRegisterFunc(totalRegisteredStreams)
+		}
+		totalRegisteredStreams = make([]infra.NodeMeta, len(registerStreamOnce))
+		copy(totalRegisteredStreams, registerStreamOnce)
 		return next(registerStreamOnce)
 	}
 

@@ -68,18 +68,20 @@ func SaveTask(c *gin.Context) {
 		return
 	}
 
-	tasksUnderProject, err := srv.GetTaskList(req.ProjectID)
-	if err != nil {
-		response.APIError(c, err)
-		return
-	}
-
-	for _, v := range tasksUnderProject {
-		v.Name = strings.TrimSpace(v.Name)
-		v.Command = strings.TrimSpace(v.Command)
-		if v.Name == req.Name || v.Command == req.Command {
-			response.APIError(c, errors.NewError(http.StatusBadRequest, fmt.Sprintf("目标项目下，存在相同任务名称或命令(task_id: %s)，请检查后再试", v.TaskID)))
+	if req.TaskID == "" { // 没有taskid的场景说明是创建/复制
+		tasksUnderProject, err := srv.GetTaskList(req.ProjectID)
+		if err != nil {
+			response.APIError(c, err)
 			return
+		}
+
+		for _, v := range tasksUnderProject {
+			v.Name = strings.TrimSpace(v.Name)
+			v.Command = strings.TrimSpace(v.Command)
+			if v.Name == req.Name || v.Command == req.Command {
+				response.APIError(c, errors.NewError(http.StatusBadRequest, fmt.Sprintf("目标项目下，存在相同任务名称或命令(task_id: %s)，请检查后再试", v.TaskID)))
+				return
+			}
 		}
 	}
 

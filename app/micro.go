@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"math/rand"
 	"net/http"
@@ -18,7 +17,6 @@ import (
 	"github.com/spacegrower/watermelon/infra/wlog"
 	"github.com/spacegrower/watermelon/pkg/safe"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.etcd.io/etcd/client/v3/concurrency"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -271,62 +269,44 @@ func (a *app) GetAgentStream(ctx context.Context, projectID int64, host string) 
 }
 
 func (a *app) UpdateAgentRegisterWeight(projectID int64, host string, weight int32) error {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	defer cancel()
+	// 下发权重变更到对应的host
 	meta, err := a.GetAgentRegisterMeta(a.GetConfig().Micro.Region, projectID, host)
 	if err != nil {
 		return err
 	}
 
-	meta.attr.NodeWeight = weight
-
-	raw, err := json.Marshal(meta.attr)
+	stream, err := a.genCenterStream(ctx, meta.addr.Addr, meta.attr)
 	if err != nil {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
-	defer cancel()
-
-	_, err = concurrency.NewSTM(a.etcd.Client(), func(stm concurrency.STM) error {
-		stm.Put(genFullAgentRegisterKey(projectID, meta.addr.Addr), string(raw))
-		// 下发权重变更到对应的host
-		meta, err := a.GetAgentRegisterMeta(a.GetConfig().Micro.Region, projectID, host)
-		if err != nil {
-			return err
-		}
-
-		stream, err := a.genCenterStream(ctx, meta.addr.Addr, meta.attr)
-		if err != nil {
-			return err
-		}
-
-		resp, err := stream.SendEvent(ctx, &cronpb.SendEventRequest{
-			Region:    a.GetConfig().Micro.Region,
-			ProjectId: projectID,
-			Agent:     meta.addr.Addr,
-			Event: &cronpb.ServiceEvent{
-				Id:        utils.GetStrID(),
-				Type:      cronpb.EventType_EVENT_MODIFY_NODE_META,
-				EventTime: time.Now().Unix(),
-				Event: &cronpb.ServiceEvent_ModifyNodeMeta{
-					ModifyNodeMeta: &cronpb.ModifyNodeRegisterMeta{
-						Weight: weight,
-					},
+	resp, err := stream.SendEvent(ctx, &cronpb.SendEventRequest{
+		Region:    a.GetConfig().Micro.Region,
+		ProjectId: projectID,
+		Agent:     meta.addr.Addr,
+		Event: &cronpb.ServiceEvent{
+			Id:        utils.GetStrID(),
+			Type:      cronpb.EventType_EVENT_MODIFY_NODE_META,
+			EventTime: time.Now().Unix(),
+			Event: &cronpb.ServiceEvent_ModifyNodeMeta{
+				ModifyNodeMeta: &cronpb.ModifyNodeRegisterMeta{
+					Weight: weight,
 				},
 			},
-		})
-		if err != nil {
-			return err
-		}
-
-		if resp.Error != nil {
-			return fmt.Errorf("agent response error: %s", resp.Error.Error)
-		}
-		return nil
+		},
 	})
+
 	if err != nil {
 		wlog.Error("failed to set agent node weight", zap.Error(err))
 		return errors.NewError(http.StatusInternalServerError, "failed to set agent node weight").WithLog(err.Error())
 	}
+
+	if resp.Type == cronpb.EventType_EVENT_CLIENT_UNSUPPORT {
+		return fmt.Errorf("client未支持该事件类型")
+	}
+
 	return nil
 }
 

@@ -45,6 +45,8 @@ type Server[T interface {
 	WithMeta(register.NodeMeta) T
 }] func(register func(srv *grpc.Server), opts ...infra.Option[T]) *infra.Srv[T]
 
+type AgentSrv infra.Srv[NodeMetaRemote]
+
 // NewServer is a function to create a server instance
 func NewAgentServer() Server[NodeMetaRemote] {
 	return Server[NodeMetaRemote](infra.NewServer[NodeMetaRemote])

@@ -90,11 +90,13 @@ func (a *client) SetupMicroService() *winfra.Srv[infra.NodeMetaRemote] {
 	go func() {
 		srv.RunUntil(syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL)
 	}()
+
+	a.srv = srv
 	return srv
 }
 
 func (a *client) MustSetupRemoteRegisterV2() wregister.ServiceRegister[infra.NodeMetaRemote] {
-	genMetadata := func(ctx context.Context, cc *grpc.ClientConn, reqMethod string) context.Context {
+	genMetadata := func(ctx context.Context, reqMethod string) context.Context {
 		md := metadata.NewOutgoingContext(ctx, metadata.New(map[string]string{
 			common.GOPHERCRON_AGENT_IP_MD_KEY:   a.GetIP(),
 			common.GOPHERCRON_AGENT_VERSION_KEY: protocol.GetVersion(),
@@ -145,10 +147,10 @@ func (a *client) MustSetupRemoteRegisterV2() wregister.ServiceRegister[infra.Nod
 					Timeout: time.Second * 5,
 				}),
 				grpc.WithUnaryInterceptor(func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
-					return invoker(genMetadata(ctx, cc, method), method, req, reply, cc, opts...)
+					return invoker(genMetadata(ctx, method), method, req, reply, cc, opts...)
 				}),
 				grpc.WithStreamInterceptor(func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
-					return streamer(genMetadata(ctx, cc, method), desc, cc, method, opts...)
+					return streamer(genMetadata(ctx, method), desc, cc, method, opts...)
 				}))
 			if err != nil {
 				a.metrics.SystemErrInc("agent_setup_remote_register_error")

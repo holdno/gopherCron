@@ -11,10 +11,12 @@ import (
 	"github.com/holdno/gopherCron/config"
 	"github.com/holdno/gopherCron/pkg/cronpb"
 	"github.com/holdno/gopherCron/pkg/daemon"
+	"github.com/holdno/gopherCron/pkg/infra"
 	"github.com/holdno/gopherCron/pkg/infra/register"
 	"github.com/holdno/gopherCron/pkg/warning"
 	"github.com/holdno/gopherCron/utils"
 
+	winfra "github.com/spacegrower/watermelon/infra"
 	"github.com/spacegrower/watermelon/infra/wlog"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -42,6 +44,8 @@ type client struct {
 
 	cronpb.UnimplementedAgentServer
 	metrics *Metrics
+
+	srv *winfra.Srv[infra.NodeMetaRemote]
 }
 
 type Client interface {

@@ -104,17 +104,15 @@ func (a *workflowRunner) scheduleTask(taskInfo *common.TaskInfo) error {
 		})
 		if err != nil {
 			a.scheduleAgentMetric(fmt.Sprintf("%d_%s", taskInfo.ProjectID, taskInfo.TaskID), fmt.Sprint(err != nil))
-			if err != nil {
-				wlog.With(zap.Any("fields", map[string]interface{}{
-					"workflow_id": taskInfo.FlowInfo.WorkflowID,
-					"project_id":  taskInfo.ProjectID,
-					"task_id":     taskInfo.TaskID,
-					"tmp_id":      taskInfo.TmpID,
-					"error":       err.Error(),
-				})).Error("schedule workflow task error")
-				return errors.NewError(http.StatusInternalServerError,
-					fmt.Sprintf("stream 调度任务失败, project_id: %d, task_id: %s", taskInfo.ProjectID, taskInfo.TaskID)).WithLog(err.Error())
-			}
+			wlog.With(zap.Any("fields", map[string]interface{}{
+				"workflow_id": taskInfo.FlowInfo.WorkflowID,
+				"project_id":  taskInfo.ProjectID,
+				"task_id":     taskInfo.TaskID,
+				"tmp_id":      taskInfo.TmpID,
+				"error":       err.Error(),
+			})).Error("schedule workflow task error")
+			return errors.NewError(http.StatusInternalServerError,
+				fmt.Sprintf("stream 调度任务失败, project_id: %d, task_id: %s", taskInfo.ProjectID, taskInfo.TaskID)).WithLog(err.Error())
 		}
 	} else {
 		// 兼容旧版本grpc直连

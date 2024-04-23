@@ -106,6 +106,8 @@ func (a *client) handlerEventFromCenterV2(ctx context.Context, event *cronpb.Ser
 	case cronpb.EventType_EVENT_MODIFY_NODE_META:
 		// 中心直接下发指令变更agent的权重
 		a.cfg.Micro.Weight = event.GetModifyNodeMeta().Weight
+		a.srv.CustomInfo.Weight = a.cfg.Micro.Weight
+		a.srv.Register()
 		replyEvent.Event = &cronpb.ClientEvent_ModifyNodeMeta{
 			ModifyNodeMeta: &cronpb.Result{
 				Result:  true,

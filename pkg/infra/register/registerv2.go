@@ -24,14 +24,17 @@ import (
 )
 
 type remoteRegistryV2 struct {
-	once       sync.Once
-	ctx        context.Context
-	cancelFunc context.CancelFunc
-	client     *CenterClient
-	metas      []infra.NodeMetaRemote
-	log        wlog.Logger
-	reConnect  func() error
-	localIP    string
+	once          sync.Once
+	ctx           context.Context
+	cancelFunc    context.CancelFunc
+	client        *CenterClient
+	currentStream cronpb.Center_RegisterAgentV2Client
+	metas         []infra.NodeMetaRemote
+	log           wlog.Logger
+	reConnect     func() error
+	localIP       string
+	locker        *sync.Mutex
+	changedChan   chan struct{}
 
 	eventHandler func(context.Context, *cronpb.ServiceEvent) (*cronpb.ClientEvent, error)
 
@@ -48,6 +51,8 @@ func NewRemoteRegisterV2(localIP string, connect func() (*CenterClient, error), 
 		eventHandler: eventHandler,
 		localIP:      localIP,
 		str:          u.RandomStr(32),
+		changedChan:  make(chan struct{}),
+		locker:       &sync.Mutex{},
 	}
 
 	rr.reConnect = func() (err error) {
@@ -58,6 +63,7 @@ func NewRemoteRegisterV2(localIP string, connect func() (*CenterClient, error), 
 			rr.client.Cc.Close()
 		}
 
+		rr.currentStream = nil
 		rr.client, err = connect()
 		return
 	}
@@ -70,22 +76,33 @@ func NewRemoteRegisterV2(localIP string, connect func() (*CenterClient, error), 
 	return rr, nil
 }
 
-func (s *remoteRegistryV2) Append(meta infra.NodeMetaRemote) error {
+func (s *remoteRegistryV2) SetMetas(metas []infra.NodeMetaRemote) {
 	// customize your register logic
-	meta.Weight = utils.GetEnvWithDefault(definition.NodeWeightENVKey, 100, func(val string) (int32, error) {
-		res, err := strconv.Atoi(val)
-		if err != nil {
-			return 0, err
+	for k, v := range metas {
+		if v.Weight == 0 {
+			metas[k].Weight = utils.GetEnvWithDefault(definition.NodeWeightENVKey, 100, func(val string) (int32, error) {
+				res, err := strconv.Atoi(val)
+				if err != nil {
+					return 0, err
+				}
+				return int32(res), nil
+			})
 		}
-		return int32(res), nil
-	})
+	}
 
-	s.metas = append(s.metas, meta)
-	return nil
+	s.metas = metas
 }
 
 func (s *remoteRegistryV2) Register() error {
+	s.locker.Lock()
+	defer s.locker.Unlock()
 	s.log.Debug("start registerV2")
+
+	if s.changedChan != nil {
+		close(s.changedChan)
+	}
+
+	s.changedChan = make(chan struct{})
 
 	if err := s.register(); err != nil {
 		if errors.Is(err, io.EOF) {
@@ -125,12 +142,21 @@ func (s *remoteRegistryV2) parserServices() (services []*cronpb.AgentInfo) {
 	return
 }
 
+func (s *remoteRegistryV2) getConnect(ctx context.Context) (cronpb.Center_RegisterAgentV2Client, error) {
+	if s.currentStream != nil {
+		return s.currentStream, nil
+	}
+	var err error
+	s.currentStream, err = s.client.RegisterAgentV2(ctx)
+	return s.currentStream, err
+}
+
 func (s *remoteRegistryV2) register() error {
 	var (
-		receive  func() (*cronpb.ServiceEvent, error)
-		send     func(*cronpb.ClientEvent) error
-		close    func() error
-		services = s.parserServices()
+		receive     func() (*cronpb.ServiceEvent, error)
+		send        func(*cronpb.ClientEvent) error
+		closeStream func() error
+		services    = s.parserServices()
 
 		ctx, cancel = context.WithCancel(s.ctx)
 	)
@@ -139,13 +165,13 @@ func (s *remoteRegistryV2) register() error {
 		cancel()
 		return errors.New("empty service")
 	} else {
-		cli, err := s.client.RegisterAgentV2(ctx)
+		stream, err := s.getConnect(ctx)
 		if err != nil {
 			cancel()
 			return err
 		}
 
-		if err = cli.Send(&cronpb.ClientEvent{
+		if err = stream.Send(&cronpb.ClientEvent{
 			Id:        u.GetStrID(),
 			Type:      cronpb.EventType_EVENT_REGISTER_REQUEST,
 			EventTime: time.Now().Unix(),
@@ -159,9 +185,9 @@ func (s *remoteRegistryV2) register() error {
 			return err
 		}
 
-		receive = cli.Recv
-		send = cli.Send
-		close = cli.CloseSend
+		receive = stream.Recv
+		send = stream.Send
+		closeStream = stream.CloseSend
 	}
 
 	errHandler := func(err error) {
@@ -176,14 +202,17 @@ func (s *remoteRegistryV2) register() error {
 		s.reRegister()
 	}
 
+	waitingFirstReceive := make(chan struct{})
+
 	go safe.Run(func() {
 		var (
 			err   error
 			resp  *cronpb.ServiceEvent
 			reply *cronpb.ClientEvent
+			once  = &sync.Once{}
 		)
 		defer func() {
-			close()
+			closeStream()
 			if err != nil {
 				errHandler(err)
 			}
@@ -191,12 +220,21 @@ func (s *remoteRegistryV2) register() error {
 		}()
 		for {
 			select {
+			case <-s.changedChan:
+				return
 			case <-s.ctx.Done():
 				s.log.Warn("register receiver is down, context done")
 				return
 			default:
-				if resp, err = receive(); err != nil {
+				resp, err = receive()
+				if err != nil {
 					return
+				}
+
+				if resp.Type == cronpb.EventType_EVENT_REGISTER_REPLY {
+					once.Do(func() {
+						waitingFirstReceive <- struct{}{}
+					})
 				}
 
 				s.log.Debug("receive event", zap.String("event", resp.Type.String()), zap.Any("value", resp.GetEvent()))
@@ -215,7 +253,8 @@ func (s *remoteRegistryV2) register() error {
 			}
 		}
 	})
-
+	<-waitingFirstReceive
+	close(waitingFirstReceive)
 	return nil
 }
 

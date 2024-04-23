@@ -72,6 +72,7 @@ func SetClientWeight(c *gin.Context) {
 
 	if req.Weight > 100 || req.Weight < 0 {
 		response.APIError(c, errors.NewError(http.StatusBadRequest, "权重需要设置在0-100之间"))
+		return
 	}
 
 	if err = srv.CheckPermissions(req.ProjectID, uid, app.PermissionEdit); err != nil {
@@ -176,6 +177,7 @@ type UserWorkerInfo struct {
 	ProjectID int64  `json:"project_id"`
 	ClientIP  string `json:"client_ip"`
 	Version   string `json:"version"`
+	Region    string `json:"region"`
 }
 
 // GetWorkerList 获取节点
@@ -218,6 +220,7 @@ func GetWorkerListInfo(c *gin.Context) {
 					ProjectID: v.ID,
 					ClientIP:  worker.ClientIP,
 					Version:   worker.Version,
+					Region:    worker.Region,
 				})
 				noRepeatWorkerList = append(noRepeatWorkerList, worker.ClientIP)
 			}

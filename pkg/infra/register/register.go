@@ -72,18 +72,21 @@ func NewRemoteRegister(localIP string, connect func() (CenterClient, error), eve
 	return rr, nil
 }
 
-func (s *remoteRegistry) Append(meta infra.NodeMetaRemote) error {
+func (s *remoteRegistry) SetMetas(metas []infra.NodeMetaRemote) {
 	// customize your register logic
-	meta.Weight = utils.GetEnvWithDefault(definition.NodeWeightENVKey, 100, func(val string) (int32, error) {
-		res, err := strconv.Atoi(val)
-		if err != nil {
-			return 0, err
+	for k, v := range metas {
+		if v.Weight == 0 {
+			metas[k].Weight = utils.GetEnvWithDefault(definition.NodeWeightENVKey, 100, func(val string) (int32, error) {
+				res, err := strconv.Atoi(val)
+				if err != nil {
+					return 0, err
+				}
+				return int32(res), nil
+			})
 		}
-		return int32(res), nil
-	})
+	}
 
-	s.metas = append(s.metas, meta)
-	return nil
+	s.metas = metas
 }
 
 func (s *remoteRegistry) Register() error {
