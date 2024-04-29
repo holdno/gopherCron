@@ -5,13 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strconv"
 	"sync"
 	"time"
 
-	"github.com/spacegrower/watermelon/infra/definition"
 	"github.com/spacegrower/watermelon/infra/register"
-	"github.com/spacegrower/watermelon/infra/utils"
 	"github.com/spacegrower/watermelon/infra/wlog"
 	"github.com/spacegrower/watermelon/pkg/safe"
 	"go.uber.org/zap"
@@ -73,19 +70,6 @@ func NewRemoteRegister(localIP string, connect func() (CenterClient, error), eve
 }
 
 func (s *remoteRegistry) SetMetas(metas []infra.NodeMetaRemote) {
-	// customize your register logic
-	for k, v := range metas {
-		if v.Weight == 0 {
-			metas[k].Weight = utils.GetEnvWithDefault(definition.NodeWeightENVKey, 100, func(val string) (int32, error) {
-				res, err := strconv.Atoi(val)
-				if err != nil {
-					return 0, err
-				}
-				return int32(res), nil
-			})
-		}
-	}
-
 	s.metas = metas
 }
 

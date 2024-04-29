@@ -3,13 +3,10 @@ package infra
 import (
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"time"
 
-	"github.com/spacegrower/watermelon/infra/definition"
 	"github.com/spacegrower/watermelon/infra/register"
 	"github.com/spacegrower/watermelon/infra/resolver/etcd"
-	"github.com/spacegrower/watermelon/infra/utils"
 	"google.golang.org/grpc/resolver"
 )
 
@@ -82,15 +79,6 @@ func (n NodeMeta) WithMeta(meta register.NodeMeta) NodeMeta {
 }
 
 func (n NodeMeta) Value() string {
-	// customize your register value logic
-	n.NodeWeight = utils.GetEnvWithDefault(definition.NodeWeightENVKey, n.NodeWeight, func(val string) (int32, error) {
-		res, err := strconv.Atoi(val)
-		if err != nil {
-			return 0, err
-		}
-		return int32(res), nil
-	})
-
 	if n.RegisterTime == 0 {
 		n.RegisterTime = time.Now().Unix()
 	}
