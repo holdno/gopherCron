@@ -11,9 +11,3 @@ func TestSchedulerLatency(t *testing.T) {
 		t.Log(getSchedulerLatency(100, int32(i)) < getSchedulerLatency(50, 1))
 	}
 }
-
-func TestChanSend(t *testing.T) {
-	c1 := make(chan struct{})
-	c1 <- struct{}{}
-	t.Log("success")
-}
