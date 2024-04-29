@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/holdno/gopherCron/utils"
 
 	winfra "github.com/spacegrower/watermelon/infra"
+	wutils "github.com/spacegrower/watermelon/infra/utils"
 	"github.com/spacegrower/watermelon/infra/wlog"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -85,6 +87,15 @@ func (agent *client) loadConfigAndSetupAgentFunc() func() error {
 			if cfg.Timeout == 0 {
 				cfg.Timeout = 5
 			}
+
+			// 优先读取环境变量中的权重，若不存在则取配置文件中
+			cfg.Micro.Weight = wutils.GetEnvWithDefault("GOPHERCRON_AGENT_WEIGHT", cfg.Micro.Weight, func(val string) (int32, error) {
+				res, err := strconv.Atoi(val)
+				if err != nil {
+					return 0, err
+				}
+				return int32(res), nil
+			})
 
 			wlog.SetGlobalLogger(wlog.NewLogger(&wlog.Config{
 				Name:  "gophercron-agent",
