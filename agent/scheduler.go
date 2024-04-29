@@ -513,8 +513,8 @@ func tryLockTaskForExec(a *client, taskExecuteInfo *common.TaskExecutingInfo, ta
 			if taskExecuteInfo.CancelCtx.Err() != nil {
 				return
 			}
-			realtimeError := make(chan error)
-			err := tryLockUntilCtxIsDone(a.GetCenterSrv(), taskExecuteInfo, realtimeError)
+
+			realtimeError, err := tryLockUntilCtxIsDone(a.GetCenterSrv(), taskExecuteInfo)
 
 			if err != nil {
 				a.logger.Warn("failed to get task execute lock",
@@ -648,10 +648,10 @@ func (ts *TaskScheduler) PushEvent(event *common.TaskEvent) {
 	ts.TaskEventChan <- event
 }
 
-func tryLockUntilCtxIsDone(cli cronpb.CenterClient, execInfo *common.TaskExecutingInfo, disconnectChan chan error) error {
+func tryLockUntilCtxIsDone(cli cronpb.CenterClient, execInfo *common.TaskExecutingInfo) (chan error, error) {
 	locker, err := cli.TryLock(execInfo.CancelCtx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if err = locker.Send(&cronpb.TryLockRequest{
@@ -660,15 +660,17 @@ func tryLockUntilCtxIsDone(cli cronpb.CenterClient, execInfo *common.TaskExecuti
 	}); err != nil {
 		if errors.Is(err, io.EOF) {
 			if _, err = locker.Recv(); err != nil {
-				return err
+				return nil, err
 			}
 		}
-		return err
+		return nil, err
 	}
 
 	if _, err = locker.Recv(); err != nil {
-		return err
+		return nil, err
 	}
+
+	disconnectChan := make(chan error, 1)
 
 	go func() {
 		defer close(disconnectChan)
@@ -694,5 +696,5 @@ func tryLockUntilCtxIsDone(cli cronpb.CenterClient, execInfo *common.TaskExecuti
 		}
 	}()
 
-	return nil
+	return disconnectChan, nil
 }

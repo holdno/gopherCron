@@ -1,0 +1,1 @@
+import{_ as o,af as r,c as n,o as t}from"./index.e7a7d3cb.js";const c={};function s(a,_){const e=r("router-view");return t(),n(e)}var u=o(c,[["render",s],["__file","/Users/boyan/development/opensource/gopherCronFE/src/layouts/DummyContainer.vue"]]);export{u as default};
