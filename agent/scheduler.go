@@ -559,7 +559,7 @@ func tryLockTaskForExec(a *client, taskExecuteInfo *common.TaskExecutingInfo, ta
 
 					if gerr, ok := status.FromError(err); ok && gerr.Code() == codes.Canceled {
 						// 到中心的连接被关闭了，说明agent注册出现了问题，需要等待注册逻辑中重新实现建联
-						time.Sleep(time.Second)
+						time.Sleep(time.Millisecond * 100)
 					}
 				}
 			}
@@ -681,7 +681,7 @@ func tryLockUntilCtxIsDone(cli cronpb.CenterClient, execInfo *common.TaskExecuti
 					// 任务执行后锁最少保持5s
 					// 防止分布式部署下多台机器共同执行
 					if time.Since(execInfo.RealTime).Seconds() < 5 {
-						time.Sleep(5*time.Second - time.Duration(time.Now().Sub(execInfo.RealTime).Nanoseconds()))
+						time.Sleep(5*time.Second - time.Since(execInfo.RealTime))
 					}
 					locker.CloseSend()
 					wlog.Debug("unlock task", zap.String("task_id", execInfo.Task.TaskID), zap.Int64("project_id", execInfo.Task.ProjectID))
