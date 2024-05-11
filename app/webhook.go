@@ -89,6 +89,16 @@ func (a *app) DeleteAllWebHook(tx *gorm.DB, projectID int64) error {
 	return nil
 }
 
+func (a *app) DeleteAllWorkflowTask(tx *gorm.DB, projectID int64) error {
+	err := a.store.WorkflowTask().DeleteAll(tx, projectID)
+	if err != nil {
+		errObj := errors.ErrInternalError
+		errObj.Log = "[WebHook - DeleteAllWorkflowTask] failed to delete all workflow task by project id: " + err.Error()
+	}
+
+	return nil
+}
+
 func (a *app) HandleWebHook(agentIP string, res *common.TaskFinishedV2) error {
 	hooks, err := a.GetWebHookList(res.ProjectID)
 	if err != nil {

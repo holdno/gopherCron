@@ -515,7 +515,7 @@ func clearWorkflowKeys(kv clientv3.KV, workflowID int64) error {
 }
 
 // TemporarySchedulerTask 临时调度任务
-func (a *app) TemporarySchedulerTask(user *common.User, host string, task *common.TaskInfo) error {
+func (a *app) TemporarySchedulerTask(user *common.User, host string, task common.TaskInfo) error {
 	var (
 		err        error
 		resultChan = make(chan common.TaskFinishedV2, 1)
@@ -524,7 +524,7 @@ func (a *app) TemporarySchedulerTask(user *common.User, host string, task *commo
 	defer close(resultChan)
 
 	// reset task create time as schedule time
-	task.CreateTime = time.Now().Unix()
+	startTime := time.Now().Unix()
 
 	if task.TmpID == "" {
 		task.TmpID = utils.GetStrID()
@@ -542,7 +542,7 @@ func (a *app) TemporarySchedulerTask(user *common.User, host string, task *commo
 		user = &common.User{}
 	}
 	value, _ := json.Marshal(common.TaskWithOperator{
-		TaskInfo: task,
+		TaskInfo: &task,
 		UserID:   user.ID,
 		UserName: user.Name,
 	})
@@ -554,7 +554,7 @@ func (a *app) TemporarySchedulerTask(user *common.User, host string, task *commo
 			Command:   task.Command,
 			ProjectID: task.ProjectID,
 			Status:    common.TASK_STATUS_FAIL_V2,
-			StartTime: task.CreateTime,
+			StartTime: startTime,
 			EndTime:   time.Now().Unix(),
 			TmpID:     task.TmpID,
 			Error:     err.Error(),

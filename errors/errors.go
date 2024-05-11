@@ -122,7 +122,7 @@ var (
 	ErrUserExist = Error{Code: CodeUserExist, Msg: "该账号已存在", MsgEn: "User is exist", Log: "账号已存在"}
 	// ErrInsufficientPermissions 权限不足
 	ErrInsufficientPermissions = Error{Code: CodeInsufficientPermissions, Msg: "权限不足", MsgEn: "Insufficient permissions", Log: "无权限"}
-	ErrRoleNotFound            = Error{Code: http.StatusInternalServerError, Msg: "角色不存在", MsgEn: "invalid role", Log: "给定的权限名称在系统中不存在"}
+	ErrRoleNotFound            = Error{Code: http.StatusBadRequest, Msg: "角色不存在", MsgEn: "invalid role", Log: "给定的权限名称在系统中不存在"}
 	// ErrDontRemoveProjectAdmin 不能将管理员从项目中移除
 	ErrDontRemoveProjectAdmin = Error{Code: CodeDontRemoveProjectAdmin, Msg: "无法将项目管理员移出项目", MsgEn: "Don't remove the administrator from the project", Log: "无法将项目管理员移出项目"}
 	// ErrNoWorkingNode 没有工作节点

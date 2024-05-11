@@ -10,6 +10,7 @@ import (
 	"github.com/holdno/gocommons/selection"
 	"github.com/holdno/gopherCron/pkg/cronpb"
 	"github.com/holdno/gopherCron/pkg/infra"
+	"google.golang.org/grpc/status"
 
 	cmap "github.com/orcaman/concurrent-map/v2"
 	"github.com/spacegrower/watermelon/infra/wlog"
@@ -299,6 +300,10 @@ func (s *streamManager[T]) RecvStreamResponse(event *cronpb.ClientEvent) {
 	}
 }
 
+var (
+	SendEventRequestTimeOutError = fmt.Errorf("request time out")
+)
+
 func (s *streamManager[T]) SendEventWaitResponse(ctx context.Context, stream interface {
 	Send(*cronpb.ServiceEvent) error
 }, event *cronpb.ServiceEvent) (*cronpb.ClientEvent, error) {
@@ -316,7 +321,10 @@ func (s *streamManager[T]) SendEventWaitResponse(ctx context.Context, stream int
 			return nil, ctx.Err()
 		case result, ok := <-resp:
 			if !ok {
-				return nil, fmt.Errorf("request time out")
+				return nil, SendEventRequestTimeOutError
+			}
+			if result.Status != nil {
+				return nil, status.FromProto(result.Status).Err()
 			}
 			if result.Error != nil && result.Error.Error != "" {
 				return nil, errors.New(result.Error.Error)

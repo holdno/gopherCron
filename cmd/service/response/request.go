@@ -59,7 +59,7 @@ func APIError(c *gin.Context, err error) {
 	if res.Meta.Error.Code < 600 {
 		c.JSON(res.Meta.Error.Code, res)
 	} else {
-		c.JSON(http.StatusOK, res)
+		c.JSON(http.StatusBadRequest, res)
 	}
 
 	printLog(c, res.Meta)

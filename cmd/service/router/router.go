@@ -103,6 +103,7 @@ func SetupRoute(srv app.App, r *gin.Engine, conf *config.ServiceConfig) {
 			cron.GET("/list", etcd_func.GetTaskList)
 			cron.POST("/kill", etcd_func.KillTask)
 			cron.POST("/execute", etcd_func.ExecuteTask)
+			cron.POST("/flow_task/execute", etcd_func.ExecuteWorkflowTask)
 			cron.GET("/client_list", etcd_func.GetClientList)
 			cron.GET("/client/list", etcd_func.GetClientListWithMeta)
 			cron.POST("/monitor", etcd_func.GetWorkerListInfo)

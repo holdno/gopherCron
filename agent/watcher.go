@@ -4,10 +4,12 @@ import (
 	"context"
 	"time"
 
-	"github.com/holdno/gopherCron/common"
-	"github.com/holdno/gopherCron/pkg/cronpb"
 	"github.com/spacegrower/watermelon/infra/wlog"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/status"
+
+	"github.com/holdno/gopherCron/common"
+	"github.com/holdno/gopherCron/pkg/cronpb"
 )
 
 func newReplyEvent(id string) *cronpb.ClientEvent {
@@ -53,7 +55,9 @@ func (a *client) handlerEventFromCenterV2(ctx context.Context, event *cronpb.Ser
 		replyEvent.Type = cronpb.EventType_EVENT_SCHEDULE_REPLY
 		resp, err := a.Schedule(ctx, event.GetScheduleRequest())
 		if err != nil {
-			replyEvent.Error = &cronpb.Error{Error: err.Error()}
+			gerr, _ := status.FromError(err)
+			replyEvent.Status = gerr.Proto()
+			// replyEvent.Error = &cronpb.Error{Error: err.Error()}
 		} else {
 			replyEvent.Event = &cronpb.ClientEvent_ScheduleReply{
 				ScheduleReply: resp,
@@ -64,7 +68,9 @@ func (a *client) handlerEventFromCenterV2(ctx context.Context, event *cronpb.Ser
 		replyEvent.Type = cronpb.EventType_EVENT_KILL_TASK_REPLY
 		resp, err := a.KillTask(ctx, event.GetKillTaskRequest())
 		if err != nil {
-			replyEvent.Error = &cronpb.Error{Error: err.Error()}
+			gerr, _ := status.FromError(err)
+			replyEvent.Status = gerr.Proto()
+			// replyEvent.Error = &cronpb.Error{Error: err.Error()}
 		} else {
 			replyEvent.Event = &cronpb.ClientEvent_KillTaskReply{
 				KillTaskReply: resp,
@@ -75,7 +81,9 @@ func (a *client) handlerEventFromCenterV2(ctx context.Context, event *cronpb.Ser
 		replyEvent.Type = cronpb.EventType_EVENT_PROJECT_TASK_HASH_REPLY
 		resp, err := a.ProjectTaskHash(ctx, event.GetProjectTaskHashRequest())
 		if err != nil {
-			replyEvent.Error = &cronpb.Error{Error: err.Error()}
+			gerr, _ := status.FromError(err)
+			replyEvent.Status = gerr.Proto()
+			// replyEvent.Error = &cronpb.Error{Error: err.Error()}
 		} else {
 			replyEvent.Event = &cronpb.ClientEvent_ProjectTaskHashReply{
 				ProjectTaskHashReply: resp,
@@ -86,7 +94,9 @@ func (a *client) handlerEventFromCenterV2(ctx context.Context, event *cronpb.Ser
 		replyEvent.Type = cronpb.EventType_EVENT_COMMAND_REPLY
 		resp, err := a.Command(ctx, event.GetCommandRequest())
 		if err != nil {
-			replyEvent.Error = &cronpb.Error{Error: err.Error()}
+			gerr, _ := status.FromError(err)
+			replyEvent.Status = gerr.Proto()
+			// replyEvent.Error = &cronpb.Error{Error: err.Error()}
 		} else {
 			replyEvent.Event = &cronpb.ClientEvent_CommandReply{
 				CommandReply: resp,
@@ -97,7 +107,9 @@ func (a *client) handlerEventFromCenterV2(ctx context.Context, event *cronpb.Ser
 		replyEvent.Type = cronpb.EventType_EVENT_CHECK_RUNNING_REPLY
 		resp, err := a.CheckRunning(ctx, event.GetCheckRunningRequest())
 		if err != nil {
-			replyEvent.Error = &cronpb.Error{Error: err.Error()}
+			gerr, _ := status.FromError(err)
+			replyEvent.Status = gerr.Proto()
+			// replyEvent.Error = &cronpb.Error{Error: err.Error()}
 		} else {
 			replyEvent.Event = &cronpb.ClientEvent_CheckRunningReply{
 				CheckRunningReply: resp,

@@ -1293,7 +1293,8 @@ func (a *workflowRunner) TrySchedule() time.Duration {
 	// 遍历所有任务
 	a.PlanRange(func(workflowID int64, plan *WorkflowPlan) bool {
 		// 如果plan没有开启运行的话，直接跳过
-		if plan.Workflow.Status != common.TASK_STATUS_RUNNING {
+		if plan.Workflow.Status != common.TASK_STATUS_RUNNING &&
+			(plan.planState == nil || plan.planState.Status != common.TASK_STATUS_RUNNING_V2) {
 			return true
 		}
 		// 如果调度时间是在现在或之前再或者为临时调度任务

@@ -1,7 +1,9 @@
 syntax = "proto3";
 
 package cronpb;
-option go_package = ".;cronpb";
+option go_package = ".;cronpb"; 
+
+import "google/rpc/status.proto";
 
 service Center {
     rpc Auth (AuthReq) returns (AuthReply) {}
@@ -131,6 +133,7 @@ message ClientEvent {
         Result modify_node_meta = 11;
     }
     Error error = 100;
+    google.rpc.Status status = 101;
 }
 
 message Error {

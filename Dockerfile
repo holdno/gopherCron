@@ -1,4 +1,4 @@
-FROM amd64/golang:1.21.4-alpine3.18 AS builder
+FROM amd64/golang:1.22.0-alpine3.18 AS builder
 
 ENV GOPROXY=https://goproxy.cn,direct
 

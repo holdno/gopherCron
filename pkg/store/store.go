@@ -104,6 +104,7 @@ type WorkflowTaskStore interface {
 	GetOne(projectID int64, taskID string) (*common.WorkflowTask, error)
 	Save(tx *gorm.DB, data *common.WorkflowTask) error
 	Delete(tx *gorm.DB, projectID int64, taskID string) error
+	DeleteAll(tx *gorm.DB, projectID int64) error
 	GetMultiList(taskIDs []string) ([]common.WorkflowTask, error)
 }
 

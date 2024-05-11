@@ -13,7 +13,7 @@ type workflowTaskStore struct {
 	commonFields
 }
 
-//NewWebHookStore
+// NewWebHookStore
 func NewWorkflowTaskStore(provider SqlProviderInterface) store.WorkflowTaskStore {
 	repo := &workflowTaskStore{}
 
@@ -87,5 +87,13 @@ func (s *workflowTaskStore) Delete(tx *gorm.DB, projectID int64, taskID string) 
 		tx = s.GetMaster()
 	}
 	err := tx.Table(s.GetTable()).Where("project_id = ? AND task_id = ?", projectID, taskID).Delete(nil).Error
+	return err
+}
+
+func (s *workflowTaskStore) DeleteAll(tx *gorm.DB, projectID int64) error {
+	if tx == nil {
+		tx = s.GetMaster()
+	}
+	err := tx.Table(s.GetTable()).Where("project_id = ?", projectID).Delete(nil).Error
 	return err
 }

@@ -21,17 +21,17 @@ import (
 )
 
 type remoteRegistryV2 struct {
-	once          sync.Once
-	ctx           context.Context
-	cancelFunc    context.CancelFunc
-	client        *CenterClient
-	currentStream cronpb.Center_RegisterAgentV2Client
-	metas         []infra.NodeMetaRemote
-	log           wlog.Logger
-	reConnect     func() error
-	localIP       string
-	locker        *sync.Mutex
-	changedChan   chan struct{}
+	once            sync.Once
+	ctx             context.Context
+	cancelFunc      context.CancelFunc
+	client          *CenterClient
+	currentStream   cronpb.Center_RegisterAgentV2Client
+	metas           []infra.NodeMetaRemote
+	log             wlog.Logger
+	reConnect       func() error
+	localIP         string
+	locker          *sync.Mutex
+	receivingLocker *sync.Mutex
 
 	eventHandler func(context.Context, *cronpb.ServiceEvent) (*cronpb.ClientEvent, error)
 
@@ -42,14 +42,14 @@ func NewRemoteRegisterV2(localIP string, connect func() (*CenterClient, error), 
 	ctx, cancel := context.WithCancel(context.Background())
 
 	rr := &remoteRegistryV2{
-		ctx:          ctx,
-		cancelFunc:   cancel,
-		log:          wlog.With(zap.String("component", "remote-register")),
-		eventHandler: eventHandler,
-		localIP:      localIP,
-		str:          u.RandomStr(32),
-		changedChan:  make(chan struct{}),
-		locker:       &sync.Mutex{},
+		ctx:             ctx,
+		cancelFunc:      cancel,
+		log:             wlog.With(zap.String("component", "remote-register")),
+		eventHandler:    eventHandler,
+		localIP:         localIP,
+		str:             u.RandomStr(32),
+		locker:          &sync.Mutex{},
+		receivingLocker: &sync.Mutex{},
 	}
 
 	rr.reConnect = func() (err error) {
@@ -81,12 +81,6 @@ func (s *remoteRegistryV2) Register() error {
 	s.locker.Lock()
 	defer s.locker.Unlock()
 	s.log.Debug("start registerV2")
-
-	if s.changedChan != nil {
-		close(s.changedChan)
-	}
-
-	s.changedChan = make(chan struct{})
 
 	if err := s.register(); err != nil {
 		if errors.Is(err, io.EOF) {
@@ -141,17 +135,13 @@ func (s *remoteRegistryV2) register() error {
 		send        func(*cronpb.ClientEvent) error
 		closeStream func() error
 		services    = s.parserServices()
-
-		ctx, cancel = context.WithCancel(s.ctx)
 	)
 
 	if len(services) == 0 {
-		cancel()
 		return errors.New("empty service")
 	} else {
-		stream, err := s.getConnect(ctx)
+		stream, err := s.getConnect(s.ctx)
 		if err != nil {
-			cancel()
 			return err
 		}
 
@@ -165,7 +155,6 @@ func (s *remoteRegistryV2) register() error {
 				},
 			},
 		}); err != nil {
-			cancel()
 			return err
 		}
 
@@ -175,6 +164,10 @@ func (s *remoteRegistryV2) register() error {
 	}
 
 	errHandler := func(err error) {
+		if closeStream != nil {
+			closeStream()
+			s.currentStream = nil
+		}
 		s.log.Error("agent handle event with error", zap.Error(err))
 		time.Sleep(time.Second)
 		if gerr, ok := status.FromError(err); ok && gerr.Code() == codes.Canceled {
@@ -186,59 +179,64 @@ func (s *remoteRegistryV2) register() error {
 		s.reRegister()
 	}
 
-	waitingFirstReceive := make(chan struct{})
-
-	go safe.Run(func() {
-		var (
-			err   error
-			resp  *cronpb.ServiceEvent
-			reply *cronpb.ClientEvent
-			once  = &sync.Once{}
-		)
-		defer func() {
-			closeStream()
-			if err != nil {
-				errHandler(err)
-			}
-			cancel()
-		}()
-		for {
-			select {
-			case <-s.changedChan:
-				return
-			case <-s.ctx.Done():
-				s.log.Warn("register receiver is down, context done")
-				return
-			default:
-				resp, err = receive()
+	if s.receivingLocker.TryLock() {
+		waitingFirstReceive := make(chan struct{})
+		go safe.Run(func() {
+			var (
+				err   error
+				resp  *cronpb.ServiceEvent
+				reply *cronpb.ClientEvent
+				once  = &sync.Once{}
+			)
+			defer func() {
+				close(waitingFirstReceive)
+				s.receivingLocker.Unlock()
 				if err != nil {
+					errHandler(err)
+				}
+			}()
+
+			for {
+				select {
+				case <-s.ctx.Done():
+					s.log.Warn("register receiver is down, context done")
 					return
-				}
-
-				if resp.Type == cronpb.EventType_EVENT_REGISTER_REPLY {
-					once.Do(func() {
-						waitingFirstReceive <- struct{}{}
-					})
-				}
-
-				s.log.Debug("receive event", zap.String("event", resp.Type.String()), zap.Any("value", resp.GetEvent()))
-
-				if reply, err = s.eventHandler(ctx, resp); err != nil {
-					return
-				}
-
-				if reply != nil {
-					if err = send(reply); err != nil {
-						s.log.Error("failed reply center request", zap.Error(err), zap.String("event", resp.Type.String()),
-							zap.String("value", resp.String()))
+				default:
+					resp, err = receive()
+					if err != nil {
 						return
+					}
+
+					if resp.Type == cronpb.EventType_EVENT_REGISTER_REPLY {
+						once.Do(func() {
+							waitingFirstReceive <- struct{}{}
+						})
+					}
+
+					s.log.Debug("receive event", zap.String("event", resp.Type.String()), zap.Any("value", resp.GetEvent()))
+					func() {
+						ctx, cancel := context.WithTimeout(s.ctx, time.Minute)
+						defer cancel()
+						reply, err = s.eventHandler(ctx, resp)
+					}()
+					if err != nil {
+						return
+					}
+
+					if reply != nil {
+						if err = send(reply); err != nil {
+							s.log.Error("failed reply center request", zap.Error(err), zap.String("event", resp.Type.String()),
+								zap.String("value", resp.String()))
+							return
+						}
 					}
 				}
 			}
-		}
-	})
-	<-waitingFirstReceive
-	close(waitingFirstReceive)
+		})
+
+		<-waitingFirstReceive
+	}
+
 	return nil
 }
 

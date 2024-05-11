@@ -186,10 +186,13 @@ func (s *cronRpc) SendEvent(ctx context.Context, req *cronpb.SendEventRequest) (
 			}
 			resp, err := s.app.StreamManagerV2().SendEventWaitResponse(ctx, stream, req.Event)
 			if err != nil {
-				stream.Cancel()
-				return nil, errors.NewError(http.StatusInternalServerError, fmt.Sprintf("stream 下发任务操作失败, 主动断开agent链接, %s:%d, %v", stream.Host, stream.Port, err))
+				gerr, ok := status.FromError(err)
+				if err == app.SendEventRequestTimeOutError || (ok && (gerr.Code() == codes.Unavailable || gerr.Code() == codes.Canceled)) {
+					stream.Cancel()
+				}
+				return nil, status.Error(gerr.Code(), fmt.Sprintf("stream 下发任务操作失败, %s", gerr.Message()))
 			}
-			return resp, nil
+			return resp, err
 		}
 		for _, v := range s.app.StreamManager().GetStreams(req.ProjectId, cronpb.Agent_ServiceDesc.ServiceName) {
 			if err := v.Send(req.Event.GetRegisterReply()); err != nil {

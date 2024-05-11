@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/rand"
+	"math/rand/v2"
 	"runtime"
 	"sort"
 	"strings"
@@ -311,6 +311,10 @@ func (a *client) TrySchedule() time.Duration {
 			// 因为可能上一次任务还没执行结束
 			if a.cfg.Micro.Weight > 0 { // 权重大于0才会调度任务
 				a.TryStartTask(plan)
+			} else {
+				wlog.Debug("skip execute task, this client weight is zero",
+					zap.String("task_id", plan.Task.TaskID),
+					zap.Int64("project_id", plan.Task.ProjectID))
 			}
 			plan.NextTime = plan.Expr.Next(now) // 更新下一次执行时间
 		}
@@ -492,7 +496,18 @@ func getSchedulerLatency(w int32, runningCount int32) time.Duration {
 	if set > 200 {
 		set = 200
 	}
-	return time.Duration(rand.Int31n(200+(100-w)*2))*time.Millisecond + time.Duration(set)*time.Millisecond
+
+	// Base delay set to 1 second (1000 ms)
+	var baseDelay int32 = 500
+	// Calculate the maximum reduction based on weight
+	var maxReduction int32 = w * 5 // weight 0-100, so max 1000 ms reduction
+	// Apply a random reduction from 0 to maxReduction
+	randomReduction := rand.Int32N(maxReduction + 1)
+
+	// Final delay is base delay minus a random factor based on weight
+	delay := baseDelay - randomReduction
+
+	return time.Duration(delay+set) * time.Microsecond
 }
 
 func tryLockTaskForExec(a *client, taskExecuteInfo *common.TaskExecutingInfo, taskResultWriter interface{ WriteString(s string) }) error {

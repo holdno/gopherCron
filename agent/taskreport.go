@@ -10,6 +10,7 @@ import (
 	"github.com/holdno/gopherCron/config"
 	"github.com/holdno/gopherCron/pkg/store"
 	"github.com/holdno/gopherCron/pkg/store/sqlStore"
+	"github.com/jinzhu/gorm"
 
 	"github.com/holdno/gocommons/selection"
 	"github.com/spacegrower/watermelon/infra/wlog"
@@ -52,15 +53,15 @@ func (r *TaskResultReporter) ResultReport(result *common.TaskExecuteResult) erro
 	)
 
 	opts := selection.NewSelector(selection.NewRequirement("id", selection.Equals, result.ExecuteInfo.Task.ProjectID))
-	if projects, err = r.projectStore.GetProject(opts); err != nil {
-		return fmt.Errorf("failed to report task result, the task project not found, %w", err)
+	if projects, err = r.projectStore.GetProject(opts); err != nil && err != gorm.ErrRecordNotFound {
+		return fmt.Errorf("failed to report task result, %w", err)
 	}
 
 	if len(projects) > 0 {
 		projectInfo = projects[0]
 	} else {
 		r.logger.Error("task result report error, project not exist!", zap.Int64("project_id", result.ExecuteInfo.Task.ProjectID))
-		return errors.New("task result report error, project not exist!")
+		return errors.New("task result report error, the project is not exist!")
 	}
 
 	taskResult = &common.TaskResultLog{

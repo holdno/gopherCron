@@ -18,6 +18,7 @@ type TmpExecuteRequest struct {
 	Command   string `form:"command" json:"command" binding:"required"`
 	Timeout   int    `form:"timeout" json:"timeout" binding:"required"`
 	Noseize   int    `form:"noseize" json:"noseize"`
+	Host      string `form:"host" json:"host"`
 }
 
 func TmpExecute(c *gin.Context) {
@@ -49,7 +50,7 @@ func TmpExecute(c *gin.Context) {
 	}
 	taskID := fmt.Sprintf("tmp_%s", utils.GetStrID())
 	// 调用etcd的put方法以触发watcher从而调度该任务
-	if err = srv.TemporarySchedulerTask(user, "", &common.TaskInfo{
+	if err = srv.TemporarySchedulerTask(user, req.Host, common.TaskInfo{
 		TaskID:    taskID,
 		ProjectID: req.ProjectID,
 		Name:      req.Name,
@@ -69,6 +70,59 @@ type ExecuteTaskRequest struct {
 	ProjectID int64  `form:"project_id" json:"project_id" binding:"required"`
 	TaskID    string `form:"task_id" json:"task_id" binding:"required"`
 	Host      string `form:"host" json:"host"`
+}
+
+func ExecuteWorkflowTask(c *gin.Context) {
+	var (
+		req  ExecuteTaskRequest
+		err  error
+		task *common.WorkflowTask
+		res  []common.ClientInfo
+		uid  = utils.GetUserID(c)
+
+		srv = app.GetApp(c)
+	)
+
+	if err = utils.BindArgsWithGin(c, &req); err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	if res, err = srv.GetWorkerList(req.ProjectID); err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	if len(res) == 0 {
+		response.APIError(c, errors.ErrNoWorkingNode)
+		return
+	}
+
+	if task, err = srv.GetWorkflowTask(req.ProjectID, req.TaskID); err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	user, err := srv.GetUserInfo(uid)
+	if err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	if err = srv.TemporarySchedulerTask(user, req.Host, common.TaskInfo{
+		TaskID:    task.TaskID,
+		ProjectID: req.ProjectID,
+		Name:      task.TaskName,
+		Command:   task.Command,
+		Timeout:   task.Timeout,
+		Noseize:   task.Noseize,
+		Cron:      "* * * * * * *",
+	}); err != nil {
+		response.APIError(c, err)
+		return
+	}
+
+	response.APISuccess(c, nil)
 }
 
 // ExecuteTask 立即执行某个任务
@@ -114,7 +168,7 @@ func ExecuteTask(c *gin.Context) {
 		return
 	}
 
-	if err = srv.TemporarySchedulerTask(user, req.Host, task); err != nil {
+	if err = srv.TemporarySchedulerTask(user, req.Host, *task); err != nil {
 		response.APIError(c, err)
 		return
 	}
