@@ -5,7 +5,9 @@ ENV GOPROXY=https://goproxy.cn,direct
 WORKDIR /gophercron
 COPY . .
 RUN mkdir -p _build
-COPY dist /gophercron/view
+COPY dist /gophercron/_build/view
+COPY ./cmd/service/conf/config-default.toml /gophercron/_build/config/service-config-default.toml
+COPY ./cmd/client/conf/config-default.toml /gophercron/_build/config/client-config-default.toml
 RUN go build -a -ldflags '-extldflags "-static"' -o _build/gophercron ./cmd/
 
 
