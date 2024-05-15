@@ -1,0 +1,29 @@
+# This workflow will build a golang project
+# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-go
+
+name: Go
+
+on:
+  push:
+    tags:
+      - 'v*'  # 这里可以使用通配符，例如 'v*' 表示所有以 'v' 开头的标签
+
+jobs:
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Docker Login
+      # You may pin to the exact commit or the version.
+      # uses: docker/login-action@e92390c5fb421da1463c202d546fed0ec5c39f20
+      uses: docker/login-action@v3.1.0
+      with:
+        # Username used to log against the Docker registry
+        username: ${{ DOCKER_HUB_USERNAME }}
+        # Password or personal access token used to log against the Docker registry
+        password: ${{ DOCKER_HUB_PASSWORD }}
+
+    - name: Build
+      run: ./script/image.sh
