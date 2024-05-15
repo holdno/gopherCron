@@ -14,6 +14,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
+    - name: Get tag version
+      id: get_tag_version
+      run: echo "TAG_VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
 
     - name: Docker Login
       # You may pin to the exact commit or the version.
@@ -25,5 +28,5 @@ jobs:
         # Password or personal access token used to log against the Docker registry
         password: ${{ DOCKER_HUB_PASSWORD }}
 
-    - name: Build
-      run: ./script/image.sh
+    - name: Build and push image
+      run: ./script/image.sh ${{ env.TAG_VERSION }}
