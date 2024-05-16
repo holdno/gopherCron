@@ -245,7 +245,7 @@ func (a *app) GetAgentRegisterMeta(region string, projectID int64, host string) 
 	}
 
 	for _, v := range results {
-		if v.attr.Host == host {
+		if v.attr.Host == host || fmt.Sprintf("%s:%d", v.attr.Host, v.attr.Port) == host {
 			return v, nil
 		}
 	}

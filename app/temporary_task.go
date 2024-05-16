@@ -33,7 +33,7 @@ func (a *app) CreateTemporaryTask(data common.TemporaryTask) error {
 func (a *app) GetNeedToScheduleTemporaryTask(t time.Time) ([]*common.TemporaryTask, error) {
 	truncateTime := t.Truncate(time.Minute)
 	selector := selection.NewSelector(
-		selection.NewRequirement("schedule_time", selection.LessThanEqual, truncateTime.Add(time.Minute).Unix()),
+		selection.NewRequirement("schedule_time", selection.LessThan, truncateTime.Add(time.Minute).Unix()),
 		selection.NewRequirement("schedule_time", selection.GreaterThan, truncateTime.Add(-time.Minute).Unix()),
 		selection.NewRequirement("schedule_status", selection.Equals, common.TEMPORARY_TASK_SCHEDULE_STATUS_WAITING),
 	)
