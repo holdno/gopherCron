@@ -1,6 +1,8 @@
 package etcd_func
 
 import (
+	"context"
+	"net/http"
 	"time"
 
 	"github.com/holdno/gopherCron/app"
@@ -23,13 +25,12 @@ type KillTaskRequest struct {
 // 一般强行结束任务就是想要停止任务 所以这里对任务的状态进行变更
 func KillTask(c *gin.Context) {
 	var (
-		err    error
-		req    KillTaskRequest
-		task   *common.TaskInfo
-		errObj errors.Error
-		uid    = utils.GetUserID(c)
-		srv    = app.GetApp(c)
-		lk     *etcd.Locker
+		err  error
+		req  KillTaskRequest
+		task *common.TaskInfo
+		uid  = utils.GetUserID(c)
+		srv  = app.GetApp(c)
+		lk   *etcd.Locker
 	)
 
 	if err = utils.BindArgsWithGin(c, &req); err != nil {
@@ -50,15 +51,26 @@ func KillTask(c *gin.Context) {
 
 	// 强杀任务后暂停任务
 	if task, err = srv.GetTask(req.ProjectID, req.TaskID); err != nil {
-		goto ChangeStatusError
+		cerr := errors.NewError(http.StatusInternalServerError, "获取任务信息失败")
+		cerr.Log = err.Error()
+		response.APIError(c, cerr)
+		return
 	}
 
 	lk = srv.GetTaskLocker(task)
 	// 锁释放则证明任务结束
+	ctx, cancel := context.WithTimeout(c, time.Second*10)
+	defer cancel()
 	for {
-		if err = lk.TryLock(); err != nil {
-			time.Sleep(time.Second)
-			continue
+		select {
+		case <-ctx.Done():
+			response.APIError(c, ctx.Err())
+			return
+		default:
+			if err = lk.TryLock(); err != nil {
+				time.Sleep(time.Second)
+				continue
+			}
 		}
 		break
 	}
@@ -66,17 +78,14 @@ func KillTask(c *gin.Context) {
 
 	task.Status = 0
 	if _, err = srv.SaveTask(task); err != nil {
-		goto ChangeStatusError
+		cerr := errors.NewError(http.StatusInternalServerError, "强行关闭任务成功，暂停任务失败")
+		cerr.Log = err.Error()
+		cerr.MsgEn = "task killed, not stop"
+		response.APIError(c, err)
+		return
 	}
-	//if err = srv.SetTaskNotRunning(*task); err != nil {
-	//	goto ChangeStatusError
-	//}
+	// if err = srv.SetTaskNotRunning(*task); err != nil {
+	// 	goto ChangeStatusError
+	// }
 	response.APISuccess(c, nil)
-	return
-
-ChangeStatusError:
-	errObj = err.(errors.Error)
-	errObj.Msg = "强行关闭任务成功，暂停任务失败"
-	errObj.MsgEn = "task killed, not stop"
-	response.APIError(c, errObj)
 }

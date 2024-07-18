@@ -260,14 +260,16 @@ func (a *client) handleTaskEvent(event *common.TaskEvent) {
 			logrus.WithField("Error", err.Error()).Error("build task schedule plan error")
 			return
 		}
-		a.TryStartTask(taskSchedulePlan)
+		taskSchedulePlan.PlanTime = time.Now()
+		a.TryStartTask(*taskSchedulePlan)
 	case common.TASK_EVENT_WORKFLOW_SCHEDULE:
 		// 构建执行计划
 		if taskSchedulePlan, err = common.BuildWorkflowTaskSchedulerPlan(event.Task.TaskInfo); err != nil {
 			logrus.WithField("Error", err.Error()).Error("build task schedule plan error")
 			return
 		}
-		a.TryStartTask(taskSchedulePlan)
+		taskSchedulePlan.PlanTime = time.Now()
+		a.TryStartTask(*taskSchedulePlan)
 	case common.TASK_EVENT_SAVE:
 		// 构建执行计划
 		if event.Task.Status == common.TASK_STATUS_START {
@@ -306,22 +308,22 @@ func (a *client) TrySchedule() time.Duration {
 	// 遍历所有任务
 	a.scheduler.PlanRange(func(schedulerKey string, plan *common.TaskSchedulePlan) bool {
 		// 如果调度时间是在现在或之前再或者为临时调度任务
-		if plan.NextTime.Before(now) || plan.NextTime.Equal(now) {
+		if plan.PlanTime.Before(now) || plan.PlanTime.Equal(now) {
 			// 尝试执行任务
 			// 因为可能上一次任务还没执行结束
 			if a.cfg.Micro.Weight > 0 { // 权重大于0才会调度任务
-				a.TryStartTask(plan)
+				a.TryStartTask(*plan)
 			} else {
 				wlog.Debug("skip execute task, this client weight is zero",
 					zap.String("task_id", plan.Task.TaskID),
 					zap.Int64("project_id", plan.Task.ProjectID))
 			}
-			plan.NextTime = plan.Expr.Next(now) // 更新下一次执行时间
+			plan.PlanTime = plan.Expr.Next(now) // 更新下一次执行时间
 		}
 
 		// 获取下一个要执行任务的时间
-		if nearTime == nil || plan.NextTime.Before(*nearTime) {
-			nearTime = &plan.NextTime
+		if nearTime == nil || plan.PlanTime.Before(*nearTime) {
+			nearTime = &plan.PlanTime
 		}
 
 		return true
@@ -332,7 +334,7 @@ func (a *client) TrySchedule() time.Duration {
 }
 
 // TryStartTask 开始执行任务
-func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
+func (a *client) TryStartTask(plan common.TaskSchedulePlan) error {
 	if plan.TmpID == "" {
 		plan.TmpID = utils.GetStrID()
 	}
@@ -437,11 +439,12 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 		taskRuntimeMetrics := a.metrics.TaskRuntimeRecord(taskExecuteInfo.Task.ProjectID, taskExecuteInfo.Task.TaskID, taskExecuteInfo.Task.Name)
 		defer func() {
 			// 删除任务的正在执行状态
-			a.scheduler.DeleteExecutingTask(plan.Task.SchedulerKey())
 			reportTaskResult(a, taskExecuteInfo, plan, result)
+			a.scheduler.DeleteExecutingTask(plan.Task.SchedulerKey())
 			taskRuntimeMetrics.ObserveDuration()
 		}()
 
+		// 开始执行任务
 		if err := retry.Do(func() error {
 			value, _ := json.Marshal(taskExecuteInfo)
 			ctx, cancel := context.WithTimeout(taskExecuteInfo.CancelCtx, time.Duration(a.cfg.Timeout)*time.Second)
@@ -456,7 +459,14 @@ func (a *client) TryStartTask(plan *common.TaskSchedulePlan) error {
 				},
 			})
 			return err
-		}, retry.Attempts(3), retry.DelayType(retry.BackOffDelay),
+		}, retry.RetryIf(func(err error) bool {
+			if gerr, _ := status.FromError(err); gerr.Code() != codes.Aborted {
+				a.logger.Debug("task aborted", zap.String("task_id", plan.Task.TaskID), zap.Int64("project_id", plan.Task.ProjectID),
+					zap.String("tmp_id", plan.TmpID), zap.Error(err))
+				return false
+			}
+			return true
+		}), retry.Attempts(3), retry.DelayType(retry.BackOffDelay),
 			retry.MaxJitter(time.Second*30), retry.LastErrorOnly(true)); err != nil {
 			taskExecuteInfo.CancelFunc()
 			a.metrics.SystemErrInc("agent_status_report_failure")
@@ -497,17 +507,17 @@ func getSchedulerLatency(w int32, runningCount int32) time.Duration {
 		set = 200
 	}
 
-	// Base delay set to 1 second (1000 ms)
+	// Base delay set to 500 ms
 	var baseDelay int32 = 500
 	// Calculate the maximum reduction based on weight
-	var maxReduction int32 = w * 5 // weight 0-100, so max 1000 ms reduction
+	var maxReduction int32 = w * 5 // weight 0-100, so max 500 ms reduction
 	// Apply a random reduction from 0 to maxReduction
-	randomReduction := rand.Int32N(maxReduction + 1)
+	randomReduction := rand.Int32N(maxReduction)
 
 	// Final delay is base delay minus a random factor based on weight
 	delay := baseDelay - randomReduction
 
-	return time.Duration(delay+set) * time.Microsecond
+	return time.Duration(delay+set) * time.Millisecond
 }
 
 func tryLockTaskForExec(a *client, taskExecuteInfo *common.TaskExecutingInfo, taskResultWriter interface{ WriteString(s string) }) error {
@@ -547,7 +557,7 @@ func tryLockTaskForExec(a *client, taskExecuteInfo *common.TaskExecutingInfo, ta
 					})
 					if !first {
 						a.metrics.SystemErrInc("agent_task_execute_lock_failure")
-						taskResultWriter.WriteString(fmt.Sprintf("任务执行过程中锁维持失败,错误信息:%s,agent主动终止任务", err.Error()))
+						taskResultWriter.WriteString(fmt.Sprintf("任务执行过程中锁维持失败，错误信息：%s，agent主动终止任务", err.Error()))
 					}
 					return
 				}
@@ -585,7 +595,7 @@ func tryLockTaskForExec(a *client, taskExecuteInfo *common.TaskExecutingInfo, ta
 }
 
 // 将任务结果上报到中心服务
-func reportTaskResult(a *client, taskExecuteInfo *common.TaskExecutingInfo, plan *common.TaskSchedulePlan, result *common.TaskExecuteResult) {
+func reportTaskResult(a *client, taskExecuteInfo *common.TaskExecutingInfo, plan common.TaskSchedulePlan, result *common.TaskExecuteResult) {
 	f := common.TaskFinishedV2{
 		TaskName:  taskExecuteInfo.Task.Name,
 		TaskID:    taskExecuteInfo.Task.TaskID,
@@ -593,6 +603,7 @@ func reportTaskResult(a *client, taskExecuteInfo *common.TaskExecutingInfo, plan
 		ProjectID: taskExecuteInfo.Task.ProjectID,
 		Status:    common.TASK_STATUS_DONE_V2,
 		TmpID:     taskExecuteInfo.TmpID,
+		PlanTime:  taskExecuteInfo.PlanTime.Unix(),
 	}
 	if plan.UserId != 0 {
 		f.Operator = fmt.Sprintf("%s(%d)", plan.UserName, plan.UserId)
@@ -672,6 +683,8 @@ func tryLockUntilCtxIsDone(cli cronpb.CenterClient, execInfo *common.TaskExecuti
 	if err = locker.Send(&cronpb.TryLockRequest{
 		ProjectId: execInfo.Task.ProjectID,
 		TaskId:    execInfo.Task.TaskID,
+		TaskTmpId: execInfo.TmpID,
+		Type:      cronpb.LockType_LOCK,
 	}); err != nil {
 		if errors.Is(err, io.EOF) {
 			if _, err = locker.Recv(); err != nil {
@@ -695,9 +708,15 @@ func tryLockUntilCtxIsDone(cli cronpb.CenterClient, execInfo *common.TaskExecuti
 				safe.Run(func() {
 					// 任务执行后锁最少保持5s
 					// 防止分布式部署下多台机器共同执行
-					if time.Since(execInfo.RealTime).Seconds() < 5 {
-						time.Sleep(5*time.Second - time.Since(execInfo.RealTime))
-					}
+					// if time.Since(execInfo.RealTime).Seconds() < 5 {
+					// 	time.Sleep(5*time.Second - time.Since(execInfo.RealTime))
+					// }
+					locker.Send(&cronpb.TryLockRequest{
+						ProjectId: execInfo.Task.ProjectID,
+						TaskId:    execInfo.Task.TaskID,
+						TaskTmpId: execInfo.TmpID,
+						Type:      cronpb.LockType_UNLOCK,
+					})
 					locker.CloseSend()
 					wlog.Debug("unlock task", zap.String("task_id", execInfo.Task.TaskID), zap.Int64("project_id", execInfo.Task.ProjectID))
 				})

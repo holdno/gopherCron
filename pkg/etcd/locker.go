@@ -80,7 +80,7 @@ func (tl *Locker) TryLock() error {
 }
 
 // 尝试上锁
-func (tl *Locker) TryLockWithOwner(agentIP string) error {
+func (tl *Locker) TryLockWithOwner(owner string) error {
 	var (
 		leaseGrantResp *clientv3.LeaseGrantResponse
 		cancelCtx      context.Context
@@ -133,7 +133,7 @@ func (tl *Locker) TryLockWithOwner(agentIP string) error {
 
 	// 事务抢锁
 	txn.If(clientv3.Compare(clientv3.CreateRevision(tl.key), "=", 0)).
-		Then(clientv3.OpPut(tl.key, agentIP, clientv3.WithLease(leaseGrantResp.ID))).
+		Then(clientv3.OpPut(tl.key, owner, clientv3.WithLease(leaseGrantResp.ID))).
 		Else(clientv3.OpGet(tl.key))
 
 	// 提交事务
@@ -151,14 +151,14 @@ func (tl *Locker) TryLockWithOwner(agentIP string) error {
 		// 导致锁需要继承的原因可能是持有锁的center突然宕机，从而导致agent重新尝试连接其他center进行加锁，但是锁又被lease keep在一定的ttl中没有及时释放
 		if len(txnResp.Responses) == 0 ||
 			len(txnResp.Responses[0].GetResponseRange().Kvs) == 0 ||
-			string(txnResp.Responses[0].GetResponseRange().Kvs[0].Value) != agentIP {
+			string(txnResp.Responses[0].GetResponseRange().Kvs[0].Value) != owner {
 			failFunc()
 			return errors.ErrLockAlreadyRequired
 		}
 
 		ctx, cancel := utils.GetContextWithTimeout()
 		defer cancel()
-		if _, err = tl.kv.Put(ctx, tl.key, agentIP, clientv3.WithLease(leaseGrantResp.ID)); err != nil {
+		if _, err = tl.kv.Put(ctx, tl.key, owner, clientv3.WithLease(leaseGrantResp.ID)); err != nil {
 			failFunc()
 			return err
 		}
