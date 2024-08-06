@@ -103,15 +103,9 @@ func execute(ctx context.Context, shell, command string, logger wlog.Logger) (*s
 	if err = cmd.Wait(); err != nil { // cmd.Wait will release io
 		ctxErr := ctx.Err()
 		var errMsg string
-		if cmd.ProcessState.ExitCode() == -1 {
-			if ctxErr == context.DeadlineExceeded {
-				errMsg = "context timeout"
-			} else if ctxErr == context.Canceled {
-				errMsg = "context canceled"
-			}
-		}
-
-		if errMsg == "" {
+		if cmd.ProcessState.ExitCode() == -1 && ctxErr != nil {
+			errMsg = ctxErr.Error()
+		} else {
 			errMsg = err.Error()
 		}
 
@@ -126,6 +120,13 @@ func (a *client) ExecuteTask(info *common.TaskExecutingInfo) *common.TaskExecute
 		StartTime:   time.Now(),
 		ExecuteInfo: info,
 	}
+
+	if result.StartTime.Sub(info.RealTime.Add(time.Second*5)) > 0 {
+		result.EndTime = time.Now()
+		result.Err = "task starting timeout"
+		return result
+	}
+
 	if info.CancelCtx.Err() != nil {
 		result.Err = info.CancelCtx.Err().Error()
 		result.EndTime = time.Now()

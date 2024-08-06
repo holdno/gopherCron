@@ -90,7 +90,7 @@ type TaskSchedulePlan struct {
 	Task     *TaskInfo
 	Expr     *cronexpr.Expression // 解析后的cron表达式
 	TmpID    string
-	NextTime time.Time
+	PlanTime time.Time
 	Type     PlanType
 	UserId   int64
 	UserName string
@@ -228,19 +228,6 @@ func BuildWorkflowSchedulerKey(workflowID, projectID int64, taskID string) strin
 	return fmt.Sprintf("%s/%d/%s/%d/%s", ETCD_PREFIX, projectID, WORKFLOW, workflowID, taskID)
 }
 
-// BuildWorkflowSchedulerKey agent返回接收调度确认的key
-func BuildWorkflowAckKey(workflowID, projectID int64, taskID, tmpID string) string {
-	return fmt.Sprintf("%s/%d/%s/%d/%s/%s", ETCD_PREFIX, projectID, WORKFLOW_ACK, workflowID, taskID, tmpID)
-}
-
-func BuildTaskResultQueuePrefixKey() string {
-	return fmt.Sprintf("%s/%s/%s/", ETCD_PREFIX, "queue", "task_result")
-}
-
-func BuildTaskResultQueueProjectKey(projectID int64) string {
-	return fmt.Sprintf("%s%d/", BuildTaskResultQueuePrefixKey(), projectID)
-}
-
 // IsTemporaryKey 检测是否为临时调度key
 func IsTemporaryKey(key string) bool {
 	return strings.Contains(key, "/"+TEMPORARY+"/")
@@ -367,7 +354,7 @@ func BuildTaskSchedulerPlan(task *TaskWithOperator, planType PlanType) (*TaskSch
 		UserId:   task.UserID,
 		UserName: task.UserName,
 		Expr:     expr,
-		NextTime: expr.Next(time.Now()),
+		PlanTime: expr.Next(time.Now()),
 		Type:     planType,
 		TmpID:    task.TmpID,
 	}, nil
@@ -383,13 +370,13 @@ func BuildWorkflowTaskSchedulerPlan(task *TaskInfo) (*TaskSchedulePlan, error) {
 }
 
 // BuildTaskExecuteInfo 构建 executer
-func BuildTaskExecuteInfo(plan *TaskSchedulePlan) *TaskExecutingInfo {
+func BuildTaskExecuteInfo(plan TaskSchedulePlan) *TaskExecutingInfo {
 	if plan.TmpID == "" {
 		plan.TmpID = plan.Task.TmpID
 	}
 	info := &TaskExecutingInfo{
 		Task:     plan.Task,
-		PlanTime: plan.NextTime, // 计划调度时间
+		PlanTime: plan.PlanTime, // 计划调度时间
 		PlanType: plan.Type,
 		RealTime: time.Now(), // 真实执行时间
 		TmpID:    plan.TmpID,
@@ -428,4 +415,5 @@ type TaskFinishedV2 struct {
 	Result     string `json:"result"`
 	Error      string `json:"error"`
 	Operator   string `json:"operator"`
+	PlanTime   int64  `json:"plan_time"`
 }

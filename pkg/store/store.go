@@ -64,6 +64,7 @@ type TaskLogStore interface {
 	CreateTaskLog(data common.TaskLog) error
 	GetList(selector selection.Selector) ([]*common.TaskLog, error)
 	GetOne(projectID int64, taskID, tmpID string) (*common.TaskLog, error)
+	CheckOrCreateScheduleLog(tx *gorm.DB, taskInfo *common.TaskExecutingInfo, agentIP, agentVersion string) (bool, error)
 	Clean(tx *gorm.DB, selector selection.Selector) error
 }
 

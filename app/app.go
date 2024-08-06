@@ -158,7 +158,7 @@ type App interface {
 	GetGrpcDirector() func(ctx context.Context, fullMethodName string) (context.Context, *grpc.ClientConn, error)
 
 	// task status
-	SetTaskRunning(agentIP string, execInfo *common.TaskExecutingInfo) error
+	SetTaskRunning(agentIP, agentVersion string, execInfo *common.TaskExecutingInfo) error
 	CheckTaskIsRunning(projectID int64, taskID string) ([]common.TaskRunningInfo, error)
 	HandlerTaskFinished(agentIP string, result *common.TaskFinishedV2) error
 	SaveTaskLog(agentIP string, result common.TaskFinishedV2)

@@ -213,7 +213,8 @@ func (a *client) Schedule(ctx context.Context, req *cronpb.ScheduleRequest) (*cr
 		if err != nil {
 			return nil, status.Error(codes.Aborted, "failed to build task plan: "+err.Error())
 		}
-		if err = a.TryStartTask(plan); err != nil {
+		plan.PlanTime = time.Now()
+		if err = a.TryStartTask(*plan); err != nil {
 			return nil, status.Error(codes.Aborted, "failed to execute task: "+err.Error())
 		}
 	case common.REMOTE_EVENT_WORKFLOW_SCHEDULE:
@@ -229,7 +230,8 @@ func (a *client) Schedule(ctx context.Context, req *cronpb.ScheduleRequest) (*cr
 		if err != nil {
 			return nil, status.Error(codes.Internal, "failed to build workflow task schedule plan")
 		}
-		if err = a.TryStartTask(plan); err != nil {
+		plan.PlanTime = time.Now()
+		if err = a.TryStartTask(*plan); err != nil {
 			return nil, err
 		}
 	case common.REMOTE_EVENT_TASK_STOP:

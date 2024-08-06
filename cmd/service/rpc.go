@@ -63,15 +63,29 @@ func (s *cronRpc) TryLock(req cronpb.Center_TryLockServer) error {
 		return status.Error(codes.PermissionDenied, codes.PermissionDenied.String())
 	}
 	var (
-		locker    *etcd.Locker
-		heartbeat = time.NewTicker(time.Second * 5)
+		locker      *etcd.Locker
+		heartbeat   = time.NewTicker(time.Second * 5)
+		receiveChan = make(chan *cronpb.TryLockRequest)
 	)
 	defer func() {
 		heartbeat.Stop()
-		if locker != nil {
-			locker.Unlock()
+		if locker == nil {
+			return
+		}
+		locker.Unlock()
+	}()
+
+	go func() {
+		defer close(receiveChan)
+		for {
+			task, err := req.Recv()
+			if err != nil || task == nil {
+				return
+			}
+			receiveChan <- task
 		}
 	}()
+
 	for {
 		select {
 		case <-req.Context().Done():
@@ -83,16 +97,21 @@ func (s *cronRpc) TryLock(req cronpb.Center_TryLockServer) error {
 			}); err != nil {
 				return err
 			}
-		default:
-			task, err := req.Recv()
-			if err != nil || task == nil {
-				return err
+		case task := <-receiveChan:
+			if task == nil {
+				return nil
 			}
+			if task.Type == cronpb.LockType_UNLOCK {
+				// defer unlock
+				return nil
+			}
+
 			if authenticator != nil && !authenticator.Allow(task.ProjectId) {
 				return status.Error(codes.Unauthenticated, codes.Unauthenticated.String())
 			}
 			locker = s.app.GetTaskLocker(&common.TaskInfo{TaskID: task.TaskId, ProjectID: task.ProjectId})
-			if err = locker.TryLockWithOwner(agentIP); err != nil {
+			// 锁的持有者除了agentip外还应该增加tmpid来确保是同一个任务在尝试恢复锁
+			if err := locker.TryLockWithOwner(fmt.Sprintf("%s:%s", agentIP, task.TaskTmpId)); err != nil {
 				return status.Error(codes.Aborted, err.Error())
 			}
 
@@ -132,13 +151,14 @@ func (s *cronRpc) StatusReporter(ctx context.Context, req *cronpb.ScheduleReply)
 		return nil, status.Error(codes.Unauthenticated, codes.Unauthenticated.String())
 	}
 	agentIP, _ := middleware.GetAgentIP(ctx)
+	agentVersion, existAgentVersion := middleware.GetAgentVersion(ctx)
 	switch req.Event.Type {
 	case common.TASK_STATUS_RUNNING_V2:
 		var result common.TaskExecutingInfo
 		if err := json.Unmarshal(req.Event.Value, &result); err != nil {
 			return nil, err
 		}
-		if err := s.app.SetTaskRunning(agentIP, &result); err != nil {
+		if err := s.app.SetTaskRunning(agentIP, agentVersion, &result); err != nil {
 			var workflowID int64
 			if result.Task.FlowInfo != nil {
 				workflowID = result.Task.FlowInfo.WorkflowID
@@ -146,6 +166,11 @@ func (s *cronRpc) StatusReporter(ctx context.Context, req *cronpb.ScheduleReply)
 			wlog.Error("failed to set task running status", zap.Error(err), zap.String("task_id", result.Task.TaskID),
 				zap.Int64("project_id", result.Task.ProjectID), zap.String("tmp_id", result.TmpID),
 				zap.Int64("workflow_id", workflowID))
+
+			if cerr, ok := err.(*errors.Error); ok && cerr.Code != http.StatusInternalServerError {
+				// aborted 状态可以让agent取消请求重试，直接终止任务
+				return nil, status.Error(codes.Aborted, cerr.Msg)
+			}
 			return nil, err
 		}
 	case common.TASK_STATUS_FINISHED_V2:
@@ -154,8 +179,7 @@ func (s *cronRpc) StatusReporter(ctx context.Context, req *cronpb.ScheduleReply)
 			return nil, err
 		}
 
-		version, exist := middleware.GetAgentVersion(ctx)
-		if exist && utils.CompareVersion("v2.1.9999", version) {
+		if existAgentVersion && utils.CompareVersion("v2.1.9999", agentVersion) {
 			s.app.SaveTaskLog(agentIP, result)
 		}
 
@@ -273,6 +297,7 @@ func (s *cronRpc) RegisterAgent(req cronpb.Center_RegisterAgentServer) error {
 		for _, meta := range registerStream {
 			s.app.StreamManager().RemoveStream(meta)
 		}
+		r.Close()
 	}()
 Here:
 	for {

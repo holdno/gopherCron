@@ -635,7 +635,7 @@ scheduleError:
 	return fmt.Errorf("failed to schedule tmp-task, %s", errResult.Error)
 }
 
-func (a *app) SetTaskRunning(agentIP string, execInfo *common.TaskExecutingInfo) error {
+func (a *app) SetTaskRunning(agentIP, agentVersion string, execInfo *common.TaskExecutingInfo) error {
 	runningInfo, _ := json.Marshal(common.TaskRunningInfo{
 		Status:    common.TASK_STATUS_RUNNING_V2,
 		TmpID:     execInfo.TmpID,
@@ -643,8 +643,26 @@ func (a *app) SetTaskRunning(agentIP string, execInfo *common.TaskExecutingInfo)
 		AgentIP:   agentIP,
 	})
 
+	var err error
+	tx := a.store.BeginTx()
+	defer func() {
+		if r := recover(); r != nil || err != nil {
+			tx.Rollback()
+		} else {
+			tx.Commit()
+		}
+	}()
+	isCreate, err := a.store.TaskLog().CheckOrCreateScheduleLog(tx, execInfo, agentIP, agentVersion)
+	if err != nil {
+		return errors.NewError(http.StatusInternalServerError, "预创建任务执行日志失败").WithLog(err.Error())
+	}
+	if !isCreate {
+		err = errors.NewError(http.StatusForbidden, "该任务当前计划时间已被执行，请检查任务运行状态")
+		return err
+	}
+
 	if execInfo.Task.FlowInfo != nil {
-		_, err := concurrency.NewSTM(a.etcd.Client(), func(s concurrency.STM) error {
+		_, err = concurrency.NewSTM(a.etcd.Client(), func(s concurrency.STM) error {
 			err := setWorkflowTaskRunning(s, WorkflowRunningTaskInfo{
 				WorkflowID: execInfo.Task.FlowInfo.WorkflowID,
 				TmpID:      execInfo.TmpID,
@@ -700,6 +718,7 @@ func (a *app) CheckTaskIsRunning(projectID int64, taskID string) ([]common.TaskR
 	if err = json.Unmarshal(kv.Value, &runningInfo); err != nil {
 		return nil, err
 	}
+	fmt.Println("runningInfo", runningInfo)
 	checkFuncV2 := func(stream *CenterClient) (bool, error) {
 		ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
 		defer cancel()
@@ -828,6 +847,7 @@ func (a *app) SaveTaskLog(agentIP string, result common.TaskFinishedV2) {
 		TmpID:     result.TmpID,
 		TaskID:    result.TaskID,
 		ProjectID: result.ProjectID,
+		PlanTime:  result.PlanTime,
 	}
 
 	opts := selection.NewSelector(selection.NewRequirement("id", selection.Equals, result.ProjectID))
@@ -885,6 +905,7 @@ func (a *app) HandlerTaskFinished(agentIP string, result *common.TaskFinishedV2)
 	if err != nil {
 		return errors.NewError(http.StatusInternalServerError, "设置任务运行状态失败").WithLog(err.Error())
 	}
+
 	if result.WorkflowID != 0 {
 		if err := a.workflowRunner.handleTaskResultV1(agentIP, result); err != nil {
 			return err

@@ -13,7 +13,7 @@ import (
 func NewCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "test",
-		Short: "echo current system version",
+		Short: "local test case",
 		Run: func(c *cobra.Command, args []string) {
 			RunTest()
 		},

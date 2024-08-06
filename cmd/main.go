@@ -5,7 +5,6 @@ import (
 
 	"github.com/holdno/gopherCron/cmd/client"
 	"github.com/holdno/gopherCron/cmd/service"
-	"github.com/holdno/gopherCron/cmd/test"
 	"github.com/holdno/gopherCron/cmd/version"
 	"github.com/spf13/cobra"
 )
@@ -18,7 +17,8 @@ func main() {
 		service.NewCommand(),
 		client.NewCommand(),
 		version.NewCommand(),
-		test.NewCommand())
+		// test.NewCommand()
+	)
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)

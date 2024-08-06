@@ -40,6 +40,14 @@ message TryLockRequest {
     int64 project_id = 1;
     string task_id = 2;
     string agent_ip = 3;
+    LockType type = 4;
+    string task_tmp_id = 5;
+}
+
+enum LockType {
+    UNKNOWN = 0;
+    LOCK = 1;
+    UNLOCK = 2;
 }
 
 message TryLockReply {

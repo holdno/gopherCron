@@ -25,6 +25,7 @@ import (
 	"github.com/spacegrower/watermelon/infra/graceful"
 	"github.com/spacegrower/watermelon/infra/wlog"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/status"
 )
 
 var shutdownFunc func()
@@ -62,16 +63,20 @@ func apiServer(srv app.App, conf *config.ServiceConfig) {
 		newServer.WithServiceRegister(infra.MustSetupEtcdRegister()),
 		newServer.WithGrpcServerOptions(grpc.ReadBufferSize(protocol.GrpcBufferSize), grpc.WriteBufferSize(protocol.GrpcBufferSize)))
 
-	grpcRequestCounter := srv.Metrics().NewCounter("grpc_request", "method", "source")
+	grpcRequestErrorCounter := srv.Metrics().NewCounter("grpc_request_error", "method", "source", "status")
 	grpcRequestDuration := srv.Metrics().NewHistogram("grpc_request", "method", "source")
 	server.Use(middleware.CheckoutAgentMeta(srv.GetConfig().Deploy.LegacyMode))
 	server.Use(func(ctx context.Context) error {
 		method := middleware.GetFullMethodFrom(ctx)
 		agentIP, _ := middleware.GetAgentIP(ctx)
-		grpcRequestCounter(method, agentIP)
 		timer := grpcRequestDuration(method, agentIP)
 		defer timer.ObserveDuration()
-		return middleware.Next(ctx)
+		err := middleware.Next(ctx)
+		if err != nil {
+			s, _ := status.FromError(err)
+			grpcRequestErrorCounter(method, agentIP, s.Code().String())
+		}
+		return err
 	})
 
 	server.Handler(cronpb.CenterServer.Auth)
