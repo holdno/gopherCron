@@ -3,6 +3,7 @@ package etcd
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/errors"
@@ -19,7 +20,7 @@ type Locker struct {
 	key        string
 	cancelFunc context.CancelFunc
 	leaseID    clientv3.LeaseID
-	isLocked   bool // 是否上锁成功
+	isLocked   atomic.Bool // 是否上锁成功
 }
 
 func initTaskLocker(taskInfo *common.TaskInfo, kv clientv3.KV, lease clientv3.Lease) *Locker {
@@ -166,7 +167,7 @@ func (tl *Locker) TryLockWithOwner(owner string) error {
 
 	tl.leaseID = leaseGrantResp.ID
 	tl.cancelFunc = cancelFunc
-	tl.isLocked = true
+	tl.isLocked.Store(true)
 	clientlockers.setLease(tl.leaseID, tl)
 	return nil
 }
@@ -183,8 +184,8 @@ func (tl *Locker) LockExist() (bool, error) {
 
 // Unlock 释放锁
 func (tl *Locker) Unlock() {
-	if tl.isLocked {
-		tl.isLocked = false
+	if tl.isLocked.Load() {
+		tl.isLocked.Store(false)
 		tl.cancelFunc() // 取消锁协成自动续租
 		ctx, cancel := utils.GetContextWithTimeout()
 		defer cancel()

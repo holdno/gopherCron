@@ -30,29 +30,6 @@ func (s *taskLogStore) AutoMigrate() {
 	s.provider.Logger().Info(fmt.Sprintf("%s, complete initialization", s.GetTable()))
 }
 
-// func (s *taskLogStore) CreateBaseLogIfNotExist(projectID int64, taskID, tmpID string, planTimestamp int64, agentIP, agentVersion string) (bool, error) {
-// 	var exist common.ExistResult
-// 	err := s.GetReplica().
-// 		Raw("SELECT EXISTS(SELECT 1 FROM gc_task_log WHERE project_id = ? AND task_id = ? AND tmp_id = ?) AS result", projectID, taskID, tmpID).
-// 		Scan(&exist).Error
-// 	if err != nil && err != gorm.ErrRecordNotFound {
-// 		return false, err
-// 	}
-
-// 	if exist.Result {
-// 		return false, nil
-// 	}
-
-// 	return true, s.GetMaster().Create(&common.TaskLog{
-// 		ProjectID:    projectID,
-// 		TaskID:       taskID,
-// 		TmpID:        tmpID,
-// 		PlanTime:     planTimestamp,
-// 		ClientIP:     agentIP,
-// 		AgentVersion: agentVersion,
-// 	}).Error
-// }
-
 func (s *taskLogStore) CreateTaskLog(data common.TaskLog) error {
 	var tmpLog common.TaskLog
 

@@ -657,7 +657,7 @@ func (a *app) SetTaskRunning(agentIP, agentVersion string, execInfo *common.Task
 		return errors.NewError(http.StatusInternalServerError, "预创建任务执行日志失败").WithLog(err.Error())
 	}
 	if !isCreate {
-		err = errors.NewError(http.StatusForbidden, "该任务当前计划时间已被执行")
+		err = errors.NewError(http.StatusForbidden, "该任务当前计划时间已被执行，请检查任务运行状态")
 		return err
 	}
 

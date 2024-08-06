@@ -102,9 +102,7 @@ func (s *cronRpc) TryLock(req cronpb.Center_TryLockServer) error {
 				return nil
 			}
 			if task.Type == cronpb.LockType_UNLOCK {
-				if locker != nil {
-					locker.Unlock()
-				}
+				// defer unlock
 				return nil
 			}
 
@@ -299,6 +297,7 @@ func (s *cronRpc) RegisterAgent(req cronpb.Center_RegisterAgentServer) error {
 		for _, meta := range registerStream {
 			s.app.StreamManager().RemoveStream(meta)
 		}
+		r.Close()
 	}()
 Here:
 	for {
