@@ -33,9 +33,9 @@ func (s *taskLogStore) AutoMigrate() {
 func (s *taskLogStore) CreateTaskLog(data common.TaskLog) error {
 	var tmpLog common.TaskLog
 
-	if data.TmpID != "" {
-		err := s.GetMaster().Table(s.table).Where("project_id = ? AND task_id = ? AND tmp_id = ?",
-			data.ProjectID, data.TaskID, data.TmpID).
+	if data.TmpID != "" && data.PlanTime > 0 {
+		err := s.GetMaster().Table(s.table).Where("project_id = ? AND task_id = ? AND tmp_id = ? AND plan_time = ?",
+			data.ProjectID, data.TaskID, data.TmpID, data.PlanTime).
 			First(&tmpLog).Error
 		if err != nil && err != gorm.ErrRecordNotFound {
 			return err
@@ -46,8 +46,8 @@ func (s *taskLogStore) CreateTaskLog(data common.TaskLog) error {
 		return s.GetMaster().Table(s.table).Create(&data).Error
 	} else {
 		data.PlanTime = tmpLog.PlanTime
-		return s.GetMaster().Table(s.table).Where("project_id = ? AND task_id = ? AND tmp_id = ?",
-			data.ProjectID, data.TaskID, data.TmpID).Update(&data).Error
+		return s.GetMaster().Table(s.table).Where("project_id = ? AND task_id = ? AND tmp_id = ? AND plan_time = ?",
+			data.ProjectID, data.TaskID, data.TmpID, data.PlanTime).Update(&data).Error
 	}
 }
 
@@ -100,7 +100,6 @@ func (s *taskLogStore) CheckOrCreateScheduleLog(tx *gorm.DB, taskInfo *common.Ta
 		if err != nil && err != gorm.ErrRecordNotFound {
 			return false, err
 		}
-
 	}
 
 	if exist.Result {

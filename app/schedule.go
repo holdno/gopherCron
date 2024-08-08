@@ -643,26 +643,30 @@ func (a *app) SetTaskRunning(agentIP, agentVersion string, execInfo *common.Task
 		AgentIP:   agentIP,
 	})
 
-	var err error
-	tx := a.store.BeginTx()
-	defer func() {
-		if r := recover(); r != nil || err != nil {
-			tx.Rollback()
-		} else {
-			tx.Commit()
+	// TODO: 如果不兼容v2.4.6版本，该if可以移除(仅判断移除，内部代码需保留)
+	if utils.CompareVersion("v2.4.6", agentVersion) {
+		var err error
+		tx := a.store.BeginTx()
+		defer func() {
+			if r := recover(); r != nil || err != nil {
+				tx.Rollback()
+			} else {
+				tx.Commit()
+			}
+		}()
+
+		isCreate, err := a.store.TaskLog().CheckOrCreateScheduleLog(tx, execInfo, agentIP, agentVersion)
+		if err != nil {
+			return errors.NewError(http.StatusInternalServerError, "预创建任务执行日志失败").WithLog(err.Error())
 		}
-	}()
-	isCreate, err := a.store.TaskLog().CheckOrCreateScheduleLog(tx, execInfo, agentIP, agentVersion)
-	if err != nil {
-		return errors.NewError(http.StatusInternalServerError, "预创建任务执行日志失败").WithLog(err.Error())
-	}
-	if !isCreate {
-		err = errors.NewError(http.StatusForbidden, "该任务当前计划时间已被执行，请检查任务运行状态")
-		return err
+		if !isCreate {
+			err = errors.NewError(http.StatusForbidden, "该任务当前计划时间已被执行，请检查任务运行状态")
+			return err
+		}
 	}
 
 	if execInfo.Task.FlowInfo != nil {
-		_, err = concurrency.NewSTM(a.etcd.Client(), func(s concurrency.STM) error {
+		_, err := concurrency.NewSTM(a.etcd.Client(), func(s concurrency.STM) error {
 			err := setWorkflowTaskRunning(s, WorkflowRunningTaskInfo{
 				WorkflowID: execInfo.Task.FlowInfo.WorkflowID,
 				TmpID:      execInfo.TmpID,
