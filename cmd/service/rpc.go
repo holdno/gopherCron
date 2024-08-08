@@ -165,6 +165,7 @@ func (s *cronRpc) StatusReporter(ctx context.Context, req *cronpb.ScheduleReply)
 			}
 			wlog.Error("failed to set task running status", zap.Error(err), zap.String("task_id", result.Task.TaskID),
 				zap.Int64("project_id", result.Task.ProjectID), zap.String("tmp_id", result.TmpID),
+				zap.Any("plan_time", result.PlanTime),
 				zap.Int64("workflow_id", workflowID))
 
 			if cerr, ok := err.(*errors.Error); ok && cerr.Code != http.StatusInternalServerError {
