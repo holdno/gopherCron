@@ -96,6 +96,10 @@ v2.1.0 + 版本中移除了 client 对 etcd 的依赖
 
 下载项目到本地并编译，根据 cmd 文件夹下 service 和 client 中包含的 conf/config-default.toml 进行配置
 
+### 初始化数据库表
+
+建表语句在 `pkg/store/sqlstore/table.sql`
+
 ### Admin 管理页面
 
 访问地址: localhost:6306/admin
