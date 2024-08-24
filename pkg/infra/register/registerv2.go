@@ -33,9 +33,41 @@ type remoteRegistryV2 struct {
 	locker          *sync.Mutex
 	receivingLocker *sync.Mutex
 
-	eventHandler func(context.Context, *cronpb.ServiceEvent) (*cronpb.ClientEvent, error)
+	eventHandler   func(context.Context, *cronpb.ServiceEvent) (*cronpb.ClientEvent, error)
+	registerNotify *registerNotify
 
 	str string
+}
+
+type registerNotify struct {
+	locker           *sync.Mutex
+	registeredNotify map[string]chan struct{}
+}
+
+func (s *registerNotify) notify(reqID string) {
+	s.locker.Lock()
+	if c, exist := s.registeredNotify[reqID]; exist {
+		close(c)
+		delete(s.registeredNotify, reqID)
+	} else {
+		// 兼容旧版本
+		for key, v := range s.registeredNotify {
+			close(v)
+			delete(s.registeredNotify, key)
+		}
+	}
+	s.locker.Unlock()
+}
+
+func (s *registerNotify) registerNotify(reqID string) func() {
+	s.locker.Lock()
+	c := make(chan struct{})
+	s.registeredNotify[reqID] = c
+	s.locker.Unlock()
+
+	return func() {
+		<-c
+	}
 }
 
 func NewRemoteRegisterV2(localIP string, connect func() (*CenterClient, error), eventHandler func(context.Context, *cronpb.ServiceEvent) (*cronpb.ClientEvent, error)) (register.ServiceRegister[infra.NodeMetaRemote], error) {
@@ -50,6 +82,10 @@ func NewRemoteRegisterV2(localIP string, connect func() (*CenterClient, error), 
 		str:             u.RandomStr(32),
 		locker:          &sync.Mutex{},
 		receivingLocker: &sync.Mutex{},
+		registerNotify: &registerNotify{
+			locker:           &sync.Mutex{},
+			registeredNotify: make(map[string]chan struct{}),
+		},
 	}
 
 	rr.reConnect = func() (err error) {
@@ -129,6 +165,13 @@ func (s *remoteRegistryV2) getConnect(ctx context.Context) (cronpb.Center_Regist
 	return s.currentStream, err
 }
 
+type RegisterType int
+
+const (
+	FirstRegister RegisterType = iota
+	SecondRegister
+)
+
 func (s *remoteRegistryV2) register() error {
 	var (
 		receive     func() (*cronpb.ServiceEvent, error)
@@ -139,104 +182,124 @@ func (s *remoteRegistryV2) register() error {
 
 	if len(services) == 0 {
 		return errors.New("empty service")
-	} else {
-		stream, err := s.getConnect(s.ctx)
-		if err != nil {
-			return err
-		}
-
-		if err = stream.Send(&cronpb.ClientEvent{
-			Id:        u.GetStrID(),
-			Type:      cronpb.EventType_EVENT_REGISTER_REQUEST,
-			EventTime: time.Now().Unix(),
-			Event: &cronpb.ClientEvent_RegisterInfo{
-				RegisterInfo: &cronpb.RegisterInfo{
-					Agents: services,
-				},
-			},
-		}); err != nil {
-			return err
-		}
-
-		receive = stream.Recv
-		send = stream.Send
-		closeStream = stream.CloseSend
 	}
 
-	errHandler := func(err error) {
-		if closeStream != nil {
-			closeStream()
-			s.currentStream = nil
-		}
-		s.log.Error("agent handle event with error", zap.Error(err))
-		time.Sleep(time.Second)
-		if gerr, ok := status.FromError(err); ok && gerr.Code() == codes.Canceled {
-			s.log.Warn("retry to reconnect", zap.String("status", gerr.Code().String()))
-			if err = s.reConnect(); err != nil {
-				s.log.Error("failed to reconnect registry", zap.Error(err))
-			}
-		}
-		s.reRegister()
+	stream, err := s.getConnect(s.ctx)
+	if err != nil {
+		return err
+	}
+
+	// 加入 hang 实现“同步模式”的重新注册
+	hang := make(chan struct{}, 1)
+	reqID := u.GetStrID()
+	go safe.Run(func() {
+		defer close(hang)
+		wait := s.registerNotify.registerNotify(reqID)
+		hang <- struct{}{}
+		wait()
+	})
+
+	<-hang
+
+	// 无论是第几次注册，都需要发送注册信息
+	if err = stream.Send(&cronpb.ClientEvent{
+		Id:        reqID,
+		Type:      cronpb.EventType_EVENT_REGISTER_REQUEST,
+		EventTime: time.Now().Unix(),
+		Event: &cronpb.ClientEvent_RegisterInfo{
+			RegisterInfo: &cronpb.RegisterInfo{
+				Agents: services,
+			},
+		},
+	}); err != nil {
+		return err
 	}
 
 	if s.receivingLocker.TryLock() {
-		waitingFirstReceive := make(chan struct{})
+		// 首次注册需要开启事件监听
+		receive = stream.Recv
+		send = stream.Send
+		closeStream = stream.CloseSend
+		kill := make(chan struct{})
+
+		errHandler := func(err error) {
+			if err == nil {
+				return
+			}
+			close(kill)
+
+			if closeStream != nil {
+				closeStream()
+				s.currentStream = nil
+			}
+			s.log.Error("agent handle event with error", zap.Error(err))
+			time.Sleep(time.Second)
+			if gerr, ok := status.FromError(err); ok && gerr.Code() == codes.Canceled {
+				s.log.Warn("retry to reconnect", zap.String("status", gerr.Code().String()))
+				if err = s.reConnect(); err != nil {
+					s.log.Error("failed to reconnect registry", zap.Error(err))
+				}
+			}
+
+			s.reRegister()
+		}
+
 		go safe.Run(func() {
 			var (
-				err   error
-				resp  *cronpb.ServiceEvent
-				reply *cronpb.ClientEvent
-				once  = &sync.Once{}
+				err               error
+				resp              *cronpb.ServiceEvent
+				reply             *cronpb.ClientEvent
+				eventHandleLocker = &sync.Mutex{}
 			)
 			defer func() {
-				close(waitingFirstReceive)
 				s.receivingLocker.Unlock()
-				if err != nil {
-					errHandler(err)
-				}
 			}()
 
 			for {
 				select {
+				case <-kill:
+					s.log.Warn("register killed by self")
+					return
 				case <-s.ctx.Done():
 					s.log.Warn("register receiver is down, context done")
 					return
 				default:
 					resp, err = receive()
 					if err != nil {
+						errHandler(err)
 						return
 					}
-
 					if resp.Type == cronpb.EventType_EVENT_REGISTER_REPLY {
-						once.Do(func() {
-							waitingFirstReceive <- struct{}{}
-						})
+						// 重新注册的过程中修改任务信息，同样会下发 EventType_EVENT_REGISTER_REPLY 事件，可能导致 notify 不准确
+						s.registerNotify.notify(resp.Id)
 					}
 
 					s.log.Debug("receive event", zap.String("event", resp.Type.String()), zap.Any("value", resp.GetEvent()))
-					func() {
+					go safe.Run(func() {
+						eventHandleLocker.Lock()
+						defer eventHandleLocker.Unlock()
 						ctx, cancel := context.WithTimeout(s.ctx, time.Minute)
 						defer cancel()
 						reply, err = s.eventHandler(ctx, resp)
-					}()
-					if err != nil {
-						return
-					}
-
-					if reply != nil {
-						if err = send(reply); err != nil {
-							s.log.Error("failed reply center request", zap.Error(err), zap.String("event", resp.Type.String()),
-								zap.String("value", resp.String()))
+						if err != nil {
+							errHandler(err)
 							return
 						}
-					}
+						if reply != nil {
+							if err = send(reply); err != nil {
+								s.log.Error("failed reply center request", zap.Error(err), zap.String("event", resp.Type.String()),
+									zap.String("value", resp.String()))
+								errHandler(err)
+								return
+							}
+						}
+					})
 				}
 			}
 		})
-
-		<-waitingFirstReceive
 	}
 
+	<-hang
 	return nil
 }
 

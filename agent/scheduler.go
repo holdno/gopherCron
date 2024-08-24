@@ -460,14 +460,17 @@ func (a *client) TryStartTask(plan common.TaskSchedulePlan) error {
 			})
 			return err
 		}, retry.RetryIf(func(err error) bool {
-			if gerr, _ := status.FromError(err); gerr.Code() != codes.Aborted {
-				a.logger.Debug("task aborted", zap.String("task_id", plan.Task.TaskID), zap.Int64("project_id", plan.Task.ProjectID),
-					zap.String("tmp_id", plan.TmpID), zap.Error(err))
+			if gerr, _ := status.FromError(err); gerr.Code() == codes.Aborted || gerr.Code() == codes.Unauthenticated {
 				return false
 			}
 			return true
 		}), retry.Attempts(3), retry.DelayType(retry.BackOffDelay),
 			retry.MaxJitter(time.Second*30), retry.LastErrorOnly(true)); err != nil {
+			if gerr, _ := status.FromError(err); gerr.Code() == codes.Aborted {
+				a.logger.Debug("task aborted", zap.String("task_id", plan.Task.TaskID), zap.Int64("project_id", plan.Task.ProjectID),
+					zap.String("tmp_id", plan.TmpID), zap.Error(err))
+				return
+			}
 			taskExecuteInfo.CancelFunc()
 			a.metrics.SystemErrInc("agent_status_report_failure")
 			a.logger.Error(fmt.Sprintf("task: %s, id: %s, tmp_id: %s, change running status error, %v", plan.Task.Name,
@@ -708,9 +711,9 @@ func tryLockUntilCtxIsDone(cli cronpb.CenterClient, execInfo *common.TaskExecuti
 				safe.Run(func() {
 					// 任务执行后锁最少保持5s
 					// 防止分布式部署下多台机器共同执行
-					// if time.Since(execInfo.RealTime).Seconds() < 5 {
-					// 	time.Sleep(5*time.Second - time.Since(execInfo.RealTime))
-					// }
+					if time.Since(execInfo.RealTime).Seconds() < 5 {
+						time.Sleep(5*time.Second - time.Since(execInfo.RealTime))
+					}
 					locker.Send(&cronpb.TryLockRequest{
 						ProjectId: execInfo.Task.ProjectID,
 						TaskId:    execInfo.Task.TaskID,

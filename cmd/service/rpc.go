@@ -409,9 +409,14 @@ Here:
 	return nil
 }
 
+type registerInfo struct {
+	reqID string
+	info  *cronpb.RegisterInfo
+}
+
 // watchAgentResponse watch agent register request or event handle response
-func watchAgentResponse(ctx context.Context, receive func() (*cronpb.ClientEvent, error), callback func(*cronpb.ClientEvent)) <-chan *cronpb.RegisterInfo {
-	newRegisterInfo := make(chan *cronpb.RegisterInfo)
+func watchAgentResponse(ctx context.Context, receive func() (*cronpb.ClientEvent, error), callback func(*cronpb.ClientEvent)) <-chan *registerInfo {
+	newRegisterInfo := make(chan *registerInfo)
 	go safe.Run(func() {
 		defer close(newRegisterInfo)
 		for {
@@ -425,7 +430,10 @@ func watchAgentResponse(ctx context.Context, receive func() (*cronpb.ClientEvent
 				}
 
 				if info.Type == cronpb.EventType_EVENT_REGISTER_REQUEST {
-					newRegisterInfo <- info.GetRegisterInfo()
+					newRegisterInfo <- &registerInfo{
+						reqID: info.Id,
+						info:  info.GetRegisterInfo(),
+					}
 				} else {
 					callback(info)
 				}
@@ -527,15 +535,15 @@ func (s *cronRpc) buildAgentRegister(ctx context.Context) (registerFunc func(req
 	return registerFunc, deRegisterFunc
 }
 
-type dispatcher func(meta infra.NodeMeta) app.JobDispatcher
+type dispatcher func(reqID string, meta infra.NodeMeta) app.JobDispatcher
 
 func buildDispatchJobsV2Handler(sendEvent func(ctx context.Context, e *cronpb.ServiceEvent) error) dispatcher {
-	return func(meta infra.NodeMeta) app.JobDispatcher {
+	return func(reqID string, meta infra.NodeMeta) app.JobDispatcher {
 		return func(taskRaw []byte) error {
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
 			defer cancel()
 			if err := sendEvent(ctx, &cronpb.ServiceEvent{
-				Id:        utils.GetStrID(),
+				Id:        reqID,
 				Type:      cronpb.EventType_EVENT_REGISTER_REPLY,
 				EventTime: time.Now().Unix(),
 				Event: &cronpb.ServiceEvent_RegisterReply{
@@ -599,7 +607,7 @@ func (s *cronRpc) RegisterAgentV2(req cronpb.Center_RegisterAgentV2Server) error
 		}
 	})
 
-	// 注册成功后像agent下发任务的处理方法
+	// 注册成功后向agent下发任务的处理方法
 	dispatchHandler := buildDispatchJobsV2Handler(func(ctx context.Context, e *cronpb.ServiceEvent) error {
 		_, err := s.app.StreamManagerV2().SendEventWaitResponse(ctx, req, e)
 		return err
@@ -619,12 +627,12 @@ func (s *cronRpc) RegisterAgentV2(req cronpb.Center_RegisterAgentV2Server) error
 				return nil
 			}
 			// 将agent信息进行注册
-			err := register(multiService, func(nm []infra.NodeMeta) error {
+			err := register(multiService.info, func(nm []infra.NodeMeta) error {
 				// 完成注册后将stream缓存至内存中，方便后续中心与agent通信时使用
 				for _, meta := range nm {
 					s.app.StreamManagerV2().SaveStream(meta, req, cancel)
 					// 下发对应项目的任务列表
-					if err := s.app.DispatchAgentJob(meta.System, dispatchHandler(meta)); err != nil {
+					if err := s.app.DispatchAgentJob(meta.System, dispatchHandler(multiService.reqID, meta)); err != nil {
 						return err
 					}
 				}
