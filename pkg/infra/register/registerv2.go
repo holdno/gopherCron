@@ -248,11 +248,13 @@ func (s *remoteRegistryV2) register() error {
 			var (
 				err               error
 				resp              *cronpb.ServiceEvent
-				reply             *cronpb.ClientEvent
 				eventHandleLocker = &sync.Mutex{}
 			)
 			defer func() {
 				s.receivingLocker.Unlock()
+				if err != nil {
+					errHandler(err)
+				}
 			}()
 
 			for {
@@ -264,9 +266,7 @@ func (s *remoteRegistryV2) register() error {
 					s.log.Warn("register receiver is down, context done")
 					return
 				default:
-					resp, err = receive()
-					if err != nil {
-						errHandler(err)
+					if resp, err = receive(); err != nil {
 						return
 					}
 					if resp.Type == cronpb.EventType_EVENT_REGISTER_REPLY {
@@ -276,20 +276,26 @@ func (s *remoteRegistryV2) register() error {
 
 					s.log.Debug("receive event", zap.String("event", resp.Type.String()), zap.Any("value", resp.GetEvent()))
 					go safe.Run(func() {
+						var (
+							err   error
+							reply *cronpb.ClientEvent
+						)
+						defer func() {
+							if err != nil {
+								errHandler(err)
+							}
+						}()
 						eventHandleLocker.Lock()
 						defer eventHandleLocker.Unlock()
 						ctx, cancel := context.WithTimeout(s.ctx, time.Minute)
 						defer cancel()
-						reply, err = s.eventHandler(ctx, resp)
-						if err != nil {
-							errHandler(err)
+						if reply, err = s.eventHandler(ctx, resp); err != nil {
 							return
 						}
 						if reply != nil {
 							if err = send(reply); err != nil {
 								s.log.Error("failed reply center request", zap.Error(err), zap.String("event", resp.Type.String()),
 									zap.String("value", resp.String()))
-								errHandler(err)
 								return
 							}
 						}
