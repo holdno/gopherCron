@@ -620,6 +620,8 @@ func (s *cronRpc) RegisterAgentV2(req cronpb.Center_RegisterAgentV2Server) error
 		cancel()
 	})
 
+	firstDispatch := sync.Once{}
+
 	for {
 		select {
 		case multiService := <-newRegisterInfoChannel:
@@ -631,8 +633,12 @@ func (s *cronRpc) RegisterAgentV2(req cronpb.Center_RegisterAgentV2Server) error
 				// 完成注册后将stream缓存至内存中，方便后续中心与agent通信时使用
 				for _, meta := range nm {
 					s.app.StreamManagerV2().SaveStream(meta, req, cancel)
+					reqID := utils.GetStrID()
+					firstDispatch.Do(func() {
+						reqID = multiService.reqID
+					})
 					// 下发对应项目的任务列表
-					if err := s.app.DispatchAgentJob(meta.System, dispatchHandler(multiService.reqID, meta)); err != nil {
+					if err := s.app.DispatchAgentJob(meta.System, dispatchHandler(reqID, meta)); err != nil {
 						return err
 					}
 				}

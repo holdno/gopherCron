@@ -3,6 +3,7 @@ package register
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"sync"
 	"time"
@@ -267,6 +268,7 @@ func (s *remoteRegistryV2) register() error {
 					return
 				default:
 					if resp, err = receive(); err != nil {
+						err = fmt.Errorf("receive error: %w", err)
 						return
 					}
 					if resp.Type == cronpb.EventType_EVENT_REGISTER_REPLY {
