@@ -248,26 +248,18 @@ type responseMap struct {
 }
 
 func (rm *responseMap) Set(ctx context.Context, id string) chan *cronpb.ClientEvent {
-	timeouter := time.NewTimer(time.Second * 5)
 	responser := &streamResponse{
 		recv: make(chan *cronpb.ClientEvent, 1),
 		mu:   &sync.Mutex{},
 	}
 	rm.m.Set(id, responser)
 	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-			case <-timeouter.C:
-			}
-			timeouter.Stop()
-			responser.mu.Lock()
-			responser.isClose = true
-			close(responser.recv)
-			rm.Remove(id)
-			responser.mu.Unlock()
-			return
-		}
+		<-ctx.Done()
+		responser.mu.Lock()
+		responser.isClose = true
+		rm.Remove(id)
+		close(responser.recv)
+		responser.mu.Unlock()
 	}()
 	return responser.recv
 }
@@ -310,8 +302,9 @@ func (s *streamManager[T]) SendEventWaitResponse(ctx context.Context, stream int
 	if !s.isV2 {
 		return nil, nil
 	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel() // cancel 后 Set 内部的协程会自动清理该id
 	resp := s.responseMap.Set(ctx, event.Id)
-	defer s.responseMap.Remove(event.Id)
 	if err := stream.Send(event); err != nil {
 		return nil, err
 	}
