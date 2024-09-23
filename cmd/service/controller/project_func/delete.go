@@ -40,7 +40,7 @@ func DeleteOne(c *gin.Context) {
 		return
 	}
 
-	if err = srv.CleanProject(tx, req.ProjectID); err != nil {
+	if err = srv.ClearProject(tx, req.ProjectID); err != nil {
 		response.APIError(c, err)
 		return
 	}

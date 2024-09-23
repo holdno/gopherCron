@@ -3,6 +3,7 @@ package register
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"sync"
 	"time"
@@ -191,9 +192,12 @@ func (s *remoteRegistryV2) register() error {
 
 	// 加入 hang 实现“同步模式”的重新注册
 	hang := make(chan struct{}, 1)
+	closeHang := sync.OnceFunc(func() {
+		close(hang)
+	})
 	reqID := u.GetStrID()
 	go safe.Run(func() {
-		defer close(hang)
+		defer closeHang()
 		wait := s.registerNotify.registerNotify(reqID)
 		hang <- struct{}{}
 		wait()
@@ -226,6 +230,7 @@ func (s *remoteRegistryV2) register() error {
 			if err == nil {
 				return
 			}
+			closeHang() // 避免异常导致死锁
 			close(kill)
 
 			if closeStream != nil {
@@ -267,6 +272,7 @@ func (s *remoteRegistryV2) register() error {
 					return
 				default:
 					if resp, err = receive(); err != nil {
+						err = fmt.Errorf("receive error: %w", err)
 						return
 					}
 					if resp.Type == cronpb.EventType_EVENT_REGISTER_REPLY {

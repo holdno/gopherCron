@@ -53,7 +53,7 @@ func (a *app) GetUserOrgs(userID int64) ([]*common.Org, error) {
 	return list, nil
 }
 
-func (a *app) CleanProject(tx *gorm.DB, pid int64) error {
+func (a *app) ClearProject(tx *gorm.DB, pid int64) error {
 	var err error
 	if err = a.store.Project().DeleteProjectV2(tx, pid); err != nil {
 		return errors.NewError(http.StatusInternalServerError, fmt.Sprintf("删除项目%d失败", pid)).WithLog(err.Error())
@@ -97,7 +97,7 @@ func (a *app) DeleteOrg(orgID string, userID int64) error {
 		}
 	}()
 	for _, v := range plist {
-		if err := a.CleanProject(tx, v.ID); err != nil {
+		if err := a.ClearProject(tx, v.ID); err != nil {
 			return errors.NewError(http.StatusInternalServerError, fmt.Sprintf("删除项目%d失败", v.ID)).WithLog(err.Error())
 		}
 	}
