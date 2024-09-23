@@ -84,6 +84,7 @@ func (a *app) DeleteAllWebHook(tx *gorm.DB, projectID int64) error {
 	if err != nil {
 		errObj := errors.ErrInternalError
 		errObj.Log = "[WebHook - DeleteAllWebHook] failed to delete all webhook by project id: " + err.Error()
+		return errObj
 	}
 
 	return nil
@@ -94,6 +95,7 @@ func (a *app) DeleteAllWorkflowTask(tx *gorm.DB, projectID int64) error {
 	if err != nil {
 		errObj := errors.ErrInternalError
 		errObj.Log = "[WebHook - DeleteAllWorkflowTask] failed to delete all workflow task by project id: " + err.Error()
+		return errObj
 	}
 
 	return nil

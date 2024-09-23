@@ -538,9 +538,16 @@ func (s *cronRpc) buildAgentRegister(ctx context.Context) (registerFunc func(req
 type dispatcher func(reqID string, meta infra.NodeMeta) app.JobDispatcher
 
 func buildDispatchJobsV2Handler(sendEvent func(ctx context.Context, e *cronpb.ServiceEvent) error) dispatcher {
-	return func(reqID string, meta infra.NodeMeta) app.JobDispatcher {
+	return func(firstReqID string, meta infra.NodeMeta) app.JobDispatcher {
+		// firstReqID 代表需要向agent回复的任务下发id，agent在发起注册后，会监听该id的事件来作为中心对agent注册的回应
+		// 但该id仅需要被回复一次即可
+		once := sync.Once{}
 		return func(taskRaw []byte) error {
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
+			reqID := utils.GetStrID()
+			once.Do(func() {
+				reqID = firstReqID
+			})
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 			defer cancel()
 			if err := sendEvent(ctx, &cronpb.ServiceEvent{
 				Id:        reqID,
@@ -607,17 +614,8 @@ func (s *cronRpc) RegisterAgentV2(req cronpb.Center_RegisterAgentV2Server) error
 		}
 	})
 
-	firstDispatch := sync.Once{}
-
 	// 注册成功后向agent下发任务的处理方法
 	dispatchHandler := buildDispatchJobsV2Handler(func(ctx context.Context, e *cronpb.ServiceEvent) error {
-		isFirst := false
-		firstDispatch.Do(func() {
-			isFirst = true
-		})
-		if !isFirst {
-			e.Id = utils.GetStrID()
-		}
 		_, err := s.app.StreamManagerV2().SendEventWaitResponse(ctx, req, e)
 		return err
 	})

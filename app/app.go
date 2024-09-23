@@ -47,7 +47,7 @@ type App interface {
 	CreateProject(tx *gorm.DB, p common.Project) (int64, error)
 	ReGenProjectToken(uid, pid int64) (string, error)
 	GetProject(pid int64) (*common.Project, error)
-	CleanProject(tx *gorm.DB, pid int64) error
+	ClearProject(tx *gorm.DB, pid int64) error
 	GetUserProjects(uid int64, oid string) ([]*common.ProjectWithUserRole, error)
 	CheckProjectExist(oid, title string) (*common.Project, error)
 	CheckUserIsInProject(pid, uid int64) (*common.ProjectRelevance, error) // 确认该用户是否加入该项目

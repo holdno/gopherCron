@@ -247,7 +247,7 @@ type responseMap struct {
 	m cmap.ConcurrentMap[string, *streamResponse]
 }
 
-func (rm *responseMap) Set(ctx context.Context, id string) chan *cronpb.ClientEvent {
+func (rm *responseMap) set(ctx context.Context, id string) chan *cronpb.ClientEvent {
 	responser := &streamResponse{
 		recv: make(chan *cronpb.ClientEvent, 1),
 		mu:   &sync.Mutex{},
@@ -257,14 +257,13 @@ func (rm *responseMap) Set(ctx context.Context, id string) chan *cronpb.ClientEv
 		<-ctx.Done()
 		responser.mu.Lock()
 		responser.isClose = true
-		rm.Remove(id)
 		close(responser.recv)
 		responser.mu.Unlock()
 	}()
 	return responser.recv
 }
 
-func (rm *responseMap) Remove(id string) {
+func (rm *responseMap) remove(id string) {
 	rm.m.Remove(id)
 }
 
@@ -304,7 +303,8 @@ func (s *streamManager[T]) SendEventWaitResponse(ctx context.Context, stream int
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel() // cancel 后 Set 内部的协程会自动清理该id
-	resp := s.responseMap.Set(ctx, event.Id)
+	resp := s.responseMap.set(ctx, event.Id)
+	defer s.responseMap.remove(event.Id) // 确保id在使用完立即销毁
 	if err := stream.Send(event); err != nil {
 		return nil, err
 	}
