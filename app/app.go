@@ -646,7 +646,7 @@ func (a *app) CheckUserProject(pid, uid int64) (*common.Project, error) {
 	if uid != common.ADMIN_USER_ID {
 		opt.AddQuery(selection.NewRequirement("uid", selection.Equals, uid))
 	}
-	a.store.ProjectRelevance()
+
 	res, err := a.store.Project().GetProject(opt)
 	if err != nil && err != gorm.ErrRecordNotFound {
 		errObj := errors.ErrInternalError
