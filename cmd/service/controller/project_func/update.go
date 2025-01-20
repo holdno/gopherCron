@@ -23,11 +23,10 @@ type UpdateRequest struct {
 // 只有项目创建者才可以更新
 func Update(c *gin.Context) {
 	var (
-		req     UpdateRequest
-		err     error
-		project *common.Project
-		uid     = utils.GetUserID(c)
-		srv     = app.GetApp(c)
+		req UpdateRequest
+		err error
+		uid = utils.GetUserID(c)
+		srv = app.GetApp(c)
 	)
 
 	if err = utils.BindArgsWithGin(c, &req); err != nil {
@@ -35,14 +34,8 @@ func Update(c *gin.Context) {
 		return
 	}
 
-	// 检测该项目是否属于请求人
-	if project, err = srv.CheckUserProject(req.ProjectID, uid); err != nil {
+	if err = srv.CheckPermissions(req.ProjectID, uid, app.PermissionEdit); err != nil {
 		response.APIError(c, err)
-		return
-	}
-
-	if project == nil {
-		response.APIError(c, errors.ErrProjectNotExist)
 		return
 	}
 

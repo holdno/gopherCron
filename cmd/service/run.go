@@ -55,7 +55,7 @@ func apiServer(srv app.App, conf *config.ServiceConfig) {
 		cronpb.RegisterCenterServer(grpcServer, rpcImpl)
 	}, newServer.WithRegion(conf.Micro.Region),
 		newServer.WithOrg(conf.Micro.OrgID),
-		newServer.WithAddress([]infra.Address{{ListenAddress: conf.Deploy.Host}}),
+		newServer.WithAddress([]infra.Address{{ListenAddress: conf.Deploy.Host, RegisterAddress: conf.Deploy.RegisterHost}}),
 		newServer.WithHttpServer(&http.Server{
 			Handler:     engine,
 			ReadTimeout: time.Duration(5) * time.Second,
