@@ -87,12 +87,13 @@ type Micro struct {
 
 // DeployConf 部署配置
 type DeployConf struct {
-	Environment string `toml:"environment"`
-	Timeout     int    `toml:"timeout"`
-	ViewPath    string `toml:"view_path"`
-	Host        string `toml:"host"`
-	ProxyHost   string `toml:"proxy_host"`
-	LegacyMode  bool   `toml:"legacy_mode"`
+	Environment  string `toml:"environment"`
+	Timeout      int    `toml:"timeout"`
+	ViewPath     string `toml:"view_path"`
+	Host         string `toml:"host"`
+	RegisterHost string `toml:"register_host"`
+	ProxyHost    string `toml:"proxy_host"`
+	LegacyMode   bool   `toml:"legacy_mode"`
 }
 
 // EtcdConf etcd配置
