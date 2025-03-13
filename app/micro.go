@@ -495,7 +495,7 @@ func (c *CenterClient) Close() {
 
 func resolveCenterService(a *app) {
 	finder := etcd.NewAsyncFinder[infra.NodeMeta](infra.ResolveEtcdClient(),
-		etcd.NewEtcdTarget("gophercron", "0", cronpb.Center_ServiceDesc.ServiceName),
+		etcd.NewEtcdTarget(a.cfg.Micro.OrgID, "0", cronpb.Center_ServiceDesc.ServiceName),
 		func(query url.Values, attr infra.NodeMeta, addr *resolver.Address) bool {
 			return true
 		})

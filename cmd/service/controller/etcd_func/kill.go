@@ -1,15 +1,12 @@
 package etcd_func
 
 import (
-	"context"
 	"net/http"
-	"time"
 
 	"github.com/holdno/gopherCron/app"
 	"github.com/holdno/gopherCron/cmd/service/response"
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/errors"
-	"github.com/holdno/gopherCron/pkg/etcd"
 	"github.com/holdno/gopherCron/utils"
 
 	"github.com/gin-gonic/gin"
@@ -30,7 +27,7 @@ func KillTask(c *gin.Context) {
 		task *common.TaskInfo
 		uid  = utils.GetUserID(c)
 		srv  = app.GetApp(c)
-		lk   *etcd.Locker
+		// lk   *etcd.Locker
 	)
 
 	if err = utils.BindArgsWithGin(c, &req); err != nil {
@@ -56,25 +53,28 @@ func KillTask(c *gin.Context) {
 		response.APIError(c, cerr)
 		return
 	}
-
-	lk = srv.GetTaskLocker(task)
-	// 锁释放则证明任务结束
-	ctx, cancel := context.WithTimeout(c, time.Second*10)
-	defer cancel()
-	for {
-		select {
-		case <-ctx.Done():
-			response.APIError(c, ctx.Err())
-			return
-		default:
-			if err = lk.TryLock(); err != nil {
-				time.Sleep(time.Second)
-				continue
-			}
-		}
-		break
+	if task == nil {
+		response.APIError(c, errors.NewError(http.StatusNoContent, "任务不存在"))
+		return
 	}
-	defer lk.Unlock()
+	// lk = srv.GetTaskLocker(task)
+	// // 锁释放则证明任务结束
+	// ctx, cancel := context.WithTimeout(c, time.Second*10)
+	// defer cancel()
+	// for {
+	// 	select {
+	// 	case <-ctx.Done():
+	// 		response.APIError(c, ctx.Err())
+	// 		return
+	// 	default:
+	// 		if err = lk.TryLock(); err != nil {
+	// 			time.Sleep(time.Second)
+	// 			continue
+	// 		}
+	// 	}
+	// 	break
+	// }
+	// defer lk.Unlock()
 
 	task.Status = 0
 	if _, err = srv.SaveTask(task); err != nil {

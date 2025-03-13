@@ -1,6 +1,8 @@
 package store
 
 import (
+	"time"
+
 	"github.com/holdno/gopherCron/common"
 
 	"github.com/holdno/gocommons/selection"
@@ -21,6 +23,13 @@ type OrgStore interface {
 	CreateOrg(tx *gorm.DB, obj common.Org) error
 	List(selector selection.Selector) ([]*common.Org, error)
 	Delete(tx *gorm.DB, id string) error
+}
+
+type AgentActivityStore interface {
+	Commons
+	Create(tx *gorm.DB, obj common.AgentActivity) error
+	DeleteBefore(tx *gorm.DB, activeTime time.Time) error
+	GetOne(projectID int64, clientIP string) (*common.AgentActivity, error)
 }
 
 type OrgRelevanceStore interface {
@@ -61,8 +70,9 @@ type UserStore interface {
 
 type TaskLogStore interface {
 	Commons
-	CreateTaskLog(data common.TaskLog) error
+	CreateOrUpdateTaskLog(tx *gorm.DB, data common.TaskLog) error
 	GetList(selector selection.Selector) ([]*common.TaskLog, error)
+	LoadRunningTasks(tx *gorm.DB, before time.Time) ([]*common.TaskLog, error)
 	GetOne(projectID int64, taskID, tmpID string) (*common.TaskLog, error)
 	CheckOrCreateScheduleLog(tx *gorm.DB, taskInfo *common.TaskExecutingInfo, agentIP, agentVersion string) (bool, error)
 	Clean(tx *gorm.DB, selector selection.Selector) error

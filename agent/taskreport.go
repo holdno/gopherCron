@@ -10,9 +10,9 @@ import (
 	"github.com/holdno/gopherCron/config"
 	"github.com/holdno/gopherCron/pkg/store"
 	"github.com/holdno/gopherCron/pkg/store/sqlStore"
-	"github.com/jinzhu/gorm"
 
 	"github.com/holdno/gocommons/selection"
+	"github.com/jinzhu/gorm"
 	"github.com/spacegrower/watermelon/infra/wlog"
 	"go.uber.org/zap"
 )
@@ -70,7 +70,7 @@ func (r *TaskResultReporter) ResultReport(result *common.TaskExecuteResult) erro
 
 	if result.Err != "" {
 		taskResult.Error = result.Err
-		getError = 1
+		getError = common.TASK_HAS_ERROR
 	}
 
 	if resultBytes, jsonMarshalErr = json.Marshal(taskResult); jsonMarshalErr != nil {
@@ -95,7 +95,7 @@ func (r *TaskResultReporter) ResultReport(result *common.TaskExecuteResult) erro
 	logInfo.ProjectID = result.ExecuteInfo.Task.ProjectID
 	logInfo.TaskID = result.ExecuteInfo.Task.TaskID
 
-	if err = r.taskLogStore.CreateTaskLog(logInfo); err != nil {
+	if err = r.taskLogStore.CreateOrUpdateTaskLog(nil, logInfo); err != nil {
 		r.logger.With(zap.Any("fields", map[string]interface{}{
 			"task_name":  logInfo.Name,
 			"result":     logInfo.Result,

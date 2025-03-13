@@ -2,6 +2,7 @@ package sqlStore
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/pkg/store"
@@ -30,7 +31,7 @@ func (s *taskLogStore) AutoMigrate() {
 	s.provider.Logger().Info(fmt.Sprintf("%s, complete initialization", s.GetTable()))
 }
 
-func (s *taskLogStore) CreateTaskLog(data common.TaskLog) error {
+func (s *taskLogStore) CreateOrUpdateTaskLog(tx *gorm.DB, data common.TaskLog) error {
 	var tmpLog common.TaskLog
 
 	if data.TmpID != "" && data.PlanTime > 0 {
@@ -42,11 +43,15 @@ func (s *taskLogStore) CreateTaskLog(data common.TaskLog) error {
 		}
 	}
 
+	if tx == nil {
+		tx = s.GetMaster()
+	}
+
 	if tmpLog.TaskID == "" {
-		return s.GetMaster().Table(s.table).Create(&data).Error
+		return tx.Table(s.table).Create(&data).Error
 	} else {
 		data.PlanTime = tmpLog.PlanTime
-		return s.GetMaster().Table(s.table).Where("project_id = ? AND task_id = ? AND tmp_id = ? AND plan_time = ?",
+		return tx.Table(s.table).Where("project_id = ? AND task_id = ? AND tmp_id = ? AND plan_time = ?",
 			data.ProjectID, data.TaskID, data.TmpID, data.PlanTime).Update(&data).Error
 	}
 }
@@ -105,15 +110,38 @@ func (s *taskLogStore) CheckOrCreateScheduleLog(tx *gorm.DB, taskInfo *common.Ta
 	if exist.Result {
 		return false, nil
 	}
+
+	if taskInfo.RealTime.IsZero() {
+		taskInfo.RealTime = time.Now()
+	}
+
 	return true, tx.Table(s.table).Create(&common.TaskLog{
 		ProjectID:    taskInfo.Task.ProjectID,
 		TaskID:       taskInfo.Task.TaskID,
 		TmpID:        taskInfo.TmpID,
 		PlanTime:     taskInfo.PlanTime.Unix(),
+		Name:         taskInfo.Task.Name,
+		Command:      taskInfo.Task.Command,
 		AgentVersion: agentVersion,
 		ClientIP:     agentIP,
 		StartTime:    taskInfo.RealTime.Unix(),
 	}).Error
+}
+
+func (s *taskLogStore) LoadRunningTasks(tx *gorm.DB, before time.Time) ([]*common.TaskLog, error) {
+	var (
+		err error
+		res []*common.TaskLog
+	)
+
+	if tx == nil {
+		tx = s.GetReplica()
+	}
+
+	if err = tx.Table(s.GetTable()).Where("end_time = 0 AND start_time < ?", before.Unix()).Find(&res).Error; err != nil {
+		return nil, err
+	}
+	return res, nil
 }
 
 func (s *taskLogStore) Clean(tx *gorm.DB, selector selection.Selector) error {

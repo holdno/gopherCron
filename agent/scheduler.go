@@ -257,6 +257,7 @@ func (a *client) handleTaskEvent(event *common.TaskEvent) {
 	case common.TASK_EVENT_TEMPORARY:
 		// 构建执行计划
 		if taskSchedulePlan, err = common.BuildTaskSchedulerPlan(event.Task, common.ActivePlan); err != nil {
+			wlog.Error("build task schedule plan error in temporary event", zap.Error(err))
 			logrus.WithField("Error", err.Error()).Error("build task schedule plan error")
 			return
 		}
@@ -265,7 +266,7 @@ func (a *client) handleTaskEvent(event *common.TaskEvent) {
 	case common.TASK_EVENT_WORKFLOW_SCHEDULE:
 		// 构建执行计划
 		if taskSchedulePlan, err = common.BuildWorkflowTaskSchedulerPlan(event.Task.TaskInfo); err != nil {
-			logrus.WithField("Error", err.Error()).Error("build task schedule plan error")
+			wlog.Error("build task schedule plan error in workflow schedule event", zap.Error(err))
 			return
 		}
 		taskSchedulePlan.PlanTime = time.Now()
@@ -274,7 +275,7 @@ func (a *client) handleTaskEvent(event *common.TaskEvent) {
 		// 构建执行计划
 		if event.Task.Status == common.TASK_STATUS_START {
 			if taskSchedulePlan, err = common.BuildTaskSchedulerPlan(event.Task, common.NormalPlan); err != nil {
-				logrus.WithField("Error", err.Error()).Error("build task schedule plan error")
+				wlog.Error("build task schedule plan error in save event", zap.Error(err))
 				return
 			}
 
@@ -297,7 +298,7 @@ func (a *client) handleTaskEvent(event *common.TaskEvent) {
 func (a *client) TrySchedule() time.Duration {
 	var (
 		now      time.Time
-		nearTime *time.Time
+		nearTime time.Time
 	)
 
 	// 如果当前任务调度表中没有任务的话 可以随机睡眠后再尝试
@@ -311,7 +312,7 @@ func (a *client) TrySchedule() time.Duration {
 		if plan.PlanTime.Before(now) || plan.PlanTime.Equal(now) {
 			// 尝试执行任务
 			// 因为可能上一次任务还没执行结束
-			if a.cfg.Micro.Weight > 0 { // 权重大于0才会调度任务
+			if a.cfg.Micro.Weight > 0 && plan.Task.Status == common.TASK_STATUS_START { // 权重大于0才会调度任务
 				a.TryStartTask(*plan)
 			} else {
 				wlog.Debug("skip execute task, this client weight is zero",
@@ -322,15 +323,15 @@ func (a *client) TrySchedule() time.Duration {
 		}
 
 		// 获取下一个要执行任务的时间
-		if nearTime == nil || plan.PlanTime.Before(*nearTime) {
-			nearTime = &plan.PlanTime
+		if nearTime.IsZero() || plan.PlanTime.Before(nearTime) {
+			nearTime = plan.PlanTime
 		}
 
 		return true
 	})
 
 	// 下次调度时间 (最近要执行的任务调度时间 - 当前时间)
-	return (*nearTime).Sub(now)
+	return nearTime.Sub(now)
 }
 
 // TryStartTask 开始执行任务
@@ -445,11 +446,13 @@ func (a *client) TryStartTask(plan common.TaskSchedulePlan) error {
 		}()
 
 		// 开始执行任务
+		var taskStatusReportResult *cronpb.Result
 		if err := retry.Do(func() error {
 			value, _ := json.Marshal(taskExecuteInfo)
 			ctx, cancel := context.WithTimeout(taskExecuteInfo.CancelCtx, time.Duration(a.cfg.Timeout)*time.Second)
 			defer cancel()
-			_, err := a.GetStatusReporter()(ctx, &cronpb.ScheduleReply{
+			var err error
+			taskStatusReportResult, err = a.GetStatusReporter()(ctx, &cronpb.ScheduleReply{
 				ProjectId: plan.Task.ProjectID,
 				Event: &cronpb.Event{
 					Type:      common.TASK_STATUS_RUNNING_V2,
@@ -480,8 +483,15 @@ func (a *client) TryStartTask(plan common.TaskSchedulePlan) error {
 			errSignal.Send(errDetail)
 		}
 
-		errSignal.Close()
+		if !taskStatusReportResult.Result {
+			taskExecuteInfo.CancelFunc()
+			a.logger.Error(fmt.Sprintf("task: %s, id: %s, tmp_id: %s, change running status failed, %v", plan.Task.Name,
+				plan.Task.TaskID, plan.TmpID, taskStatusReportResult.Message))
+			cancelReason.WriteString(taskStatusReportResult.Message)
+			errSignal.Send(fmt.Errorf("agent上报任务开始状态失败: %s，任务终止", taskStatusReportResult.Message))
+		}
 
+		errSignal.Close()
 		// 执行任务
 		result = a.ExecuteTask(taskExecuteInfo)
 		if result.Err != "" {
@@ -678,7 +688,13 @@ func (ts *TaskScheduler) PushEvent(event *common.TaskEvent) {
 }
 
 func tryLockUntilCtxIsDone(cli cronpb.CenterClient, execInfo *common.TaskExecutingInfo) (chan error, error) {
-	locker, err := cli.TryLock(execInfo.CancelCtx)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(execInfo.Task.Timeout)*time.Second)
+	locker, err := cli.TryLock(ctx)
+	defer func() {
+		if err != nil {
+			cancel()
+		}
+	}()
 	if err != nil {
 		return nil, err
 	}
@@ -690,8 +706,8 @@ func tryLockUntilCtxIsDone(cli cronpb.CenterClient, execInfo *common.TaskExecuti
 		Type:      cronpb.LockType_LOCK,
 	}); err != nil {
 		if errors.Is(err, io.EOF) {
-			if _, err = locker.Recv(); err != nil {
-				return nil, err
+			if _, recvErr := locker.Recv(); recvErr != nil {
+				return nil, recvErr
 			}
 		}
 		return nil, err
@@ -704,24 +720,32 @@ func tryLockUntilCtxIsDone(cli cronpb.CenterClient, execInfo *common.TaskExecuti
 	disconnectChan := make(chan error, 1)
 
 	go func() {
-		defer close(disconnectChan)
+		defer func() {
+			close(disconnectChan)
+			cancel()
+		}()
 		for {
 			select {
 			case <-execInfo.CancelCtx.Done():
 				safe.Run(func() {
 					// 任务执行后锁最少保持5s
 					// 防止分布式部署下多台机器共同执行
-					if time.Since(execInfo.RealTime).Seconds() < 5 {
-						time.Sleep(5*time.Second - time.Since(execInfo.RealTime))
+					if execInfo.CancelCtx.Err() != context.Canceled {
+						if time.Since(execInfo.RealTime).Seconds() < 4 {
+							// 来回网络延迟接近5s
+							time.Sleep(4*time.Second - time.Since(execInfo.RealTime))
+						}
 					}
-					locker.Send(&cronpb.TryLockRequest{
+
+					err = locker.Send(&cronpb.TryLockRequest{
 						ProjectId: execInfo.Task.ProjectID,
 						TaskId:    execInfo.Task.TaskID,
 						TaskTmpId: execInfo.TmpID,
 						Type:      cronpb.LockType_UNLOCK,
 					})
 					locker.CloseSend()
-					wlog.Debug("unlock task", zap.String("task_id", execInfo.Task.TaskID), zap.Int64("project_id", execInfo.Task.ProjectID))
+					wlog.Debug("unlock task", zap.String("task_id", execInfo.Task.TaskID),
+						zap.Int64("project_id", execInfo.Task.ProjectID), zap.Error(err))
 				})
 				return
 			default:
