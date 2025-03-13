@@ -159,9 +159,13 @@ type App interface {
 
 	// task status
 	SetTaskRunning(agentIP, agentVersion string, execInfo *common.TaskExecutingInfo) error
-	CheckTaskIsRunning(projectID int64, taskID string) ([]common.TaskRunningInfo, error)
+	CheckTaskIsRunningWithResetStatus(projectID int64, taskID, tmpID string) ([]common.TaskRunningInfo, error)
+	CheckTaskIsRunning(projectID int64, taskID string) (common.TaskRunningInfo, []common.TaskRunningInfo, error)
 	HandlerTaskFinished(agentIP string, result *common.TaskFinishedV2) error
 	SaveTaskLog(agentIP string, result common.TaskFinishedV2)
+
+	UpsertAgentActiveTime(projectID int64, clientIP string) error
+	GetAgentLatestActiveTime(projectID int64, clientIP string) (time.Time, error)
 
 	GetOIDCService() *OIDCService
 	FireTower() *Tower
@@ -387,6 +391,7 @@ func (a *app) Run() {
 	startCleanupTask(a)
 	startWorkflow(a)
 	startTemporaryTaskWorker(a)
+	startTaskDoctor(a)
 	// startCalcDataConsistency(a)
 }
 
@@ -578,6 +583,41 @@ func startTemporaryTaskWorker(app *app) {
 					Error:     "not yet scheduled",
 					Operator:  userInfo.Name,
 				})
+			}
+		}
+	})
+}
+
+func startTaskDoctor(app *app) {
+	app.election(common.BuildTaskDoctorMasterKey(), func(s *concurrency.Session) error {
+		wlog.Info("new task docker leader")
+		app.metrics.CustomInc("temporary_task_docker_leader", app.localip, "")
+
+		c := time.NewTicker(time.Minute * 5)
+		defer c.Stop()
+		for {
+			select {
+			case <-s.Done():
+				return nil
+			case <-app.ctx.Done():
+				return nil
+			case <-c.C:
+			}
+
+			runningTasks, err := app.store.TaskLog().LoadRunningTasks(nil, time.Now().Add(-time.Hour))
+			if err != nil {
+				wlog.Error("failed to load running task list", zap.Error(err))
+				continue
+			}
+
+			for _, v := range runningTasks {
+				_, err = app.CheckTaskIsRunningWithResetStatus(v.ProjectID, v.TaskID, v.TmpID)
+				if err != nil {
+					wlog.Error("task doctor: failed check task running status", zap.Error(err), zap.String("task_id", v.TaskID),
+						zap.String("tmp_id", v.TmpID), zap.Int64("project_id", v.ProjectID), zap.String("target_host", v.ClientIP))
+					app.metrics.CustomInc("task_doctor_check_fail", app.localip, fmt.Sprintf("%d-%s", v.ProjectID, v.TaskID))
+					continue
+				}
 			}
 		}
 	})

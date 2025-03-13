@@ -70,6 +70,7 @@ type SqlProviderStores struct {
 	TemporaryTask         store.TemporaryTaskStore
 	Org                   store.OrgStore
 	OrgRelevance          store.OrgRelevanceStore
+	AgentActivity         store.AgentActivityStore
 }
 
 func MustSetup(conf *config.MysqlConf, logger wlog.Logger, install bool) SqlStore {
@@ -93,6 +94,7 @@ func MustSetup(conf *config.MysqlConf, logger wlog.Logger, install bool) SqlStor
 	provider.stores.TemporaryTask = NewTemporaryTaskStoreStore(provider)
 	provider.stores.Org = NewOrgStore(provider)
 	provider.stores.OrgRelevance = NewOrgRelevanceStore(provider)
+	provider.stores.AgentActivity = NewAgentActivityStore(provider)
 
 	provider.CheckStores()
 
@@ -170,6 +172,10 @@ func (s *SqlProvider) WebHook() store.TaskWebHookStore {
 	return s.stores.WebHook
 }
 
+func (s *SqlProvider) AgentActivity() store.AgentActivityStore {
+	return s.stores.AgentActivity
+}
+
 func (s *SqlProvider) BeginTx() *gorm.DB {
 	return s.GetMaster().Begin()
 }
@@ -223,6 +229,7 @@ type SqlStore interface {
 	TemporaryTask() store.TemporaryTaskStore
 	Org() store.OrgStore
 	OrgRelevance() store.OrgRelevanceStore
+	AgentActivity() store.AgentActivityStore
 	BeginTx() *gorm.DB
 	Install()
 	Shutdown()

@@ -158,7 +158,7 @@ func (s *remoteRegistryV2) parserServices() (services []*cronpb.AgentInfo) {
 }
 
 func (s *remoteRegistryV2) getConnect(ctx context.Context) (cronpb.Center_RegisterAgentV2Client, error) {
-	if s.currentStream != nil {
+	if s.currentStream != nil && s.currentStream.Context().Err() != nil {
 		return s.currentStream, nil
 	}
 	var err error
@@ -216,6 +216,7 @@ func (s *remoteRegistryV2) register() error {
 			},
 		},
 	}); err != nil {
+		s.currentStream = nil
 		return err
 	}
 

@@ -143,6 +143,7 @@ var (
 	CLEANUP_MASTER          = "t_cleanup_master"
 	CALC_CONSISTENCY_MASTER = "t_calc_consistency_master"
 	TEMPORARY_MASTER        = "t_temporary_master"
+	TASK_DOCTOR             = "t_task_doctor_master"
 	STATUS                  = "t_status"
 )
 
@@ -182,6 +183,10 @@ func BuildCalaConsistencyMasterKey() string {
 
 func BuildTemporaryMasterKey() string {
 	return fmt.Sprintf("%s/%s", ETCD_PREFIX, TEMPORARY_MASTER)
+}
+
+func BuildTaskDoctorMasterKey() string {
+	return fmt.Sprintf("%s/%s", ETCD_PREFIX, TASK_DOCTOR)
 }
 
 func GetTaskStatusPrefixKey() string {

@@ -12,7 +12,7 @@ RUN go build -a -ldflags '-extldflags "-static"' -o _build/gophercron ./cmd/
 
 
 FROM amd64/alpine:3.18
-LABEL MAINTAINER <wby@ojbk.io>
+LABEL MAINTAINER <w@ojbk.io>
 
 RUN apk update && apk add tzdata diffutils curl && cp -r -f /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
 

@@ -13,6 +13,8 @@ import (
 	"github.com/holdno/gopherCron/errors"
 	"github.com/holdno/gopherCron/pkg/cronpb"
 	"github.com/holdno/gopherCron/utils"
+	"github.com/spacegrower/watermelon/infra/wlog"
+	"go.uber.org/zap"
 
 	"github.com/jinzhu/gorm"
 	"go.etcd.io/etcd/api/v3/mvccpb"
@@ -152,32 +154,104 @@ func (a *app) GetProjectTaskCount(projectID int64) (int64, error) {
 
 // KillTask 强行结束任务
 func (a *app) KillTask(projectID int64, taskID string) error {
-	// taskKey := common.BuildKey(projectID, taskID)
-	// ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
-	// defer cancel()
-	// resp, err := a.etcd.KV().Get(ctx, taskKey)
-	// if err != nil {
-	// 	return err
-	// }
+	// 通过ETCD获取执行该任务的agentIP
+	memoryResult, runningInfo, err := a.CheckTaskIsRunning(projectID, taskID)
+	if err != nil {
+		return err
+	}
 
-	err := a.DispatchEvent(&cronpb.SendEventRequest{
-		Region:    a.cfg.Micro.Region,
-		ProjectId: projectID,
-		Event: &cronpb.ServiceEvent{
-			Id:        utils.GetStrID(),
-			Type:      cronpb.EventType_EVENT_KILL_TASK_REQUEST,
-			EventTime: time.Now().Unix(),
-			Event: &cronpb.ServiceEvent_KillTaskRequest{
-				KillTaskRequest: &cronpb.KillTaskRequest{
-					TaskId:    taskID,
-					ProjectId: projectID,
+	if memoryResult.AgentIP != "" && len(runningInfo) == 0 {
+		// 没有agent在跑该任务，但是etcd中存在该任务的running key，大概率是上一次任务执行中agent宕机
+		wlog.Info("Actively remove the key for the task's running status, as the currently recorded agent does not match the one executing the task.",
+			zap.String("status_key", common.BuildTaskStatusKey(projectID, taskID)), zap.String("task_id", taskID), zap.Int64("project_id", projectID))
+
+		taskLog, err := a.store.TaskLog().GetOne(projectID, taskID, memoryResult.TmpID)
+		if err != nil && err != gorm.ErrRecordNotFound {
+			return errors.NewError(http.StatusInternalServerError, "获取任务日志失败").WithLog(err.Error())
+		}
+
+		if taskLog.EndTime == 0 {
+			taskLog.WithError = common.TASK_HAS_ERROR
+
+			resultRaw, _ := json.Marshal(common.TaskResultLog{
+				Result: "",
+				Error:  fmt.Sprintf("Agent(%s) offline", memoryResult.AgentIP),
+			})
+			taskLog.Result = string(resultRaw)
+			taskLog.EndTime = time.Now().Unix()
+			tx := a.store.BeginTx()
+			if err = a.store.TaskLog().CreateOrUpdateTaskLog(tx, *taskLog); err != nil {
+				return errors.NewError(http.StatusInternalServerError, "Agent离线，记录任务日志失败").WithLog(err.Error())
+			}
+
+			defer func() {
+				if err == nil {
+					tx.Commit()
+				}
+			}()
+		}
+	}
+
+	if err = a.DelTaskRunningKey(memoryResult.AgentIP, projectID, taskID); err != nil {
+		return errors.NewError(http.StatusInternalServerError, "删除任务运行状态key失败").WithLog(err.Error())
+	}
+
+	if len(runningInfo) == 0 {
+		a.PublishMessage(messageTaskStatusChanged(projectID, taskID, memoryResult.TmpID, common.TASK_STATUS_FAIL_V2))
+		return nil
+	}
+
+	streams, err := a.FindAgentsV2(a.cfg.Micro.Region, projectID)
+	if err != nil {
+		return err
+	}
+
+	if len(streams) == 0 {
+		// 没有存在的agent，则不需要下发kill命令，理论上 runningInfo 不为空一定会有 stream存在，但两步操作中间有略微间隔(极端情况，或异常)
+		return nil
+	}
+
+	killFunc := func(stream *CenterClient) (bool, error) {
+		ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
+		defer cancel()
+
+		resp, err := stream.SendEvent(ctx, &cronpb.SendEventRequest{
+			Region:    a.cfg.Micro.Region,
+			ProjectId: projectID,
+			Agent:     stream.addr,
+			Event: &cronpb.ServiceEvent{
+				Id:        utils.GetStrID(),
+				EventTime: time.Now().Unix(),
+				Type:      cronpb.EventType_EVENT_KILL_TASK_REQUEST,
+				Event: &cronpb.ServiceEvent_KillTaskRequest{
+					KillTaskRequest: &cronpb.KillTaskRequest{
+						ProjectId: projectID,
+						TaskId:    taskID,
+					},
 				},
 			},
-		},
-	})
-	if err != nil {
-		return errors.NewError(http.StatusInternalServerError, "下发任务强行结束事件失败").WithLog(err.Error())
+		})
+		if err != nil {
+			return false, err
+		}
+
+		if resp.GetKillTaskReply() == nil {
+			wlog.Error("get unexcept event response", zap.String("request", cronpb.EventType_EVENT_KILL_TASK_REQUEST.String()),
+				zap.String("response", resp.Type.String()), zap.String("raw", resp.String()))
+			return false, nil
+		}
+
+		return resp.GetKillTaskReply().Result, nil
 	}
+
+	for _, v := range streams {
+		defer v.Close()
+		_, err := killFunc(v)
+		if err != nil {
+			return errors.NewError(http.StatusInternalServerError, "下发任务强行结束事件失败，AgentIP: "+v.addr).WithLog(err.Error())
+		}
+	}
+
 	return nil
 }
 
@@ -477,6 +551,8 @@ func (a *app) SaveTask(task *common.TaskInfo, opts ...clientv3.OpOption) (*commo
 	if err != nil {
 		return nil, errors.NewError(http.StatusInternalServerError, "下发任务更新事件失败，可能出现数据不一致，请重试无效后联系系统管理员处理").WithLog(err.Error())
 	}
+
+	wlog.Debug("Dispatch save task event", zap.String("task_id", task.TaskID), zap.Int64("project_id", task.ProjectID))
 
 	ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
 	defer cancel()

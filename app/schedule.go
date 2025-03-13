@@ -15,6 +15,7 @@ import (
 	"github.com/holdno/gopherCron/pkg/cronpb"
 	"github.com/holdno/gopherCron/pkg/warning"
 	"github.com/holdno/gopherCron/utils"
+	"github.com/jinzhu/gorm"
 	"github.com/spacegrower/watermelon/infra/wlog"
 	"github.com/spacegrower/watermelon/pkg/safe"
 	"go.uber.org/zap"
@@ -704,25 +705,118 @@ func (a *app) SetTaskRunning(agentIP, agentVersion string, execInfo *common.Task
 	return nil
 }
 
-func (a *app) CheckTaskIsRunning(projectID int64, taskID string) ([]common.TaskRunningInfo, error) {
+// CheckTaskIsRunningWithResetStatus 检查任务的实际运行状态
+// 如果带有tmpID 则认为是检测任务状态判断边缘agent是否存活
+// 如果不携带tmpID，则认为是一定要停止
+func (a *app) CheckTaskIsRunningWithResetStatus(projectID int64, taskID, tmpID string) ([]common.TaskRunningInfo, error) {
+	memoryResult, checkResult, err := a.CheckTaskIsRunning(projectID, taskID)
+	if err != nil {
+		return nil, err
+	}
+
+	switch true {
+	case memoryResult.AgentIP != "" && len(checkResult) == 0:
+		taskInfo, err := a.GetTask(projectID, taskID)
+		if err != nil {
+			return nil, err
+		}
+
+		if taskInfo.Timeout > int(time.Now().Sub(time.Unix(memoryResult.Timestamp, 0)).Seconds()) {
+			// 未到超时时间，不做处理
+			// 检测 agent 活跃状态，判断agent是不是刚掉线之类，边缘存在断线重试，可能正好在这个间隔期间
+			latestTime, err := a.GetAgentLatestActiveTime(projectID, memoryResult.AgentIP)
+			if err != nil {
+				return nil, err
+			}
+
+			if latestTime.After(time.Now().Add(-time.Minute * 10)) {
+				// 如果agent最后一次活跃时间至现在小于10分钟，则认为该agent只是暂时性异常，可能会恢复
+				break
+			}
+		}
+		fallthrough
+	case len(checkResult) > 0 && memoryResult.TmpID != tmpID:
+		// 没有agent在跑该任务，但是etcd中存在该任务的running key，大概率是上一次任务执行中agent宕机
+		wlog.Info("Actively remove the key for the task's running status, as the currently recorded agent does not match the one executing the task.",
+			zap.String("status_key", common.BuildTaskStatusKey(projectID, taskID)), zap.String("task_id", taskID), zap.Int64("project_id", projectID))
+
+		taskLog, err := a.store.TaskLog().GetOne(projectID, taskID, tmpID)
+		if err != nil && err != gorm.ErrRecordNotFound {
+			return nil, errors.NewError(http.StatusInternalServerError, "获取任务日志失败").WithLog(err.Error())
+		}
+		// 因为检测agent是否仍在运行该任务的动作与获取任务状态的动作不是原子性的，所以在检测到没有agent在运行时，需要再检查一下日志状态
+		// 正常情况下，agent一定是先上报任务结束，等任务日志更新后才在本地移除运行状态。
+		if taskLog == nil {
+			return nil, nil
+		}
+
+		if taskLog.EndTime != 0 {
+			// 说明两次调用间隔期间 任务已经完成
+			return checkResult, nil
+		}
+		taskLog.WithError = common.TASK_HAS_ERROR
+
+		resultRaw, _ := json.Marshal(common.TaskResultLog{
+			Result: "",
+			Error:  fmt.Sprintf("Agent(%s) offline", memoryResult.AgentIP),
+		})
+		taskLog.Result = string(resultRaw)
+		taskLog.EndTime = time.Now().Unix()
+		tx := a.store.BeginTx()
+		if err = a.store.TaskLog().CreateOrUpdateTaskLog(tx, *taskLog); err != nil {
+			return nil, errors.NewError(http.StatusInternalServerError, "Agent离线，记录任务日志失败").WithLog(err.Error())
+		}
+
+		defer func() {
+			if err == nil {
+				tx.Commit()
+			}
+		}()
+
+		if memoryResult.TmpID == tmpID { // 相同的tmpid说明检测的是当前正在运行的任务
+			if err = a.DelTaskRunningKey(memoryResult.AgentIP, projectID, taskID); err != nil {
+				return nil, errors.NewError(http.StatusInternalServerError, "删除任务运行状态key失败").WithLog(err.Error())
+			}
+
+			a.PublishMessage(messageTaskStatusChanged(projectID, taskID, memoryResult.TmpID, common.TASK_STATUS_FAIL_V2))
+		}
+
+		if otherErr := a.Warning(warning.NewTaskWarningData(warning.TaskWarning{
+			AgentIP:   memoryResult.AgentIP,
+			TaskName:  taskLog.Name,
+			TaskID:    taskID,
+			ProjectID: projectID,
+			Message:   fmt.Sprintf("Agent此前发生异常，请关注项目当前状态。\n项目：%s\n任务： %s\nTmpID：%s", taskLog.Project, taskLog.Name, tmpID),
+		})); otherErr != nil {
+			wlog.Error("Failed to send warning message", zap.Int64("project_id", projectID),
+				zap.String("task_id", taskID), zap.String("agent_ip", memoryResult.AgentIP), zap.Error(otherErr))
+		}
+	}
+
+	return checkResult, nil
+}
+
+func (a *app) CheckTaskIsRunning(projectID int64, taskID string) (common.TaskRunningInfo, []common.TaskRunningInfo, error) {
 	key := common.BuildTaskStatusKey(projectID, taskID)
-	ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
 	defer cancel()
+
+	var runningInfo common.TaskRunningInfo
 	resp, err := a.etcd.KV().Get(ctx, key)
 	if err != nil {
-		return nil, errors.NewError(http.StatusInternalServerError, "获取任务运行状态失败").WithLog(err.Error())
+		return runningInfo, nil, errors.NewError(http.StatusInternalServerError, "获取任务运行状态失败").WithLog(err.Error())
 	}
 
 	if len(resp.Kvs) == 0 {
-		return nil, nil
+		return runningInfo, nil, nil
 	}
 	var result []common.TaskRunningInfo
 	kv := resp.Kvs[0]
-	var runningInfo common.TaskRunningInfo
+
 	if err = json.Unmarshal(kv.Value, &runningInfo); err != nil {
-		return nil, err
+		return runningInfo, nil, err
 	}
-	fmt.Println("runningInfo", runningInfo)
+
 	checkFuncV2 := func(stream *CenterClient) (bool, error) {
 		ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
 		defer cancel()
@@ -771,7 +865,7 @@ func (a *app) CheckTaskIsRunning(projectID int64, taskID string) ([]common.TaskR
 
 	streams, err := a.FindAgentsV2(a.cfg.Micro.Region, projectID)
 	if err != nil {
-		return nil, err
+		return runningInfo, nil, err
 	}
 	if len(streams) > 0 {
 		defer func() {
@@ -784,7 +878,7 @@ func (a *app) CheckTaskIsRunning(projectID int64, taskID string) ([]common.TaskR
 			if strings.Contains(stream.addr, runningInfo.AgentIP) {
 				exist, err := checkFuncV2(stream)
 				if err != nil {
-					return nil, err
+					return runningInfo, nil, err
 				}
 				if exist {
 					result = append(result, runningInfo)
@@ -795,7 +889,7 @@ func (a *app) CheckTaskIsRunning(projectID int64, taskID string) ([]common.TaskR
 	} else {
 		agentList, err := a.FindAgents(a.cfg.Micro.Region, projectID)
 		if err != nil {
-			return nil, err
+			return runningInfo, nil, err
 		}
 
 		defer func() {
@@ -807,7 +901,7 @@ func (a *app) CheckTaskIsRunning(projectID int64, taskID string) ([]common.TaskR
 			if strings.Contains(agent.addr, runningInfo.AgentIP) {
 				exist, err := checkFunc(agent)
 				if err != nil {
-					return nil, err
+					return runningInfo, nil, err
 				}
 				if exist {
 					result = append(result, runningInfo)
@@ -817,14 +911,7 @@ func (a *app) CheckTaskIsRunning(projectID int64, taskID string) ([]common.TaskR
 		}
 	}
 
-	if len(result) == 0 {
-		// 没有agent在跑该任务，但是etcd中存在该任务的running key，大概率是上一次任务执行中agent宕机
-		wlog.Info("delete the key of task running status proactively, because the current running status agent does not match the agent that is executing the task",
-			zap.String("status_key", key), zap.String("task_id", taskID), zap.Int64("project_id", projectID))
-		a.DelTaskRunningKey(runningInfo.AgentIP, projectID, taskID)
-	}
-
-	return result, nil
+	return runningInfo, result, nil
 }
 
 func (a *app) DelTaskRunningKey(agentIP string, projectID int64, taskID string) error {
@@ -870,7 +957,7 @@ func (a *app) SaveTaskLog(agentIP string, result common.TaskFinishedV2) {
 		Operator: result.Operator,
 	}
 	if result.Error != "" {
-		logInfo.WithError = 1
+		logInfo.WithError = common.TASK_HAS_ERROR
 		taskResult.Error = result.Error
 	}
 
@@ -884,7 +971,7 @@ func (a *app) SaveTaskLog(agentIP string, result common.TaskFinishedV2) {
 
 	logInfo.Result = string(resultBytes)
 
-	if err := a.store.TaskLog().CreateTaskLog(logInfo); err != nil {
+	if err := a.store.TaskLog().CreateOrUpdateTaskLog(nil, logInfo); err != nil {
 		a.Metrics().CustomInc("system_error", "task_log_saver", fmt.Sprintf("%d_%s", result.ProjectID, result.TaskID))
 		a.Warning(warning.NewTaskWarningData(warning.TaskWarning{
 			AgentIP:      logInfo.ClientIP,

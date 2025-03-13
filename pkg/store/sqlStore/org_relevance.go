@@ -5,6 +5,7 @@ import (
 
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/pkg/store"
+
 	"github.com/jinzhu/gorm"
 )
 

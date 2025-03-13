@@ -36,6 +36,12 @@ type Org struct {
 	CreateTime int64  `json:"create_time" gorm:"column:create_time;type:bigint(20);not null;comment:'创建时间'"`
 }
 
+type AgentActivity struct {
+	ClientIP   string `json:"client_ip" gorm:"column:client_ip;type:varchar(32);not null;comment:'边缘agentip'"`
+	ProjectID  int64  `json:"project_id" gorm:"column:project_id;type:bigint(20);not null;comment:'关联项目id'"`
+	ActiveTime int64  `json:"active_time" gorm:"column:active_time;index:idx_active_time;type:bigint(20);not null;comment:'创建时间'"`
+}
+
 type OrgRelevance struct {
 	ID         int64  `json:"id" gorm:"column:id;primary_key;auto_increment"`
 	UID        int64  `json:"uid" gorm:"column:uid;index:uid;type:bigint(20);not null;comment:'关联用户id'"`

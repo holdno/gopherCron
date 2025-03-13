@@ -67,10 +67,17 @@ func (s *cronRpc) TryLock(req cronpb.Center_TryLockServer) error {
 		heartbeat   = time.NewTicker(time.Second * 5)
 		receiveChan = make(chan *cronpb.TryLockRequest)
 	)
+
+	agentVersion, existAgentVersion := middleware.GetAgentVersion(req.Context())
+	now := time.Now()
+
 	defer func() {
 		heartbeat.Stop()
 		if locker == nil {
 			return
+		}
+		if existAgentVersion && strings.Contains(agentVersion, "2.4.7") && time.Since(now).Seconds() < 5 {
+			time.Sleep(time.Duration(5-time.Since(now).Seconds()) * time.Second)
 		}
 		locker.Unlock()
 	}()
@@ -98,11 +105,7 @@ func (s *cronRpc) TryLock(req cronpb.Center_TryLockServer) error {
 				return err
 			}
 		case task := <-receiveChan:
-			if task == nil {
-				return nil
-			}
-			if task.Type == cronpb.LockType_UNLOCK {
-				// defer unlock
+			if task == nil || task.Type == cronpb.LockType_UNLOCK {
 				return nil
 			}
 
@@ -116,9 +119,23 @@ func (s *cronRpc) TryLock(req cronpb.Center_TryLockServer) error {
 			}
 
 			// 加锁成功后获取任务运行中状态的key是否存在，若存在则说明之前执行该任务的机器网络中断 / 宕机
-			runningInfo, err := s.app.CheckTaskIsRunning(task.ProjectId, task.TaskId)
+			runningKey, runningInfo, err := s.app.CheckTaskIsRunning(task.ProjectId, task.TaskId)
 			if err != nil {
 				return err
+			}
+
+			// 获取任务日志，如果日志存在，则说明是续锁操作
+			// 续锁的话就得判断任务是否已经被杀掉
+			if runningKey.TmpID == "" {
+				// 第一次加锁 或 任务已结束
+				log, err := s.app.GetTaskLogDetail(task.ProjectId, task.TaskId, task.TaskTmpId)
+				if err != nil {
+					return err
+				}
+				if log != nil && log.EndTime != 0 {
+					// 任务已经结束
+					return status.Error(codes.Aborted, "任务已结束")
+				}
 			}
 
 			pass := len(runningInfo) == 0
@@ -158,6 +175,22 @@ func (s *cronRpc) StatusReporter(ctx context.Context, req *cronpb.ScheduleReply)
 		if err := json.Unmarshal(req.Event.Value, &result); err != nil {
 			return nil, err
 		}
+
+		if result.PlanType != common.ActivePlan {
+			// 如果任务不是被人工调度，需要检测任务当前的可被调度状态
+			taskInfo, err := s.app.GetTask(req.ProjectId, result.Task.TaskID)
+			if err != nil {
+				return nil, err
+			}
+
+			if taskInfo.Status != common.TASK_STATUS_SCHEDULING {
+				return &cronpb.Result{
+					Result:  false,
+					Message: fmt.Sprintf("该任务已停止调度"),
+				}, status.Error(codes.Aborted, "The task's schedule is being stopped now, and the operation has been rejected.")
+			}
+		}
+
 		if err := s.app.SetTaskRunning(agentIP, agentVersion, &result); err != nil {
 			var workflowID int64
 			if result.Task.FlowInfo != nil {
@@ -572,7 +605,7 @@ func buildDispatchJobsV2Handler(sendEvent func(ctx context.Context, e *cronpb.Se
 
 func (s *cronRpc) getHeartbeatKeeper(ctx context.Context, req interface {
 	Send(*cronpb.ServiceEvent) error
-}, onError func()) func() {
+}, onPong func(), onError func()) func() {
 	var do sync.Once
 	return func() {
 		do.Do(func() {
@@ -594,6 +627,7 @@ func (s *cronRpc) getHeartbeatKeeper(ctx context.Context, req interface {
 							onError()
 							return
 						}
+						onPong()
 					}
 				}
 			}()
@@ -622,7 +656,19 @@ func (s *cronRpc) RegisterAgentV2(req cronpb.Center_RegisterAgentV2Server) error
 
 	ctx, cancel := context.WithCancel(req.Context())
 	defer cancel()
+
+	lock := &sync.Mutex{}
+	var receiveMetas []infra.NodeMeta
 	heartbeatAsync := s.getHeartbeatKeeper(ctx, req, func() {
+		lock.Lock()
+		defer lock.Unlock()
+		for _, v := range receiveMetas {
+			if err := s.app.UpsertAgentActiveTime(v.System, v.Host); err != nil {
+				wlog.Error("Failed to upsert agent active time", zap.Error(err), zap.String("client_ip", v.Host),
+					zap.Int64("project_id", v.System))
+			}
+		}
+	}, func() {
 		// heartbeat error 关闭连接
 		cancel()
 	})
@@ -635,6 +681,9 @@ func (s *cronRpc) RegisterAgentV2(req cronpb.Center_RegisterAgentV2Server) error
 			}
 			// 将agent信息进行注册
 			err := register(multiService.info, func(nm []infra.NodeMeta) error {
+				lock.Lock()
+				receiveMetas = append(receiveMetas, nm...)
+				lock.Unlock()
 				// 完成注册后将stream缓存至内存中，方便后续中心与agent通信时使用
 				for _, meta := range nm {
 					s.app.StreamManagerV2().SaveStream(meta, req, cancel)
