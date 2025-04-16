@@ -118,45 +118,36 @@ func (s *cronRpc) TryLock(req cronpb.Center_TryLockServer) error {
 				return status.Error(codes.Aborted, err.Error())
 			}
 
-			// 加锁成功后获取任务运行中状态的key是否存在，若存在则说明之前执行该任务的机器网络中断 / 宕机
-			runningKey, runningInfo, err := s.app.CheckTaskIsRunning(task.ProjectId, task.TaskId)
+			// // 加锁成功后获取任务运行中状态的key是否存在，若存在则说明之前执行该任务的机器网络中断 / 宕机
+			// runningKey, runningInfo, err := s.app.CheckTaskIsRunning(task.ProjectId, task.TaskId)
+			// if err != nil {
+			// 	return err
+			// }
+
+			// // 获取任务日志，如果日志存在，则说明是续锁操作
+			// // 续锁的话就得判断任务是否已经被杀掉
+			// if runningKey.TmpID == "" {
+			// 第一次加锁 或 任务已结束
+			log, err := s.app.GetTaskLogDetail(task.ProjectId, task.TaskId, task.TaskTmpId)
 			if err != nil {
 				return err
 			}
-
-			// 获取任务日志，如果日志存在，则说明是续锁操作
-			// 续锁的话就得判断任务是否已经被杀掉
-			if runningKey.TmpID == "" {
-				// 第一次加锁 或 任务已结束
-				log, err := s.app.GetTaskLogDetail(task.ProjectId, task.TaskId, task.TaskTmpId)
-				if err != nil {
-					return err
-				}
-				if log != nil && log.EndTime != 0 {
+			if log != nil {
+				if log.EndTime != 0 {
 					// 任务已经结束
 					return status.Error(codes.Aborted, "任务已结束")
 				}
-			}
-
-			pass := len(runningInfo) == 0
-			if !pass {
-				for _, info := range runningInfo {
-					if info.AgentIP == agentIP {
-						pass = true
-						break
-					}
+				if log.ClientIP != task.AgentIp {
+					return status.Error(codes.Aborted, "任务运行中")
 				}
 			}
+			// }
 
-			if pass {
-				if err = req.Send(&cronpb.TryLockReply{
-					Result:  true,
-					Message: "ok",
-				}); err != nil {
-					return err
-				}
-			} else {
-				return status.Error(codes.Aborted, "任务运行中")
+			if err = req.Send(&cronpb.TryLockReply{
+				Result:  true,
+				Message: "ok",
+			}); err != nil {
+				return err
 			}
 		}
 	}

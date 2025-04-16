@@ -72,7 +72,7 @@ type TaskLogStore interface {
 	Commons
 	CreateOrUpdateTaskLog(tx *gorm.DB, data common.TaskLog) error
 	GetList(selector selection.Selector) ([]*common.TaskLog, error)
-	LoadRunningTasks(tx *gorm.DB, before time.Time) ([]*common.TaskLog, error)
+	LoadRunningTasks(tx *gorm.DB, before time.Time, after time.Time) ([]*common.TaskLog, error)
 	GetOne(projectID int64, taskID, tmpID string) (*common.TaskLog, error)
 	CheckOrCreateScheduleLog(tx *gorm.DB, taskInfo *common.TaskExecutingInfo, agentIP, agentVersion string) (bool, error)
 	Clean(tx *gorm.DB, selector selection.Selector) error

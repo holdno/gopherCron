@@ -593,7 +593,8 @@ func startTaskDoctor(app *app) {
 		wlog.Info("new task docker leader")
 		app.metrics.CustomInc("temporary_task_docker_leader", app.localip, "")
 
-		c := time.NewTicker(time.Minute * 5)
+		period := time.Hour
+		c := time.NewTimer(period)
 		defer c.Stop()
 		for {
 			select {
@@ -604,7 +605,7 @@ func startTaskDoctor(app *app) {
 			case <-c.C:
 			}
 
-			runningTasks, err := app.store.TaskLog().LoadRunningTasks(nil, time.Now().Add(-time.Hour))
+			runningTasks, err := app.store.TaskLog().LoadRunningTasks(nil, time.Now().Add(-time.Hour*2), time.Now().Add(-time.Hour*3))
 			if err != nil {
 				wlog.Error("failed to load running task list", zap.Error(err))
 				continue
@@ -619,6 +620,8 @@ func startTaskDoctor(app *app) {
 					continue
 				}
 			}
+
+			c.Reset(period)
 		}
 	})
 }
