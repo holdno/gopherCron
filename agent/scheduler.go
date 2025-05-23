@@ -481,9 +481,7 @@ func (a *client) TryStartTask(plan common.TaskSchedulePlan) error {
 			errDetail := fmt.Errorf("agent上报任务开始状态失败: %s，任务终止", err.Error())
 			cancelReason.WriteString(errDetail.Error())
 			errSignal.Send(errDetail)
-		}
-
-		if !taskStatusReportResult.Result {
+		} else if !taskStatusReportResult.Result {
 			taskExecuteInfo.CancelFunc()
 			a.logger.Error(fmt.Sprintf("task: %s, id: %s, tmp_id: %s, change running status failed, %v", plan.Task.Name,
 				plan.Task.TaskID, plan.TmpID, taskStatusReportResult.Message))

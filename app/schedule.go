@@ -1016,7 +1016,7 @@ func (a *app) HandlerTaskFinished(agentIP string, result *common.TaskFinishedV2)
 		}
 	}
 
-	safe.Run(func() {
+	go safe.Run(func() {
 		a.PublishMessage(messageTaskStatusChanged(result.ProjectID, result.TaskID, result.TmpID, result.Status))
 		a.HandleWebHook(agentIP, result)
 	})
