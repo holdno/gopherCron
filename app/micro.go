@@ -310,12 +310,12 @@ func (a *app) UpdateAgentRegisterWeight(projectID int64, host string, weight int
 	return nil
 }
 
-func genAgentRegisterPrefix(projectID int64) string {
-	return filepath.ToSlash(filepath.Join(etcdregister.GetETCDPrefixKey(), "gophercron", strconv.FormatInt(projectID, 10), cronpb.Agent_ServiceDesc.ServiceName)) + "/"
+func genAgentRegisterPrefix(orgID string, projectID int64) string {
+	return filepath.ToSlash(filepath.Join(etcdregister.GetETCDPrefixKey(), orgID, strconv.FormatInt(projectID, 10), cronpb.Agent_ServiceDesc.ServiceName)) + "/"
 }
 
-func genFullAgentRegisterKey(projectID int64, hostAndPort string) string {
-	return filepath.ToSlash(filepath.Join(genAgentRegisterPrefix(projectID), "node", hostAndPort))
+func genFullAgentRegisterKey(orgID string, projectID int64, hostAndPort string) string {
+	return filepath.ToSlash(filepath.Join(genAgentRegisterPrefix(orgID, projectID), "node", hostAndPort))
 }
 
 func (a *app) getAgentAddrs(region string, projectID int64) ([]*FinderResult, error) {
@@ -324,7 +324,7 @@ func (a *app) getAgentAddrs(region string, projectID int64) ([]*FinderResult, er
 	finder := etcd.NewFinder[infra.NodeMeta](infra.ResolveEtcdClient())
 	ctx, cancel := context.WithTimeout(context.TODO(), time.Duration(a.GetConfig().Deploy.Timeout)*time.Second)
 	defer cancel()
-	addrs, _, err := finder.FindAll(ctx, genAgentRegisterPrefix(projectID))
+	addrs, _, err := finder.FindAll(ctx, genAgentRegisterPrefix(a.cfg.Micro.OrgID, projectID))
 	if err != nil {
 		a.metrics.CustomInc("find_agents_error", fmt.Sprintf("%s_%d", region, projectID), err.Error())
 		return nil, err

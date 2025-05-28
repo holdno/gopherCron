@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/holdno/gopherCron/common"
-	"github.com/holdno/gopherCron/pkg/store"
+	"github.com/holdno/gopherCron/utils"
 
 	"github.com/holdno/gocommons/selection"
 	"github.com/jinzhu/gorm"
@@ -16,7 +16,7 @@ type taskLogStore struct {
 }
 
 // NewProjectStore
-func NewTaskLogStore(provider SqlProviderInterface) store.TaskLogStore {
+func NewTaskLogStore(provider SqlProviderInterface) *taskLogStore {
 	repo := &taskLogStore{}
 
 	repo.SetProvider(provider)
@@ -76,12 +76,12 @@ func (s *taskLogStore) GetList(selector selection.Selector) ([]*common.TaskLog, 
 
 func (s *taskLogStore) GetOne(projectID int64, taskID, tmpID string) (*common.TaskLog, error) {
 	var (
-		err error
-		res common.TaskLog
+		err    error
+		res    common.TaskLog
+		st, et = utils.GetLast7DaysUnixRange()
 	)
-
 	err = s.GetReplica().Table(s.GetTable()).
-		Where("project_id = ? AND task_id = ? AND tmp_id = ?", projectID, taskID, tmpID).First(&res).Error
+		Where("plan_time BETWEEN ? AND ? AND project_id = ? AND task_id = ? AND tmp_id = ?", st, et, projectID, taskID, tmpID).First(&res).Error
 	if err != nil {
 		return nil, err
 	}

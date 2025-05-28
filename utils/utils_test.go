@@ -2,6 +2,7 @@ package utils
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -66,4 +67,18 @@ func TestNewReasonWriter(t *testing.T) {
 
 func TestVersionCompare(t *testing.T) {
 	t.Log(CompareVersion("v2.1.9999", "v2.1.99"))
+}
+
+func TestLast7Days(t *testing.T) {
+	oldestDay := time.Now().AddDate(0, 0, -7)
+	partitionName := "p_" + oldestDay.Format("20060102")
+	fmt.Println(partitionName)
+
+	st, et := GetLast7DaysTimeRange()
+
+	partitionName = "p_" + st.Format("20060102")
+	fmt.Println("st", partitionName)
+
+	partitionName = "p_" + et.Format("20060102")
+	fmt.Println("et", partitionName)
 }

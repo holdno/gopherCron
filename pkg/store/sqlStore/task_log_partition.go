@@ -7,6 +7,8 @@ import (
 	"github.com/holdno/gocommons/selection"
 	"github.com/holdno/gopherCron/common"
 	"github.com/holdno/gopherCron/pkg/store"
+	"github.com/holdno/gopherCron/utils"
+
 	"github.com/jinzhu/gorm"
 )
 
@@ -25,8 +27,9 @@ func (s *taskLogPartitionStore) AutoMigrate() {
 	// 创建主表结构
 	if err := s.GetMaster().Exec(`
 		CREATE TABLE IF NOT EXISTS gc_task_log_p (
-			id BIGINT AUTO_INCREMENT PRIMARY KEY,
+			id BIGINT AUTO_INCREMENT,
 			project_id BIGINT NOT NULL,
+			project VARCHAR(128) NOT NULL,
 			task_id VARCHAR(64) NOT NULL,
 			tmp_id VARCHAR(64) NOT NULL DEFAULT '',
 			name VARCHAR(128) NOT NULL,
@@ -38,10 +41,10 @@ func (s *taskLogPartitionStore) AutoMigrate() {
 			with_error TINYINT(1) NOT NULL DEFAULT 0,
 			agent_version VARCHAR(128) NOT NULL DEFAULT '',
 			client_ip VARCHAR(64) NOT NULL DEFAULT '',
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-			KEY idx_project_task (project_id, task_id, tmp_id),
-			KEY idx_time_range (start_time, end_time)
-		) PARTITION BY RANGE (start_time) (
+			create_time BIGINT NOT NULL,
+			PRIMARY KEY (id, plan_time),
+			UNIQUE KEY uk_project_task_tmp (plan_time, project_id, task_id, tmp_id)
+		) PARTITION BY RANGE (plan_time) (
 			PARTITION p_default VALUES LESS THAN (0)
 		)
 	`).Error; err != nil {
@@ -51,16 +54,16 @@ func (s *taskLogPartitionStore) AutoMigrate() {
 	// 初始化未来7天的分区
 	for i := 0; i < 7; i++ {
 		day := time.Now().AddDate(0, 0, i)
-		s.ensurePartition(day)
+		s.EnsurePartition(day)
 	}
 
 	s.provider.Logger().Info(fmt.Sprintf("%s, complete initialization", s.GetTable()))
 }
 
-// ensurePartition 确保指定日期的分区存在
-func (s *taskLogPartitionStore) ensurePartition(day time.Time) error {
+// EnsurePartition 确保指定日期的分区存在
+func (s *taskLogPartitionStore) EnsurePartition(day time.Time) error {
 	partitionName := "p_" + day.Format("20060102")
-	startUnix := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, time.UTC).Unix()
+	startUnix := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, time.Local).Unix()
 	endUnix := startUnix + 86400 // 24小时
 
 	// 先检查分区是否已存在
@@ -85,8 +88,9 @@ func (s *taskLogPartitionStore) ensurePartition(day time.Time) error {
 }
 
 // cleanOldPartitions 清理7天前的旧分区
-func (s *taskLogPartitionStore) cleanOldPartitions() error {
-	oldestDay := time.Now().AddDate(0, 0, -7)
+func (s *taskLogPartitionStore) CleanOldPartitions() error {
+	st, _ := utils.GetLast7DaysTimeRange()
+	oldestDay := st.AddDate(0, 0, -1)
 	partitionName := "p_" + oldestDay.Format("20060102")
 
 	return s.GetMaster().Exec(fmt.Sprintf(`
@@ -95,32 +99,31 @@ func (s *taskLogPartitionStore) cleanOldPartitions() error {
 }
 
 func (s *taskLogPartitionStore) CreateOrUpdateTaskLog(tx *gorm.DB, data common.TaskLog) error {
-	var tmpLog common.TaskLog
-
-	if data.TmpID != "" && data.PlanTime > 0 {
-		err := s.GetMaster().Table(s.table).Where("project_id = ? AND task_id = ? AND tmp_id = ?",
-			data.ProjectID, data.TaskID, data.TmpID).
-			First(&tmpLog).Error
-		if err != nil && err != gorm.ErrRecordNotFound {
-			return err
-		}
+	if data.CreateTime == 0 {
+		data.CreateTime = time.Now().Unix()
 	}
 
 	if tx == nil {
 		tx = s.GetMaster()
 	}
 
-	if tmpLog.TaskID == "" {
-		return tx.Table(s.table).Create(&data).Error
-	} else {
-		data.PlanTime = tmpLog.PlanTime
-		return tx.Table(s.table).Where("project_id = ? AND task_id = ? AND tmp_id = ? AND plan_time = ?",
-			data.ProjectID, data.TaskID, data.TmpID, data.PlanTime).UpdateColumns(map[string]interface{}{
-			"end_time":   data.EndTime,
-			"result":     data.Result,
-			"with_error": data.WithError,
-		}).Error
-	}
+	// 使用原生SQL实现ON DUPLICATE KEY UPDATE
+	return tx.Exec(`
+		INSERT INTO gc_task_log_p (
+			project_id, project, task_id, tmp_id, name, command, 
+			plan_time, start_time, end_time, result, 
+			with_error, agent_version, client_ip, create_time
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON DUPLICATE KEY UPDATE
+			end_time = VALUES(end_time),
+			result = VALUES(result),
+			with_error = VALUES(with_error),
+			project = VALUES(project)
+	`,
+		data.ProjectID, data.Project, data.TaskID, data.TmpID, data.Name, data.Command,
+		data.PlanTime, data.StartTime, data.EndTime, data.Result,
+		data.WithError, data.AgentVersion, data.ClientIP, data.CreateTime,
+	).Error
 }
 
 func (s *taskLogPartitionStore) GetList(selector selection.Selector) ([]*common.TaskLog, error) {
@@ -158,16 +161,16 @@ func (s *taskLogPartitionStore) CheckOrCreateScheduleLog(tx *gorm.DB, taskInfo *
 	var exist common.ExistResult
 	if taskInfo.Task.Noseize == common.TASK_EXECUTE_NOSEIZE {
 		err := tx.
-			Raw("SELECT EXISTS(SELECT 1 FROM gc_task_log WHERE project_id = ? AND task_id = ? AND tmp_id = ? AND plan_time = ?) AS result",
-				taskInfo.Task.ProjectID, taskInfo.Task.TaskID, taskInfo.TmpID, taskInfo.PlanTime.Unix()).
+			Raw("SELECT EXISTS(SELECT 1 FROM gc_task_log_p WHERE plan_time = ? AND  project_id = ? AND task_id = ? AND tmp_id = ?) AS result",
+				taskInfo.PlanTime.Unix(), taskInfo.Task.ProjectID, taskInfo.Task.TaskID, taskInfo.TmpID).
 			Scan(&exist).Error
 		if err != nil && err != gorm.ErrRecordNotFound {
 			return false, err
 		}
 	} else {
 		err := tx.
-			Raw("SELECT EXISTS(SELECT 1 FROM gc_task_log WHERE project_id = ? AND task_id = ? AND plan_time = ?) AS result",
-				taskInfo.Task.ProjectID, taskInfo.Task.TaskID, taskInfo.PlanTime.Unix()).
+			Raw("SELECT EXISTS(SELECT 1 FROM gc_task_log_p WHERE plan_time = ? AND project_id = ? AND task_id = ?) AS result",
+				taskInfo.PlanTime.Unix(), taskInfo.Task.ProjectID, taskInfo.Task.TaskID).
 			Scan(&exist).Error
 		if err != nil && err != gorm.ErrRecordNotFound {
 			return false, err
@@ -192,6 +195,7 @@ func (s *taskLogPartitionStore) CheckOrCreateScheduleLog(tx *gorm.DB, taskInfo *
 		AgentVersion: agentVersion,
 		ClientIP:     agentIP,
 		StartTime:    taskInfo.RealTime.Unix(),
+		CreateTime:   time.Now().Unix(),
 	}).Error
 }
 
@@ -205,7 +209,7 @@ func (s *taskLogPartitionStore) LoadRunningTasks(tx *gorm.DB, before, after time
 		tx = s.GetReplica()
 	}
 
-	if err = tx.Table(s.GetTable()).Where("end_time = 0 AND start_time > ? AND start_time < ?", after.Unix(), before.Unix()).Find(&res).Error; err != nil {
+	if err = tx.Table(s.GetTable()).Where("end_time = 0 AND plan_time > ? AND plan_time < ?", after.Unix(), before.Unix()).Find(&res).Error; err != nil {
 		return nil, err
 	}
 	return res, nil

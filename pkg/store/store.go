@@ -76,6 +76,8 @@ type TaskLogStore interface {
 	GetOne(projectID int64, taskID, tmpID string) (*common.TaskLog, error)
 	CheckOrCreateScheduleLog(tx *gorm.DB, taskInfo *common.TaskExecutingInfo, agentIP, agentVersion string) (bool, error)
 	Clean(tx *gorm.DB, selector selection.Selector) error
+	CleanOldPartitions() error
+	EnsurePartition(day time.Time) error
 }
 
 type TemporaryTaskStore interface {

@@ -34,6 +34,7 @@ type TaskWithOperator struct {
 	*TaskInfo
 	UserID   int64  `json:"user_id"`
 	UserName string `json:"user_name"`
+	PlanTime int64  `json:"plan_time"`
 }
 
 // TaskInfo 任务详情

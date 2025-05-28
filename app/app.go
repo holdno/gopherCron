@@ -68,7 +68,7 @@ type App interface {
 	GetProjectTaskCount(projectID int64) (int64, error)
 	GetTaskList(projectID int64) ([]*common.TaskListItemWithWorkflows, error)
 	GetTask(projectID int64, taskID string) (*common.TaskInfo, error)
-	TemporarySchedulerTask(user *common.User, host string, task common.TaskInfo) error
+	TemporarySchedulerTask(scheduleTime int64, user *common.User, host string, task common.TaskInfo) error
 	GetTaskLogList(pid int64, tid string, page, pagesize int) ([]*common.TaskLog, error)
 	GetTaskLogDetail(pid int64, tid, tmpID string) (*common.TaskLog, error)
 	GetLogTotalByDate(projects []int64, timestamp int64, errType int) (int, error)
@@ -429,11 +429,13 @@ func startCleanupTask(app *app) {
 	// 自动清理任务
 	app.election(common.BuildCleanupMasterKey(), func(s *concurrency.Session) error {
 		wlog.Info("new tasks cleanup leader")
+		app.AutoCreateTaskLogPartition()
 		t := time.NewTicker(time.Hour * 12)
 	BreakHere:
 		for {
 			select {
 			case <-t.C:
+				app.AutoCreateTaskLogPartition()
 				app.AutoCleanLogs()
 				app.AutoCleanScheduledTemporaryTask()
 			case <-app.ctx.Done():
@@ -590,7 +592,7 @@ func startTemporaryTaskWorker(app *app) {
 
 func startTaskDoctor(app *app) {
 	app.election(common.BuildTaskDoctorMasterKey(), func(s *concurrency.Session) error {
-		wlog.Info("new task docker leader")
+		wlog.Info("new task doctor leader")
 		app.metrics.CustomInc("temporary_task_docker_leader", app.localip, "")
 
 		period := time.Hour
@@ -793,7 +795,10 @@ func (a *app) GetUserProjects(uid int64, oid string) ([]*common.ProjectWithUserR
 }
 
 func (a *app) CleanProjectLog(tx *gorm.DB, pid int64) error {
-	opt := selection.NewSelector(selection.NewRequirement("project_id", selection.Equals, pid))
+	st, et := utils.GetLast7DaysUnixRange()
+	opt := selection.NewSelector(selection.NewRequirement("project_id", selection.Equals, pid),
+		selection.NewRequirement("plan_time", selection.GreaterThanEqual, st),
+		selection.NewRequirement("plan_time", selection.LessThanEqual, et))
 	if err := a.store.TaskLog().Clean(tx, opt); err != nil {
 		errObj := errors.ErrInternalError
 		errObj.Msg = "清除项目日志失败"
@@ -805,8 +810,11 @@ func (a *app) CleanProjectLog(tx *gorm.DB, pid int64) error {
 }
 
 func (a *app) CleanLog(tx *gorm.DB, pid int64, tid string) error {
+	st, et := utils.GetLast7DaysUnixRange()
 	opt := selection.NewSelector(selection.NewRequirement("project_id", selection.Equals, pid),
-		selection.NewRequirement("task_id", selection.Equals, tid))
+		selection.NewRequirement("task_id", selection.Equals, tid),
+		selection.NewRequirement("plan_time", selection.GreaterThanEqual, st),
+		selection.NewRequirement("plan_time", selection.LessThanEqual, et))
 	if err := a.store.TaskLog().Clean(tx, opt); err != nil {
 		errObj := errors.ErrInternalError
 		errObj.Msg = "清除日志失败"
@@ -830,8 +838,12 @@ func (a *app) GetTaskLogDetail(pid int64, tid string, tmpID string) (*common.Tas
 }
 
 func (a *app) GetTaskLogList(pid int64, tid string, page, pagesize int) ([]*common.TaskLog, error) {
+	st, et := utils.GetLast7DaysUnixRange()
 	opt := selection.NewSelector(selection.NewRequirement("project_id", selection.Equals, pid),
-		selection.NewRequirement("task_id", selection.Equals, tid))
+		selection.NewRequirement("task_id", selection.Equals, tid),
+		selection.NewRequirement("plan_time", selection.GreaterThanEqual, st),
+		selection.NewRequirement("plan_time", selection.LessThanEqual, et))
+
 	opt.Page = page
 	opt.Pagesize = pagesize
 	opt.OrderBy = "id DESC"
@@ -852,6 +864,10 @@ func (a *app) GetErrorLogs(pids []int64, page, pagesize int) ([]*common.TaskLog,
 	if len(pids) > 0 {
 		opt.AddQuery(selection.NewRequirement("project_id", selection.In, pids))
 	}
+	st, et := utils.GetLast7DaysUnixRange()
+	opt.AddQuery(selection.NewRequirement("plan_time", selection.GreaterThanEqual, st),
+		selection.NewRequirement("plan_time", selection.LessThanEqual, et))
+
 	opt.Page = page
 	opt.Pagesize = pagesize
 	opt.OrderBy = "id DESC"
@@ -870,8 +886,11 @@ func (a *app) GetErrorLogs(pids []int64, page, pagesize int) ([]*common.TaskLog,
 }
 
 func (a *app) GetTaskLogTotal(pid int64, tid string) (int, error) {
+	st, et := utils.GetLast7DaysUnixRange()
 	opt := selection.NewSelector(selection.NewRequirement("project_id", selection.Equals, pid),
-		selection.NewRequirement("task_id", selection.Equals, tid))
+		selection.NewRequirement("task_id", selection.Equals, tid),
+		selection.NewRequirement("plan_time", selection.GreaterThanEqual, st),
+		selection.NewRequirement("plan_time", selection.LessThanEqual, et))
 
 	total, err := a.store.TaskLog().GetTotal(opt)
 	if err != nil {
@@ -886,8 +905,8 @@ func (a *app) GetTaskLogTotal(pid int64, tid string) (int, error) {
 
 func (a *app) GetLogTotalByDate(projects []int64, timestamp int64, errType int) (int, error) {
 	opt := selection.NewSelector(selection.NewRequirement("project_id", selection.In, projects),
-		selection.NewRequirement("start_time", selection.GreaterThan, timestamp),
-		selection.NewRequirement("start_time", selection.LessThan, timestamp+86400),
+		selection.NewRequirement("plan_time", selection.GreaterThanEqual, timestamp),
+		selection.NewRequirement("plan_time", selection.LessThan, timestamp+86400),
 		selection.NewRequirement("with_error", selection.Equals, errType))
 
 	total, err := a.store.TaskLog().GetTotal(opt)
@@ -1409,8 +1428,16 @@ func (a *app) ChangePassword(uid int64, password, salt string) error {
 }
 
 func (a *app) AutoCleanLogs() {
-	opt := selection.NewSelector(selection.NewRequirement("start_time", selection.LessThan, time.Now().Unix()-86400*7))
-	if err := a.store.TaskLog().Clean(nil, opt); err != nil {
+	if err := a.store.TaskLog().CleanOldPartitions(); err != nil {
 		wlog.Error("failed to clean logs by auto clean", zap.Error(err))
+	}
+}
+
+func (a *app) AutoCreateTaskLogPartition() {
+	for i := range 7 {
+		t := time.Now().AddDate(0, 0, i)
+		if err := a.store.TaskLog().EnsurePartition(t); err != nil {
+			wlog.Error("failed to auto create task log partition", zap.Error(err))
+		}
 	}
 }

@@ -387,3 +387,29 @@ func (w *WaitGroupWithTimeout) Wait(timeout time.Duration) {
 	}
 	w.pcancel()
 }
+
+// GetLast7DaysTimeRange 获取包含今天在内的前7天时间段
+func GetLast7DaysTimeRange() (startTime, endTime time.Time) {
+	// 获取当前时间作为结束时间
+	endTime = time.Now()
+
+	// 获取7天前的日期
+	startDate := time.Now().AddDate(0, 0, -6)
+
+	// 将7天前的时间对齐到0点
+	startTime = time.Date(
+		startDate.Year(),
+		startDate.Month(),
+		startDate.Day(),
+		0, 0, 0, 0,
+		time.Local,
+	)
+
+	return
+}
+
+// GetLast7DaysUnixRange 获取7天前0点到当前时间的Unix时间戳范围
+func GetLast7DaysUnixRange() (startUnix, endUnix int64) {
+	startTime, endTime := GetLast7DaysTimeRange()
+	return startTime.Unix(), endTime.Unix()
+}

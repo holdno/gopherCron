@@ -8,11 +8,11 @@ import (
 	"github.com/holdno/gopherCron/config"
 	"github.com/holdno/gopherCron/pkg/store"
 	"github.com/holdno/gopherCron/utils"
-	"github.com/spacegrower/watermelon/infra/wlog"
-	"go.uber.org/zap"
 
 	"github.com/go-sql-driver/mysql"
 	"github.com/jinzhu/gorm"
+	"github.com/spacegrower/watermelon/infra/wlog"
+	"go.uber.org/zap"
 )
 
 type SqlProvider struct {
@@ -83,7 +83,7 @@ func MustSetup(conf *config.MysqlConf, logger wlog.Logger, install bool) SqlStor
 
 	provider.stores.User = NewUserStore(provider)
 	provider.stores.Project = NewProjectStore(provider)
-	provider.stores.TaskLog = NewTaskLogStore(provider)
+	provider.stores.TaskLog = NewTaskLogPartitionStore(provider)
 	provider.stores.ProjectRelevance = NewProjectRelevanceStore(provider)
 	provider.stores.WebHook = NewWebHookStore(provider)
 	provider.stores.Workflow = NewWorkflowStore(provider)
