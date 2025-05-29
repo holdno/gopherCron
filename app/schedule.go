@@ -649,6 +649,7 @@ func (a *app) SetTaskRunning(agentIP, agentVersion string, execInfo *common.Task
 	// TODO: 如果不兼容v2.4.6版本，该if可以移除(仅判断移除，内部代码需保留)
 	if utils.CompareVersion("v2.4.6", agentVersion) && !execInfo.PlanTime.IsZero() {
 		var err error
+
 		// 创建任务日志不要影响任务执行
 		isCreate, err := a.store.TaskLog().CheckOrCreateScheduleLog(nil, execInfo, agentIP, agentVersion)
 		if err != nil {
