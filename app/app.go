@@ -795,6 +795,8 @@ func (a *app) GetUserProjects(uid int64, oid string) ([]*common.ProjectWithUserR
 }
 
 func (a *app) CleanProjectLog(tx *gorm.DB, pid int64) error {
+	// 由分区清理来自动删除释放空间
+	return nil
 	st, et := utils.GetLast7DaysUnixRange()
 	opt := selection.NewSelector(selection.NewRequirement("project_id", selection.Equals, pid),
 		selection.NewRequirement("plan_time", selection.GreaterThanEqual, st),
@@ -810,6 +812,8 @@ func (a *app) CleanProjectLog(tx *gorm.DB, pid int64) error {
 }
 
 func (a *app) CleanLog(tx *gorm.DB, pid int64, tid string) error {
+	// 由分区清理来自动删除释放空间
+	return nil
 	st, et := utils.GetLast7DaysUnixRange()
 	opt := selection.NewSelector(selection.NewRequirement("project_id", selection.Equals, pid),
 		selection.NewRequirement("task_id", selection.Equals, tid),

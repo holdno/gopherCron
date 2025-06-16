@@ -45,7 +45,7 @@ func (s *taskLogPartitionStore) AutoMigrate() {
 			PRIMARY KEY (id, plan_time),
 			UNIQUE KEY uk_project_task_tmp (plan_time, project_id, task_id, tmp_id)
 		) PARTITION BY RANGE (plan_time) (
-			PARTITION p_default VALUES LESS THAN (0)
+			PARTITION p_default VALUES LESS THAN (1)
 		)
 	`).Error; err != nil {
 		panic(fmt.Errorf("failed to create partition table: %w", err))
@@ -161,7 +161,7 @@ func (s *taskLogPartitionStore) CheckOrCreateScheduleLog(tx *gorm.DB, taskInfo *
 	var exist common.ExistResult
 	if taskInfo.Task.Noseize == common.TASK_EXECUTE_NOSEIZE {
 		err := tx.
-			Raw("SELECT EXISTS(SELECT 1 FROM gc_task_log_p WHERE plan_time = ? AND  project_id = ? AND task_id = ? AND tmp_id = ?) AS result",
+			Raw("SELECT EXISTS(SELECT 1 FROM gc_task_log_p WHERE plan_time = ? AND project_id = ? AND task_id = ? AND tmp_id = ?) AS result",
 				taskInfo.PlanTime.Unix(), taskInfo.Task.ProjectID, taskInfo.Task.TaskID, taskInfo.TmpID).
 			Scan(&exist).Error
 		if err != nil && err != gorm.ErrRecordNotFound {

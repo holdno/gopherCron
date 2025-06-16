@@ -313,9 +313,9 @@ func (a *client) TrySchedule() time.Duration {
 			// 尝试执行任务
 			// 因为可能上一次任务还没执行结束
 			if a.cfg.Micro.Weight > 0 && plan.Task.Status == common.TASK_STATUS_START { // 权重大于0才会调度任务
-				go func(plan *common.TaskSchedulePlan) {
-					a.TryStartTask(*plan)
-				}(plan)
+				go func(plan common.TaskSchedulePlan) {
+					a.TryStartTask(plan)
+				}(*plan)
 			} else {
 				wlog.Debug("skip execute task, this client weight is zero",
 					zap.String("task_id", plan.Task.TaskID),
