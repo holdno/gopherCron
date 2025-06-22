@@ -79,6 +79,7 @@ type TaskLog struct {
 	ClientIP     string `json:"client_ip" gorm:"client_ip;index:client_ip;type:varchar(20);not null;comment:'节点ip'"`
 	TmpID        string `json:"tmp_id" gorm:"column:tmp_id;type:varchar(50);not null;comment:'任务执行id'"`
 	AgentVersion string `json:"agent_version" gorm:"column:agent_version;type:varchar(50);not null;comment:'节点版本'"`
+	CreateTime   int64  `json:"create_time" gorm:"column:create_time;type:bigint(20);not null;comment:'创建时间'"`
 }
 
 type ExistResult struct {

@@ -2,6 +2,7 @@ package etcd_func
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/holdno/gopherCron/app"
 	"github.com/holdno/gopherCron/cmd/service/response"
@@ -50,7 +51,7 @@ func TmpExecute(c *gin.Context) {
 	}
 	taskID := fmt.Sprintf("tmp_%s", utils.GetStrID())
 	// 调用etcd的put方法以触发watcher从而调度该任务
-	if err = srv.TemporarySchedulerTask(user, req.Host, common.TaskInfo{
+	if err = srv.TemporarySchedulerTask(time.Now().Unix(), user, req.Host, common.TaskInfo{
 		TaskID:    taskID,
 		ProjectID: req.ProjectID,
 		Name:      req.Name,
@@ -109,7 +110,7 @@ func ExecuteWorkflowTask(c *gin.Context) {
 		return
 	}
 
-	if err = srv.TemporarySchedulerTask(user, req.Host, common.TaskInfo{
+	if err = srv.TemporarySchedulerTask(time.Now().Unix(), user, req.Host, common.TaskInfo{
 		TaskID:    task.TaskID,
 		ProjectID: req.ProjectID,
 		Name:      task.TaskName,
@@ -168,7 +169,7 @@ func ExecuteTask(c *gin.Context) {
 		return
 	}
 
-	if err = srv.TemporarySchedulerTask(user, req.Host, *task); err != nil {
+	if err = srv.TemporarySchedulerTask(time.Now().Unix(), user, req.Host, *task); err != nil {
 		response.APIError(c, err)
 		return
 	}

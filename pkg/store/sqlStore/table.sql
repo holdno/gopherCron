@@ -167,3 +167,24 @@ CREATE TABLE `gc_workflow_task` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 
+CREATE TABLE IF NOT EXISTS gc_task_log_p (
+  id BIGINT AUTO_INCREMENT,
+  project_id BIGINT NOT NULL,
+  project VARCHAR(128) NOT NULL,
+  task_id VARCHAR(64) NOT NULL,
+  tmp_id VARCHAR(64) NOT NULL DEFAULT '',
+  name VARCHAR(128) NOT NULL,
+  command TEXT NOT NULL,
+  plan_time BIGINT NOT NULL,
+  start_time BIGINT NOT NULL,
+  end_time BIGINT NOT NULL DEFAULT 0,
+  result TEXT,
+  with_error TINYINT(1) NOT NULL DEFAULT 0,
+  agent_version VARCHAR(128) NOT NULL DEFAULT '',
+  client_ip VARCHAR(64) NOT NULL DEFAULT '',
+  create_time BIGINT NOT NULL,
+  PRIMARY KEY (id, plan_time),
+  UNIQUE KEY uk_project_task_tmp (plan_time, project_id, task_id, tmp_id)
+) PARTITION BY RANGE (plan_time) (
+  PARTITION p_default VALUES LESS THAN (1)
+);

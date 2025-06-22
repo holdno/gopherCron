@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/holdno/gopherCron/common"
-	"github.com/holdno/gopherCron/pkg/store"
+	"github.com/holdno/gopherCron/utils"
 
 	"github.com/holdno/gocommons/selection"
 	"github.com/jinzhu/gorm"
@@ -16,7 +16,7 @@ type taskLogStore struct {
 }
 
 // NewProjectStore
-func NewTaskLogStore(provider SqlProviderInterface) store.TaskLogStore {
+func NewTaskLogStore(provider SqlProviderInterface) *taskLogStore {
 	repo := &taskLogStore{}
 
 	repo.SetProvider(provider)
@@ -35,8 +35,8 @@ func (s *taskLogStore) CreateOrUpdateTaskLog(tx *gorm.DB, data common.TaskLog) e
 	var tmpLog common.TaskLog
 
 	if data.TmpID != "" && data.PlanTime > 0 {
-		err := s.GetMaster().Table(s.table).Where("project_id = ? AND task_id = ? AND tmp_id = ? AND plan_time = ?",
-			data.ProjectID, data.TaskID, data.TmpID, data.PlanTime).
+		err := s.GetMaster().Table(s.table).Where("project_id = ? AND task_id = ? AND tmp_id = ?",
+			data.ProjectID, data.TaskID, data.TmpID).
 			First(&tmpLog).Error
 		if err != nil && err != gorm.ErrRecordNotFound {
 			return err
@@ -52,7 +52,11 @@ func (s *taskLogStore) CreateOrUpdateTaskLog(tx *gorm.DB, data common.TaskLog) e
 	} else {
 		data.PlanTime = tmpLog.PlanTime
 		return tx.Table(s.table).Where("project_id = ? AND task_id = ? AND tmp_id = ? AND plan_time = ?",
-			data.ProjectID, data.TaskID, data.TmpID, data.PlanTime).Update(&data).Error
+			data.ProjectID, data.TaskID, data.TmpID, data.PlanTime).UpdateColumns(map[string]interface{}{
+			"end_time":   data.EndTime,
+			"result":     data.Result,
+			"with_error": data.WithError,
+		}).Error
 	}
 }
 
@@ -72,12 +76,12 @@ func (s *taskLogStore) GetList(selector selection.Selector) ([]*common.TaskLog, 
 
 func (s *taskLogStore) GetOne(projectID int64, taskID, tmpID string) (*common.TaskLog, error) {
 	var (
-		err error
-		res common.TaskLog
+		err    error
+		res    common.TaskLog
+		st, et = utils.GetLast7DaysUnixRange()
 	)
-
 	err = s.GetReplica().Table(s.GetTable()).
-		Where("project_id = ? AND task_id = ? AND tmp_id = ?", projectID, taskID, tmpID).First(&res).Error
+		Where("plan_time BETWEEN ? AND ? AND project_id = ? AND task_id = ? AND tmp_id = ?", st, et, projectID, taskID, tmpID).First(&res).Error
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +132,7 @@ func (s *taskLogStore) CheckOrCreateScheduleLog(tx *gorm.DB, taskInfo *common.Ta
 	}).Error
 }
 
-func (s *taskLogStore) LoadRunningTasks(tx *gorm.DB, before time.Time) ([]*common.TaskLog, error) {
+func (s *taskLogStore) LoadRunningTasks(tx *gorm.DB, before, after time.Time) ([]*common.TaskLog, error) {
 	var (
 		err error
 		res []*common.TaskLog
@@ -138,7 +142,7 @@ func (s *taskLogStore) LoadRunningTasks(tx *gorm.DB, before time.Time) ([]*commo
 		tx = s.GetReplica()
 	}
 
-	if err = tx.Table(s.GetTable()).Where("end_time = 0 AND start_time < ?", before.Unix()).Find(&res).Error; err != nil {
+	if err = tx.Table(s.GetTable()).Where("end_time = 0 AND start_time > ? AND start_time < ?", after.Unix(), before.Unix()).Find(&res).Error; err != nil {
 		return nil, err
 	}
 	return res, nil

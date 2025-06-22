@@ -516,7 +516,7 @@ func clearWorkflowKeys(kv clientv3.KV, workflowID int64) error {
 }
 
 // TemporarySchedulerTask 临时调度任务
-func (a *app) TemporarySchedulerTask(user *common.User, host string, task common.TaskInfo) error {
+func (a *app) TemporarySchedulerTask(scheduleTime int64, user *common.User, host string, task common.TaskInfo) error {
 	var (
 		err        error
 		resultChan = make(chan common.TaskFinishedV2, 1)
@@ -546,6 +546,7 @@ func (a *app) TemporarySchedulerTask(user *common.User, host string, task common
 		TaskInfo: &task,
 		UserID:   user.ID,
 		UserName: user.Name,
+		PlanTime: scheduleTime,
 	})
 
 	buildScheduleErrorResult := func(err error) common.TaskFinishedV2 {
@@ -560,6 +561,7 @@ func (a *app) TemporarySchedulerTask(user *common.User, host string, task common
 			TmpID:     task.TmpID,
 			Error:     err.Error(),
 			Operator:  user.Name,
+			PlanTime:  scheduleTime,
 		}
 	}
 
@@ -645,24 +647,22 @@ func (a *app) SetTaskRunning(agentIP, agentVersion string, execInfo *common.Task
 	})
 
 	// TODO: 如果不兼容v2.4.6版本，该if可以移除(仅判断移除，内部代码需保留)
-	if utils.CompareVersion("v2.4.6", agentVersion) {
+	if utils.CompareVersion("v2.4.6", agentVersion) && !execInfo.PlanTime.IsZero() {
 		var err error
-		tx := a.store.BeginTx()
-		defer func() {
-			if r := recover(); r != nil || err != nil {
-				tx.Rollback()
-			} else {
-				tx.Commit()
-			}
-		}()
 
-		isCreate, err := a.store.TaskLog().CheckOrCreateScheduleLog(tx, execInfo, agentIP, agentVersion)
+		// 创建任务日志不要影响任务执行
+		isCreate, err := a.store.TaskLog().CheckOrCreateScheduleLog(nil, execInfo, agentIP, agentVersion)
 		if err != nil {
-			return errors.NewError(http.StatusInternalServerError, "预创建任务执行日志失败").WithLog(err.Error())
-		}
-		if !isCreate {
-			err = errors.NewError(http.StatusForbidden, "该任务当前计划时间已被执行，请检查任务运行状态")
-			return err
+			wlog.Error("failed to create task log",
+				zap.Int64("project_id", execInfo.Task.ProjectID),
+				zap.String("task_id", execInfo.Task.TaskID),
+				zap.String("tmp_id", execInfo.TmpID),
+				zap.String("agent_ip", agentIP),
+				zap.String("agent_version", agentVersion),
+				zap.Error(err))
+		} else if !isCreate {
+			// 任务已经被执行过了
+			return errors.NewError(http.StatusForbidden, "该任务当前计划时间已被执行，请检查任务运行状态")
 		}
 	}
 
@@ -715,13 +715,13 @@ func (a *app) CheckTaskIsRunningWithResetStatus(projectID int64, taskID, tmpID s
 	}
 
 	switch true {
-	case memoryResult.AgentIP != "" && len(checkResult) == 0:
+	case memoryResult.TmpID == tmpID: // 最后一次运行的任务就是该任务
 		taskInfo, err := a.GetTask(projectID, taskID)
 		if err != nil {
 			return nil, err
 		}
 
-		if taskInfo.Timeout > int(time.Now().Sub(time.Unix(memoryResult.Timestamp, 0)).Seconds()) {
+		if taskInfo.Timeout > int(time.Now().Sub(time.Unix(memoryResult.Timestamp, 0)).Seconds()) && len(checkResult) > 0 {
 			// 未到超时时间，不做处理
 			// 检测 agent 活跃状态，判断agent是不是刚掉线之类，边缘存在断线重试，可能正好在这个间隔期间
 			latestTime, err := a.GetAgentLatestActiveTime(projectID, memoryResult.AgentIP)
@@ -729,16 +729,17 @@ func (a *app) CheckTaskIsRunningWithResetStatus(projectID int64, taskID, tmpID s
 				return nil, err
 			}
 
-			if latestTime.After(time.Now().Add(-time.Minute * 10)) {
-				// 如果agent最后一次活跃时间至现在小于10分钟，则认为该agent只是暂时性异常，可能会恢复
+			if latestTime.After(time.Now().Add(-time.Minute * 5)) {
+				// 如果agent最后一次活跃时间至现在小于5分钟，则认为该agent只是暂时性异常，可能会恢复
 				break
 			}
 		}
 		fallthrough
-	case len(checkResult) > 0 && memoryResult.TmpID != tmpID:
+	case memoryResult.TmpID != tmpID: // 可能不存在memoryResult
 		// 没有agent在跑该任务，但是etcd中存在该任务的running key，大概率是上一次任务执行中agent宕机
 		wlog.Info("Actively remove the key for the task's running status, as the currently recorded agent does not match the one executing the task.",
-			zap.String("status_key", common.BuildTaskStatusKey(projectID, taskID)), zap.String("task_id", taskID), zap.Int64("project_id", projectID))
+			zap.String("status_key", common.BuildTaskStatusKey(projectID, taskID)), zap.String("task_id", taskID), zap.Int64("project_id", projectID),
+			zap.String("tmp_id", tmpID))
 
 		taskLog, err := a.store.TaskLog().GetOne(projectID, taskID, tmpID)
 		if err != nil && err != gorm.ErrRecordNotFound {
@@ -764,32 +765,30 @@ func (a *app) CheckTaskIsRunningWithResetStatus(projectID int64, taskID, tmpID s
 		taskLog.EndTime = time.Now().Unix()
 		tx := a.store.BeginTx()
 		if err = a.store.TaskLog().CreateOrUpdateTaskLog(tx, *taskLog); err != nil {
+			tx.Rollback()
 			return nil, errors.NewError(http.StatusInternalServerError, "Agent离线，记录任务日志失败").WithLog(err.Error())
 		}
 
-		defer func() {
-			if err == nil {
-				tx.Commit()
-			}
-		}()
-
 		if memoryResult.TmpID == tmpID { // 相同的tmpid说明检测的是当前正在运行的任务
 			if err = a.DelTaskRunningKey(memoryResult.AgentIP, projectID, taskID); err != nil {
+				tx.Rollback()
 				return nil, errors.NewError(http.StatusInternalServerError, "删除任务运行状态key失败").WithLog(err.Error())
 			}
 
+			tx.Commit()
 			a.PublishMessage(messageTaskStatusChanged(projectID, taskID, memoryResult.TmpID, common.TASK_STATUS_FAIL_V2))
-		}
-
-		if otherErr := a.Warning(warning.NewTaskWarningData(warning.TaskWarning{
-			AgentIP:   memoryResult.AgentIP,
-			TaskName:  taskLog.Name,
-			TaskID:    taskID,
-			ProjectID: projectID,
-			Message:   fmt.Sprintf("Agent此前发生异常，请关注项目当前状态。\n项目：%s\n任务： %s\nTmpID：%s", taskLog.Project, taskLog.Name, tmpID),
-		})); otherErr != nil {
-			wlog.Error("Failed to send warning message", zap.Int64("project_id", projectID),
-				zap.String("task_id", taskID), zap.String("agent_ip", memoryResult.AgentIP), zap.Error(otherErr))
+			if otherErr := a.Warning(warning.NewTaskWarningData(warning.TaskWarning{
+				AgentIP:   memoryResult.AgentIP,
+				TaskName:  taskLog.Name,
+				TaskID:    taskID,
+				ProjectID: projectID,
+				Message:   fmt.Sprintf("系统此前发生异常，请关注项目当前状态。\n项目：%s\n任务： %s\nTmpID：%s", taskLog.Project, taskLog.Name, tmpID),
+			})); otherErr != nil {
+				wlog.Error("Failed to send warning message", zap.Int64("project_id", projectID),
+					zap.String("task_id", taskID), zap.String("agent_ip", memoryResult.AgentIP), zap.Error(otherErr))
+			}
+		} else {
+			tx.Commit()
 		}
 	}
 
@@ -982,11 +981,14 @@ func (a *app) SaveTaskLog(agentIP string, result common.TaskFinishedV2) {
 			Message:      fmt.Sprintf("Center(%s)：任务日志入库失败，原因：%s", a.GetIP(), err.Error()),
 		}))
 		wlog.With(zap.Any("fields", map[string]interface{}{
+			"project_id": logInfo.ProjectID,
+			"task_id":    logInfo.TaskID,
+			"tmp_id":     logInfo.TmpID,
 			"task_name":  logInfo.Name,
 			"result":     logInfo.Result,
 			"error":      err.Error(),
-			"start_time": time.Unix(logInfo.StartTime, 0).Format("2006-01-02 15:05:05"),
-			"end_time":   time.Unix(logInfo.StartTime, 0).Format("2006-01-02 15:05:05"),
+			"start_time": time.Unix(logInfo.StartTime, 0).Format("2006-01-02 15:04:05"),
+			"end_time":   time.Unix(logInfo.EndTime, 0).Format("2006-01-02 15:04:05"),
 		})).Error("任务日志入库失败")
 	}
 }
@@ -1003,7 +1005,7 @@ func (a *app) HandlerTaskFinished(agentIP string, result *common.TaskFinishedV2)
 		}
 	}
 
-	safe.Run(func() {
+	go safe.Run(func() {
 		a.PublishMessage(messageTaskStatusChanged(result.ProjectID, result.TaskID, result.TmpID, result.Status))
 		a.HandleWebHook(agentIP, result)
 	})

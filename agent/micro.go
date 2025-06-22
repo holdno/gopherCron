@@ -214,6 +214,10 @@ func (a *client) Schedule(ctx context.Context, req *cronpb.ScheduleRequest) (*cr
 			return nil, status.Error(codes.Aborted, "failed to build task plan: "+err.Error())
 		}
 		plan.PlanTime = time.Now()
+		if task.PlanTime != 0 {
+			plan.PlanTime = time.Unix(task.PlanTime, 0)
+		}
+
 		if err = a.TryStartTask(*plan); err != nil {
 			return nil, status.Error(codes.Aborted, "failed to execute task: "+err.Error())
 		}
@@ -231,6 +235,9 @@ func (a *client) Schedule(ctx context.Context, req *cronpb.ScheduleRequest) (*cr
 			return nil, status.Error(codes.Internal, "failed to build workflow task schedule plan")
 		}
 		plan.PlanTime = time.Now()
+		if task.PlanTime != 0 {
+			plan.PlanTime = time.Unix(task.PlanTime, 0)
+		}
 		if err = a.TryStartTask(*plan); err != nil {
 			return nil, err
 		}

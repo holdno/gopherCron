@@ -1,4 +1,4 @@
-FROM amd64/golang:1.22.0-alpine3.18 AS builder
+FROM golang:1.24.3-alpine3.21 AS builder 
 
 ENV GOPROXY=https://goproxy.cn,direct
 
@@ -11,7 +11,7 @@ COPY ./cmd/client/conf/config-default.toml /gophercron/_build/config/client-conf
 RUN go build -a -ldflags '-extldflags "-static"' -o _build/gophercron ./cmd/
 
 
-FROM amd64/alpine:3.18
+FROM alpine:3.21
 LABEL MAINTAINER <w@ojbk.io>
 
 RUN apk update && apk add tzdata diffutils curl && cp -r -f /usr/share/zoneinfo/Asia/Shanghai /etc/localtime

@@ -175,7 +175,7 @@ func (a *app) TemporaryTaskSchedule(tmpTask common.TemporaryTask) error {
 		return errors.NewError(http.StatusInternalServerError, "更新临时任务调度状态失败").WithLog(err.Error())
 	}
 
-	if err = a.TemporarySchedulerTask(userInfo, tmpTask.Host, *task); err != nil {
+	if err = a.TemporarySchedulerTask(tmpTask.ScheduleTime, userInfo, tmpTask.Host, *task); err != nil {
 		return err
 	}
 	return nil

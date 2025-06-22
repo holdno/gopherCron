@@ -63,16 +63,13 @@ func (s *cronRpc) TryLock(req cronpb.Center_TryLockServer) error {
 		return status.Error(codes.PermissionDenied, codes.PermissionDenied.String())
 	}
 	var (
-		locker      *etcd.Locker
-		heartbeat   = time.NewTicker(time.Second * 5)
-		receiveChan = make(chan *cronpb.TryLockRequest)
+		locker *etcd.Locker
 	)
 
 	agentVersion, existAgentVersion := middleware.GetAgentVersion(req.Context())
 	now := time.Now()
 
 	defer func() {
-		heartbeat.Stop()
 		if locker == nil {
 			return
 		}
@@ -83,81 +80,68 @@ func (s *cronRpc) TryLock(req cronpb.Center_TryLockServer) error {
 	}()
 
 	go func() {
-		defer close(receiveChan)
+		heartbeat := time.NewTicker(time.Second * 5)
+		defer heartbeat.Stop()
 		for {
-			task, err := req.Recv()
-			if err != nil || task == nil {
+			select {
+			case <-req.Context().Done():
 				return
+			case <-heartbeat.C:
+				if err := req.Send(&cronpb.TryLockReply{
+					Result:  true,
+					Message: "heartbeat",
+				}); err != nil {
+					return
+				}
 			}
-			receiveChan <- task
 		}
 	}()
 
 	for {
-		select {
-		case <-req.Context().Done():
-			return req.Context().Err()
-		case <-heartbeat.C:
-			if err := req.Send(&cronpb.TryLockReply{
-				Result:  true,
-				Message: "heartbeat",
-			}); err != nil {
-				return err
-			}
-		case task := <-receiveChan:
-			if task == nil || task.Type == cronpb.LockType_UNLOCK {
-				return nil
-			}
+		task, err := req.Recv()
+		if err != nil || task == nil || task.Type == cronpb.LockType_UNLOCK {
+			return nil
+		}
 
-			if authenticator != nil && !authenticator.Allow(task.ProjectId) {
-				return status.Error(codes.Unauthenticated, codes.Unauthenticated.String())
-			}
-			locker = s.app.GetTaskLocker(&common.TaskInfo{TaskID: task.TaskId, ProjectID: task.ProjectId})
-			// 锁的持有者除了agentip外还应该增加tmpid来确保是同一个任务在尝试恢复锁
-			if err := locker.TryLockWithOwner(fmt.Sprintf("%s:%s", agentIP, task.TaskTmpId)); err != nil {
-				return status.Error(codes.Aborted, err.Error())
-			}
+		if authenticator != nil && !authenticator.Allow(task.ProjectId) {
+			return status.Error(codes.Unauthenticated, codes.Unauthenticated.String())
+		}
+		locker = s.app.GetTaskLocker(&common.TaskInfo{TaskID: task.TaskId, ProjectID: task.ProjectId})
+		// 锁的持有者除了agentip外还应该增加tmpid来确保是同一个任务在尝试恢复锁
+		if err := locker.TryLockWithOwner(fmt.Sprintf("%s:%s", agentIP, task.TaskTmpId)); err != nil {
+			return status.Error(codes.Aborted, err.Error())
+		}
 
-			// 加锁成功后获取任务运行中状态的key是否存在，若存在则说明之前执行该任务的机器网络中断 / 宕机
-			runningKey, runningInfo, err := s.app.CheckTaskIsRunning(task.ProjectId, task.TaskId)
-			if err != nil {
-				return err
-			}
+		// // 加锁成功后获取任务运行中状态的key是否存在，若存在则说明之前执行该任务的机器网络中断 / 宕机
+		// runningKey, runningInfo, err := s.app.CheckTaskIsRunning(task.ProjectId, task.TaskId)
+		// if err != nil {
+		// 	return err
+		// }
 
-			// 获取任务日志，如果日志存在，则说明是续锁操作
-			// 续锁的话就得判断任务是否已经被杀掉
-			if runningKey.TmpID == "" {
-				// 第一次加锁 或 任务已结束
-				log, err := s.app.GetTaskLogDetail(task.ProjectId, task.TaskId, task.TaskTmpId)
-				if err != nil {
-					return err
-				}
-				if log != nil && log.EndTime != 0 {
-					// 任务已经结束
-					return status.Error(codes.Aborted, "任务已结束")
-				}
+		// // 获取任务日志，如果日志存在，则说明是续锁操作
+		// // 续锁的话就得判断任务是否已经被杀掉
+		// if runningKey.TmpID == "" {
+		// 第一次加锁 或 任务已结束
+		log, err := s.app.GetTaskLogDetail(task.ProjectId, task.TaskId, task.TaskTmpId)
+		if err != nil {
+			return err
+		}
+		if log != nil {
+			if log.EndTime != 0 {
+				// 任务已经结束
+				return status.Error(codes.Aborted, "任务已结束")
 			}
-
-			pass := len(runningInfo) == 0
-			if !pass {
-				for _, info := range runningInfo {
-					if info.AgentIP == agentIP {
-						pass = true
-						break
-					}
-				}
-			}
-
-			if pass {
-				if err = req.Send(&cronpb.TryLockReply{
-					Result:  true,
-					Message: "ok",
-				}); err != nil {
-					return err
-				}
-			} else {
+			if log.ClientIP != task.AgentIp {
 				return status.Error(codes.Aborted, "任务运行中")
 			}
+		}
+		// }
+
+		if err = req.Send(&cronpb.TryLockReply{
+			Result:  true,
+			Message: "ok",
+		}); err != nil {
+			return err
 		}
 	}
 }
