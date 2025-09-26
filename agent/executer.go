@@ -121,7 +121,7 @@ func (a *client) ExecuteTask(info *common.TaskExecutingInfo) *common.TaskExecute
 		ExecuteInfo: info,
 	}
 
-	if result.StartTime.Sub(info.RealTime.Add(time.Second*5)) > 0 {
+	if result.StartTime.Sub(info.RealTime.Add(time.Second*30)) > 0 {
 		result.EndTime = time.Now()
 		result.Err = "task starting timeout"
 		return result

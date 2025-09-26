@@ -27,6 +27,12 @@ func NewMetrics(serviceName, instance, pushGatewayEndpoint, pushGatewayJobName s
 		registry:    prometheus.NewRegistry(),
 	}
 
+	m.GlobalMetrics = GlobalMetrics{
+		PeriodTaskScheduleCounter: m.NewCounterVec("period_task_schedule", []string{"task"}),
+		ElectionCounter:           m.NewCounterVec("election", []string{"action"}),
+		InternalError:             m.NewCounterVec("internal_error", []string{"action"}),
+	}
+
 	if pushGatewayEndpoint != "" {
 		if pushGatewayJobName == "" {
 			pushGatewayJobName = GOPHERCRON_METRICS_DEFAULT_PUSH_JOB_NAME
@@ -52,8 +58,16 @@ type Metrics struct {
 	counter     map[string]*prometheus.CounterVec
 	histogram   map[string]*prometheus.HistogramVec
 
+	GlobalMetrics GlobalMetrics
+
 	registry *prometheus.Registry
 	pusher   *push.Pusher
+}
+
+type GlobalMetrics struct {
+	PeriodTaskScheduleCounter *prometheus.CounterVec
+	ElectionCounter           *prometheus.CounterVec
+	InternalError             *prometheus.CounterVec
 }
 
 func (m *Metrics) Registry() *prometheus.Registry {

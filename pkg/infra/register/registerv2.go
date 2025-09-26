@@ -115,6 +115,11 @@ func (s *remoteRegistryV2) SetMetas(metas []infra.NodeMetaRemote) {
 }
 
 func (s *remoteRegistryV2) Register() error {
+	// 如果当前有活跃的stream，直接在现有连接上重新注册，避免死锁
+	if s.currentStream != nil {
+		return s.ReRegisterWithCurrentStream()
+	}
+
 	s.locker.Lock()
 	defer s.locker.Unlock()
 	s.log.Debug("start registerV2")
@@ -126,6 +131,39 @@ func (s *remoteRegistryV2) Register() error {
 		return err
 	}
 
+	return nil
+}
+
+// ReRegisterWithCurrentStream 在现有连接上重新发送注册信息，避免死锁
+func (s *remoteRegistryV2) ReRegisterWithCurrentStream() error {
+	services := s.parserServices()
+	if len(services) == 0 {
+		return errors.New("empty service")
+	}
+
+	// 检查当前连接是否可用
+	if s.currentStream == nil {
+		return errors.New("no active stream")
+	}
+
+	reqID := u.GetStrID()
+
+	// 直接在现有连接上发送注册请求
+	if err := s.currentStream.Send(&cronpb.ClientEvent{
+		Id:        reqID,
+		Type:      cronpb.EventType_EVENT_REGISTER_REQUEST,
+		EventTime: time.Now().Unix(),
+		Event: &cronpb.ClientEvent_RegisterInfo{
+			RegisterInfo: &cronpb.RegisterInfo{
+				Agents: services,
+			},
+		},
+	}); err != nil {
+		s.log.Error("failed to re-register on current stream", zap.Error(err))
+		return err
+	}
+
+	s.log.Debug("re-registered successfully on current stream", zap.String("reqID", reqID))
 	return nil
 }
 
@@ -190,20 +228,7 @@ func (s *remoteRegistryV2) register() error {
 		return err
 	}
 
-	// 加入 hang 实现“同步模式”的重新注册
-	hang := make(chan struct{}, 1)
-	closeHang := sync.OnceFunc(func() {
-		close(hang)
-	})
 	reqID := u.GetStrID()
-	go safe.Run(func() {
-		defer closeHang()
-		wait := s.registerNotify.registerNotify(reqID)
-		hang <- struct{}{}
-		wait()
-	})
-
-	<-hang
 
 	// 无论是第几次注册，都需要发送注册信息
 	if err = stream.Send(&cronpb.ClientEvent{
@@ -221,6 +246,21 @@ func (s *remoteRegistryV2) register() error {
 	}
 
 	if s.receivingLocker.TryLock() {
+		// 加入 hang 实现“同步模式”的重新注册
+		hang := make(chan struct{}, 1)
+		closeHang := sync.OnceFunc(func() {
+			close(hang)
+		})
+
+		go safe.Run(func() {
+			defer closeHang()
+			wait := s.registerNotify.registerNotify(reqID)
+			hang <- struct{}{}
+			wait()
+		})
+
+		<-hang
+
 		// 首次注册需要开启事件监听
 		receive = stream.Recv
 		send = stream.Send
@@ -310,9 +350,10 @@ func (s *remoteRegistryV2) register() error {
 				}
 			}
 		})
+
+		<-hang
 	}
 
-	<-hang
 	return nil
 }
 

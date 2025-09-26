@@ -109,7 +109,10 @@ func (s *cronRpc) TryLock(req cronpb.Center_TryLockServer) error {
 		locker = s.app.GetTaskLocker(&common.TaskInfo{TaskID: task.TaskId, ProjectID: task.ProjectId})
 		// 锁的持有者除了agentip外还应该增加tmpid来确保是同一个任务在尝试恢复锁
 		if err := locker.TryLockWithOwner(fmt.Sprintf("%s:%s", agentIP, task.TaskTmpId)); err != nil {
-			return status.Error(codes.Aborted, err.Error())
+			if err == errors.ErrLockAlreadyRequired {
+				return status.Error(codes.Aborted, err.Error())
+			}
+			return status.Error(codes.Internal, fmt.Sprintf("failed to try lock task %d:%s, %s", task.ProjectId, task.TaskId, err.Error()))
 		}
 
 		// // 加锁成功后获取任务运行中状态的key是否存在，若存在则说明之前执行该任务的机器网络中断 / 宕机

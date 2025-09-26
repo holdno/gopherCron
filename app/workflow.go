@@ -1382,7 +1382,8 @@ BreakHere:
 			go a.handleTaskEvent(taskEvent)
 		case <-daemonTimer.C:
 			// 每10s
-			a.app.Metrics().CustomInc("workflow_schedule_loop", "", "")
+			a.app.Metrics().GlobalMetrics.PeriodTaskScheduleCounter.WithLabelValues("workflow_schedule_loop").Inc()
+			// a.app.Metrics().CustomInc("workflow_schedule_loop", "", "")
 			a.PlanRange(func(key int64, value *WorkflowPlan) bool {
 				if ok, _ := value.IsRunning(); ok {
 					if value.LatestScheduleTime.Before(time.Now().Add(-time.Second * 10)) {
