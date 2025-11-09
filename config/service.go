@@ -3,18 +3,19 @@ package config
 var serviceConf *ServiceConfig
 
 type ClientConfig struct {
-	Shell           string `toml:"shell,omitempty"`
-	LogLevel        string `toml:"log_level"`
-	LogFile         string `toml:"log_file"`
-	LogSize         int    `toml:"log_size"`
-	LogBackups      int    `toml:"log_backups"`
-	LogAge          int    `toml:"log_age"`
-	LogCompress     bool   `toml:"log_compress"`
-	ReportAddr      string `toml:"report_addr"`
-	Timeout         int    `toml:"timeout"`
-	Token           string `toml:"token"`
-	Address         string `toml:"address"`
-	RegisterAddress string `toml:"register_address"`
+	Shell                string `toml:"shell,omitempty"`
+	LogLevel             string `toml:"log_level"`
+	LogFile              string `toml:"log_file"`
+	LogSize              int    `toml:"log_size"`
+	LogBackups           int    `toml:"log_backups"`
+	LogAge               int    `toml:"log_age"`
+	LogCompress          bool   `toml:"log_compress"`
+	ReportAddr           string `toml:"report_addr"`
+	Timeout              int    `toml:"timeout"`
+	MaxTaskStartingDelay int    `toml:"max_task_starting_delay"`
+	Token                string `toml:"token"`
+	Address              string `toml:"address"`
+	RegisterAddress      string `toml:"register_address"`
 
 	Prometheus Prometheus `toml:"prometheus"`
 	Auth       AgentAuth  `toml:"auth"`

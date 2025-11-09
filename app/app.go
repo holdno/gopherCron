@@ -434,7 +434,6 @@ func startCleanupTask(app *app) {
 		t := time.NewTicker(time.Hour * 12)
 		defer func() {
 			t.Stop()
-			s.Close()
 		}()
 	BreakHere:
 		for {
@@ -465,11 +464,11 @@ func (a *app) election(key string, successFunc func(s *concurrency.Session) erro
 			return err
 		}
 		defer func() {
-			if r := recover(); r != nil {
-				wlog.Error("election was recovered", zap.Any("info", r))
-			}
 			if s != nil {
 				s.Close()
+			}
+			if r := recover(); r != nil {
+				wlog.Error("election was recovered", zap.Any("info", r))
 			}
 		}()
 
