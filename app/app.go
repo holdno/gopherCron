@@ -428,25 +428,30 @@ func (a *app) HandleCenterEvent(event *cronpb.ServiceEvent) error {
 func startCleanupTask(app *app) {
 	// 自动清理任务
 	app.election(common.BuildCleanupMasterKey(), func(s *concurrency.Session) error {
+		app.Metrics().GlobalMetrics.ElectionCounter.WithLabelValues("auto_clean_task").Inc()
 		wlog.Info("new tasks cleanup leader")
 		app.AutoCreateTaskLogPartition()
 		t := time.NewTicker(time.Hour * 12)
+		defer func() {
+			t.Stop()
+		}()
 	BreakHere:
 		for {
 			select {
 			case <-t.C:
+				wlog.Info("start task: cleanup")
+				app.Metrics().GlobalMetrics.PeriodTaskScheduleCounter.WithLabelValues("auto_clean_task").Inc()
 				app.AutoCreateTaskLogPartition()
 				app.AutoCleanLogs()
 				app.AutoCleanScheduledTemporaryTask()
 			case <-app.ctx.Done():
-				t.Stop()
-				s.Close()
 				break BreakHere
 			case <-s.Done():
-				t.Stop()
 				break BreakHere
 			}
 		}
+
+		wlog.Info("task cleanup exit")
 		return nil
 	})
 }
@@ -459,11 +464,11 @@ func (a *app) election(key string, successFunc func(s *concurrency.Session) erro
 			return err
 		}
 		defer func() {
-			if r := recover(); r != nil {
-				wlog.Error("election was recovered", zap.Any("info", r))
-			}
 			if s != nil {
 				s.Close()
+			}
+			if r := recover(); r != nil {
+				wlog.Error("election was recovered", zap.Any("info", r))
 			}
 		}()
 
@@ -497,6 +502,7 @@ func startWorkflow(app *app) {
 		panic(err)
 	}
 	app.election(common.BuildWorkflowMasterKey(), func(s *concurrency.Session) error {
+		app.Metrics().GlobalMetrics.ElectionCounter.WithLabelValues("workflow").Inc()
 		defer func() {
 			app.workflowRunner.isLeader = false
 		}()
@@ -525,8 +531,8 @@ func startCalcDataConsistency(app *app) {
 
 func startTemporaryTaskWorker(app *app) {
 	app.election(common.BuildTemporaryMasterKey(), func(s *concurrency.Session) error {
+		app.Metrics().GlobalMetrics.ElectionCounter.WithLabelValues("temporary_scheduler").Inc()
 		wlog.Info("new temporary scheduler leader")
-		app.metrics.CustomInc("temporary_scheduler_leader", app.localip, "")
 
 		c := time.NewTicker(time.Minute)
 		defer c.Stop()
@@ -538,10 +544,11 @@ func startTemporaryTaskWorker(app *app) {
 				return nil
 			case <-c.C:
 			}
-
+			app.Metrics().GlobalMetrics.PeriodTaskScheduleCounter.WithLabelValues("temporary_scheduler").Inc()
 			list, err := app.GetNeedToScheduleTemporaryTask(time.Now())
 			if err != nil {
 				wlog.Error("failed to refresh temporary task list", zap.Error(err))
+				app.Metrics().GlobalMetrics.InternalError.WithLabelValues("list_temporary").Inc()
 				continue
 			}
 
@@ -549,7 +556,7 @@ func startTemporaryTaskWorker(app *app) {
 				if err = app.TemporaryTaskSchedule(*v); err != nil {
 					wlog.Error("temporary task worker: failed to schedule task", zap.Error(err), zap.String("task_id", v.TaskID),
 						zap.String("tmp_id", v.TmpID), zap.Int64("project_id", v.ProjectID), zap.String("target_host", v.Host))
-					app.metrics.CustomInc("temporary_schedule_fail", app.localip, fmt.Sprintf("%d-%s", v.ProjectID, v.TaskID))
+					app.Metrics().GlobalMetrics.InternalError.WithLabelValues("temporary_scheduler").Inc()
 				}
 			}
 
@@ -564,6 +571,7 @@ func startTemporaryTaskWorker(app *app) {
 				if err != nil && err != sql.ErrNoRows {
 					wlog.Error("failed to get tmp task creator", zap.Error(err), zap.Int64("user_id", v.ID),
 						zap.Int64("project_id", v.ProjectID), zap.String("tmp_task_id", v.TmpID))
+					app.Metrics().GlobalMetrics.InternalError.WithLabelValues("get_tmp_task_creator").Inc()
 				}
 				if userInfo == nil {
 					userInfo = &common.User{}
@@ -592,8 +600,8 @@ func startTemporaryTaskWorker(app *app) {
 
 func startTaskDoctor(app *app) {
 	app.election(common.BuildTaskDoctorMasterKey(), func(s *concurrency.Session) error {
+		app.Metrics().GlobalMetrics.ElectionCounter.WithLabelValues("task_doctor").Inc()
 		wlog.Info("new task doctor leader")
-		app.metrics.CustomInc("temporary_task_docker_leader", app.localip, "")
 
 		period := time.Hour
 		c := time.NewTimer(period)
@@ -607,9 +615,11 @@ func startTaskDoctor(app *app) {
 			case <-c.C:
 			}
 
+			app.Metrics().GlobalMetrics.PeriodTaskScheduleCounter.WithLabelValues("task_doctor").Inc()
 			runningTasks, err := app.store.TaskLog().LoadRunningTasks(nil, time.Now().Add(-time.Hour*2), time.Now().Add(-time.Hour*3))
 			if err != nil {
 				wlog.Error("failed to load running task list", zap.Error(err))
+				app.Metrics().GlobalMetrics.InternalError.WithLabelValues("task_doctor_load").Inc()
 				continue
 			}
 
@@ -618,7 +628,7 @@ func startTaskDoctor(app *app) {
 				if err != nil {
 					wlog.Error("task doctor: failed check task running status", zap.Error(err), zap.String("task_id", v.TaskID),
 						zap.String("tmp_id", v.TmpID), zap.Int64("project_id", v.ProjectID), zap.String("target_host", v.ClientIP))
-					app.metrics.CustomInc("task_doctor_check_fail", app.localip, fmt.Sprintf("%d-%s", v.ProjectID, v.TaskID))
+					app.Metrics().GlobalMetrics.InternalError.WithLabelValues("task_doctor_check").Inc()
 					continue
 				}
 			}

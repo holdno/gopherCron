@@ -186,6 +186,7 @@ func (a *app) serverSideFinishedTemporaryTask(errResult common.TaskFinishedV2) {
 	if setFinishedErr := a.HandlerTaskFinished(a.GetIP(), &errResult); setFinishedErr != nil {
 		wlog.Error("failed to set tmp-task finished status", zap.Error(setFinishedErr), zap.String("task_id", errResult.TaskID),
 			zap.Int64("project_id", errResult.ProjectID), zap.String("tmp_id", errResult.TmpID))
+		a.Metrics().GlobalMetrics.InternalError.WithLabelValues("server_side_finished_temporary_task").Inc()
 	}
 }
 

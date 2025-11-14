@@ -119,6 +119,7 @@ func (a *client) handlerEventFromCenterV2(ctx context.Context, event *cronpb.Ser
 		// 中心直接下发指令变更agent的权重
 		a.cfg.Micro.Weight = event.GetModifyNodeMeta().Weight
 		a.srv.CustomInfo.Weight = a.cfg.Micro.Weight
+		// 现在Register方法已经优化，会自动检测是否有活跃stream来避免死锁
 		a.srv.Register()
 		replyEvent.Event = &cronpb.ClientEvent_ModifyNodeMeta{
 			ModifyNodeMeta: &cronpb.Result{
